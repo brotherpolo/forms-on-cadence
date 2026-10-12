@@ -21,6 +21,9 @@ const config = {
 };
 
 export const usingEmulators = env.VITE_USE_EMULATORS === 'true';
+
+// Cadence's address (its GitHub Pages URL), for the Tasks panel's links. Empty hides them.
+export const cadenceUrl = String(env.VITE_CADENCE_URL || '').trim();
 export const configured = Boolean(config.apiKey && config.projectId) || usingEmulators;
 
 export const app = initializeApp(

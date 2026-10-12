@@ -310,3 +310,21 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .auth-msg{font-size:14px;padding:10px 12px;border-radius:8px}
 .auth-msg.err{background:var(--danger-soft);color:var(--danger)}
 .auth-msg.ok{background:var(--ok-soft);color:var(--ok)}
+
+/* Cadence tasks linked to a record */
+.tlist{display:flex;flex-direction:column;padding:6px}
+.trow{display:flex;align-items:center;gap:10px;padding:4px 6px;border-radius:8px}
+.trow+.trow{border-top:1px solid var(--line);border-radius:0}
+.tcheck{flex:none;width:24px;height:24px;border-radius:7px;border:1.5px solid var(--line-strong);background:var(--surface);color:transparent;font-size:13px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.tcheck:hover{border-color:var(--accent)}
+.tcheck.on{background:var(--ok);border-color:var(--ok);color:var(--surface)}
+.tcheck:disabled{opacity:.5;cursor:progress}
+.tmain{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:8px 4px;background:none;border:0;text-align:left;cursor:pointer;border-radius:6px}
+.tmain:disabled{cursor:default}
+.tmain:not(:disabled):hover b{color:var(--accent)}
+.tmain b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.tmeta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:.82rem;color:var(--muted)}
+.tdue.today{color:var(--accent);font-weight:600}
+.tdue.late{color:var(--danger);font-weight:600}
+.tdue.ok{color:var(--ok)}
+.trow.done b{text-decoration:line-through;color:var(--muted);font-weight:500}

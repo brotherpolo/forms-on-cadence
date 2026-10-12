@@ -2,7 +2,10 @@
 import './designer.css';
 // Admin screens (users and groups) live in admin.js; data access in store.js.
 
-import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples } from './store.js';
+import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone } from './store.js';
+import { cadenceUrl } from './firebase.js';
+import { parseRoute, routeFor } from './route.js';
+import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
 import { FX } from './formulas.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
 import * as admin from './admin.js';
@@ -128,7 +131,7 @@ export function go(v,push=true){
   if(!guard())return false;
   ui.leaveOk=false;ui.confirm=null;
   if(push&&view.name!=='loading')hist.push(view);
-  view=v;closeMenu();
+  view=v;closeMenu();syncHash();
   if(v.name==='records'){ui.search='';}
   if(v.name==='formEdit'){ui.tab=v.tab||'fields';ui.openField=null;ui.palette=false;}
   render();window.scrollTo(0,0);return true;
@@ -142,10 +145,50 @@ export function home(){
   else if(isAdmin(store.me))go({name:'designer'},false);
   else go({name:'welcome'},false);
 }
-let booted=false;
+let booted=false,pendingRoute=null;
+/* ---------- Web addresses (#/record/<id>, #/form/<id>) ---------- */
+// The address follows the screen without adding browser history; the in-app Back
+// button keeps its own history. Links from Cadence open a record directly.
+function syncHash(){
+  const h=routeFor(view);
+  if((location.hash||'')===h)return;
+  history.replaceState(null,'',location.pathname+location.search+h);
+}
+/** Open the screen an address names. Returns true once handled (opened, refused or given up). */
+function openRoute(r){
+  if(!r)return true;
+  if(r.kind==='form'){
+    const f=formById(r.id);
+    if(!f||!canViewForm(store.me,f.id)){toast('That form isn’t available to you.');return true;}
+    go({name:'records',formId:f.id},false);return true;
+  }
+  const rec=recById(r.id);
+  if(!rec){
+    if(store.recordsLoading.size)return false; // still arriving: try again on the next update
+    toast('That record isn’t available. It may have been deleted, or you may not have access to it.');return true;
+  }
+  // Back from a linked record goes to its form's list
+  go({name:'records',formId:rec.formId},false);
+  rdraft=null;go({name:'record',formId:rec.formId,recordId:rec.id});
+  return true;
+}
+window.addEventListener('hashchange',()=>{
+  if(!booted)return;
+  const r=parseRoute(location.hash);
+  if(!r||location.hash===routeFor(view))return;
+  if(dirty()&&!guard()){syncHash();return;}
+  if(!openRoute(r))pendingRoute=r;
+});
 function onData(){
   if(!store.ready)return;
-  if(!booted){booted=true;$('#boot').hidden=true;$('#app').hidden=false;home();return;}
+  if(!booted){
+    booted=true;$('#boot').hidden=true;$('#app').hidden=false;
+    const r=parseRoute(location.hash);
+    home();
+    if(r&&!openRoute(r))pendingRoute=r;
+    return;
+  }
+  if(pendingRoute&&openRoute(pendingRoute))pendingRoute=null;
   if(ADMIN_VIEWS.has(view.name)&&!isAdmin(store.me)){ui.leaveOk=true;home();return;}
   if((view.name==='records'||view.name==='record')&&!canViewForm(store.me,view.formId)){ui.leaveOk=true;home();return;}
   renderSide();
@@ -186,6 +229,53 @@ function renderMain(){
   $('#topttl').textContent=title||'Formwright';
   m.innerHTML=`<div class="wrap">${h}</div>`;
   document.querySelectorAll('canvas[data-sig]').forEach(initSig);
+  syncTaskWatch();
+}
+
+/* ---------- Cadence tasks linked to the open record ---------- */
+// Only tasks this person owns or is assigned in Cadence are listed (Cadence's rules).
+const tw={recordId:null,unsub:null,tasks:[],status:'off',error:null,busy:new Set()};
+function syncTaskWatch(){
+  const want=view.name==='record'&&view.recordId?view.recordId:null;
+  if(want===tw.recordId)return;
+  if(tw.unsub){tw.unsub();tw.unsub=null;}
+  Object.assign(tw,{recordId:want,tasks:[],status:want?'loading':'off',error:null});
+  if(!want)return;
+  tw.unsub=watchTasks(want,(list)=>{tw.tasks=list;tw.status='ready';paintTasks();},(err)=>{
+    console.error('[formwright] tasks',err);tw.status='error';tw.error=err?.code||'unknown';paintTasks();
+  });
+}
+function paintTasks(){const el=$('#rec-tasks');if(el)el.innerHTML=tasksInner();}
+function tasksInner(){
+  const rec=view.recordId?recById(view.recordId):null;
+  const form=rec?formById(rec.formId):null;
+  const noun=form?itemName(form).toLowerCase():'record';
+  const add=cadenceUrl?`<button class="btn sm" data-act="add-task">+ Add task</button>`:'';
+  const head=`<div class="section-h"><h2>Tasks${tw.status==='ready'&&tw.tasks.length?` <span class="count">${tw.tasks.filter(t=>!t.done).length}</span>`:''}</h2>${add}</div>`;
+  if(tw.status==='loading'||tw.recordId!==view.recordId)return head+`<div class="panel"><p class="note">Loading tasks…</p></div>`;
+  if(tw.status==='error')return head+`<div class="panel"><p class="note">${tw.error==='failed-precondition'?'Tasks need a database index that is still being built. Try again in a few minutes.':'Couldn’t load tasks ('+esc(tw.error)+').'}</p></div>`;
+  if(!tw.tasks.length)return head+`<div class="panel"><p class="note">No tasks for this ${esc(noun)} yet.${cadenceUrl?' Add one, or link an existing task to it in Cadence.':' Link a task to it from Cadence.'}</p></div>`;
+  const me=store.user?.uid,today=dateKey(new Date());
+  return head+`<div class="panel tlist">${sortTasks(tw.tasks).map(t=>{
+    const due=t.done?{text:'Done',tone:'ok'}:dueInfo(t.due,today);
+    const rep=repeats(t),busy=tw.busy.has(t.id);
+    const meta=[`<span class="tdue ${due.tone}">${esc(due.text)}</span>`,whoLine(t,me),rep?repeatLabel(t):''].filter(Boolean);
+    return `<div class="trow${t.done?' done':''}">
+      <button class="tcheck${t.done?' on':''}" data-act="task-done" data-id="${esc(t.id)}" aria-pressed="${!!t.done}" aria-label="${t.done?'Reopen':'Mark done'}: ${esc(t.title)}"${busy?' disabled':''}${rep&&!t.done?' title="Repeating tasks are completed in Cadence, so the next one is created"':''}>✓</button>
+      <button class="tmain" data-act="task-open" data-id="${esc(t.id)}"${cadenceUrl?'':' disabled'}><b>${esc(t.title||'Untitled task')}</b><span class="tmeta">${meta.map(x=>x.startsWith('<')?x:`<span>${esc(x)}</span>`).join('')}</span></button>
+    </div>`;}).join('')}</div>`;
+}
+async function toggleTask(id){
+  const t=tw.tasks.find(x=>x.id===id);if(!t)return;
+  if(repeats(t)&&!t.done){
+    if(cadenceUrl){window.open(cadenceLink(cadenceUrl,{task:t.id}),'cadence');toast('Complete repeating tasks in Cadence so the next one is created.');}
+    else toast('Complete repeating tasks in Cadence so the next one is created.');
+    return;
+  }
+  tw.busy.add(id);paintTasks();
+  try{await setTaskDone(id,donePatch(!t.done,store.user.uid,Date.now()));}
+  catch(err){console.error('[formwright] task',err);toast('Couldn’t update that task. Try again.');}
+  tw.busy.delete(id);paintTasks();
 }
 
 function viewWelcome(){
@@ -284,6 +374,7 @@ function viewRecord(form){
       ${ro?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
     </div>
   </div>
+  ${rec?`<section class="section" id="rec-tasks">${tasksInner()}</section>`:''}
   ${childHTML}${backHTML}
   ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}`;
 }
@@ -625,6 +716,9 @@ document.addEventListener('click',async e=>{
     case 'open-record':{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});break;}
     case 'add-child':{const parent=recById(view.recordId);const cf=formById(id);if(!parent||!cf)return;if(rdraft?.dirty){toast('Save this record first.');return;}goRec(newRecordDraft(cf,parent),{name:'record',formId:cf.id,recordId:null});break;}
     case 'save-record':saveRecord();break;
+    case 'task-done':toggleTask(id);break;
+    case 'task-open':if(cadenceUrl)window.open(cadenceLink(cadenceUrl,{task:id}),'cadence');break;
+    case 'add-task':if(cadenceUrl&&view.recordId)window.open(cadenceLink(cadenceUrl,{addTaskFor:view.recordId}),'cadence');break;
     case 'del-record':{const k='rec-'+view.recordId;if(ui.confirm!==k){ui.confirm=k;renderMain();return;}ui.confirm=null;const rid=view.recordId;rdraft.dirty=false;try{await store.del('records',rid);toast('Deleted');}catch(err){toast('Delete failed. Try again.');}break;}
     case 'rate':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);const n=+el.dataset.n;d.values[f.id]=d.values[f.id]===n?0:n;markDirty(d);repaint(d,f);break;}
     case 'file-clear':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);d.values[f.id]=null;markDirty(d);repaint(d,f);break;}
@@ -795,12 +889,13 @@ document.addEventListener('pointercancel',endFmDrag);
 
 /* ---------- Lifecycle (called from main.js) ---------- */
 export function startApp(){
-  booted=false;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
+  booted=false;pendingRoute=null;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
   Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false});
   store.onChange=onData;
   store.onError=(err)=>{if(err?.code==='permission-denied')toast('Some data could not be loaded because of your permissions.');else toast('Lost the connection to the database. Changes will sync when it returns.');};
 }
 export function stopApp(){
   booted=false;store.onChange=()=>{};$('#app').hidden=true;closeMenu();
+  if(tw.unsub){tw.unsub();tw.unsub=null;}tw.recordId=null;
 }
 export { view as currentView, ui, byOrder, formById, recordsOf, renderMain };

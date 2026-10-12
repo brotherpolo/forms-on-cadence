@@ -217,6 +217,27 @@ export async function saveProfileName(userId, displayName) {
   await setDoc(doc(db, 'profiles', userId), { displayName: String(displayName).slice(0, 120) });
 }
 
+/* ---------- Cadence tasks linked to a record ---------- */
+
+/**
+ * Live list of the Cadence tasks linked to one record that this person owns or is
+ * assigned. Cadence's rules only allow reading tasks you're a member of, so the
+ * query must filter on members. Returns an unsubscribe function.
+ */
+export function watchTasks(recordId, onNext, onError) {
+  const q = query(
+    collection(db, 'tasks'),
+    where('members', 'array-contains', store.user.uid),
+    where('recordId', '==', recordId)
+  );
+  return onSnapshot(q, (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id }))), onError);
+}
+
+/** Tick a task off or reopen it, writing only the fields Cadence's rules let an owner or assignee change. */
+export async function setTaskDone(taskId, patch) {
+  await updateDoc(doc(db, 'tasks', taskId), patch);
+}
+
 /* ---------- Writes ---------- */
 
 const plain = (o) => JSON.parse(JSON.stringify(o ?? null));
