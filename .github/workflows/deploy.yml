@@ -1,0 +1,71 @@
+name: Test and deploy
+
+# Formwright runs on Cadence's Firebase project (tasks-2ae9d) and deploys only its
+# web pages, to its own Hosting site. Security rules, indexes and Cloud Functions
+# are shared with Cadence and deploy from the Cadence folder, never from here:
+# deploying rules from this repo would replace Cadence's rules.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Build
+        run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: dist
+          path: dist
+          retention-days: 3
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Write service account key
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: printf '%s' "$SA_JSON" > "$RUNNER_TEMP/sa.json"
+      - name: Deploy Hosting (web pages only)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+          PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
+          SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
+        run: |
+          if [ -z "$SITE" ]; then echo "Set the FIREBASE_HOSTING_SITE variable to Formwright's Hosting site name." >&2; exit 1; fi
+          npx firebase target:apply hosting forms "$SITE" --project "$PROJECT"
+          npx firebase deploy --only hosting:forms --project "$PROJECT" --non-interactive
