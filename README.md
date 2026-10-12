@@ -10,6 +10,8 @@ A form builder for phone and desktop, running on Firebase.
 
 Plain JavaScript modules, built with Vite. The only runtime dependency is the Firebase JS SDK.
 
+- **Cadence tasks**: each record lists the Cadence tasks linked to it that you own or are assigned. Tick them off, open them in Cadence, or **Add task** to start one already linked.
+
 Formwright runs on **Cadence's Firebase project (`tasks-2ae9d`)**, with the same accounts, and deploys to its own Hosting site. The security rules, indexes and Cloud Functions for both apps live in the Cadence folder and deploy from there. This repo deploys only its web pages.
 
 ---
@@ -57,6 +59,8 @@ src/
   store.js                 Firestore subscriptions and writes, Storage uploads, group/access writes
   access.js                Permission model (pure; mirrored by the rules)
   formulas.js              Formula parser and evaluator (no eval)
+  route.js                 Web addresses for records and form lists (pure)
+  tasks.js                 Cadence task display helpers and links into Cadence (pure)
   app.js                   Navigation, record list and record screens, form designer
   admin.js                 Security groups and users screens (admins only)
   auth.js                  Sign-in screen: Google, email and password, password reset
@@ -85,6 +89,27 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Signatures are stored inline as small PNG data URLs.
 
 ---
+
+## Links and Cadence tasks
+
+Each record and form list has its own address, so links and refreshes open the right screen:
+
+- `#/record/<recordId>`: one record. Back goes to its form's list.
+- `#/form/<formId>`: a form's records.
+
+Cadence links to records this way, from the record chip on a task.
+
+**Tasks panel.** Under each record's fields, Formwright lists the Cadence tasks linked to that record that you own or are assigned. Cadence's rules allow nothing else.
+
+- Overdue tasks come first, then by due date. Done tasks are listed last.
+- The tick box marks a task done or reopens it, writing the same fields Cadence does.
+- Repeating tasks open in Cadence instead, so Cadence can create the next occurrence.
+- Tapping a task opens it in Cadence (`?task=<id>`).
+- **Add task** opens Cadence with a new task already linked to the record (`?addTaskFor=<recordId>`).
+
+Set Cadence's address in `VITE_CADENCE_URL` (in `.env.local`, and as a GitHub Actions variable for deploys). Without it, the panel still lists and ticks tasks, but can't open Cadence.
+
+The panel's query needs the `tasks` index on `members` + `recordId`. It's in Cadence's `firestore.indexes.json`.
 
 ## Setup
 
@@ -151,7 +176,7 @@ npm run make-admin -- you@example.com --emulator
 ## Tests
 
 ```bash
-npm run test:unit        # formulas and permission logic (no Firebase needed)
+npm run test:unit        # formulas, permissions, addresses and task helpers (no Firebase needed)
 ```
 
 The security rules tests, including Formwright's, are in the Cadence folder under `tests/`.
@@ -177,6 +202,7 @@ The security rules tests, including Formwright's, are in the Cadence folder unde
 |---|---|
 | `FIREBASE_PROJECT_ID` | `tasks-2ae9d` |
 | `FIREBASE_HOSTING_SITE` | Formwright's Hosting site name, for example `cadence-forms` |
+| `VITE_CADENCE_URL` | Cadence's address, for example `https://you.github.io/cadence/` |
 | `VITE_FIREBASE_AUTH_DOMAIN` | Cadence's `authDomain` |
 | `VITE_FIREBASE_STORAGE_BUCKET` | Cadence's `storageBucket` |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Cadence's `messagingSenderId` |
