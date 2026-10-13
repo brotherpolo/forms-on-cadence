@@ -28,6 +28,8 @@ export const store = {
   profiles: {},
   groups: [],
   users: [],
+  reports: [], // my reports and reports shared with everyone, newest first
+  reportsReady: false,
   recordsLoading: new Set(),
   onChange: () => {},
   onError: () => {},
@@ -114,6 +116,30 @@ export function startData(user) {
       fail('profiles')
     )
   );
+  // Reports: mine, and the ones others have shared. Two queries, because the rules only
+  // let a list through when it asks for exactly what you may read.
+  const parts = { mine: [], shared: [] }, gotParts = { mine: false, shared: false };
+  const mergeReports = () => {
+    store.reportsReady = gotParts.mine && gotParts.shared;
+    const m = new Map();
+    [...parts.mine, ...parts.shared].forEach((r) => m.set(r.id, r));
+    store.reports = [...m.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    changed();
+  };
+  baseUnsubs.push(
+    onSnapshot(
+      query(collection(db, 'reports'), where('ownerId', '==', user.uid)),
+      (s) => { parts.mine = s.docs.map((d) => ({ ...d.data(), id: d.id })); gotParts.mine = true; mergeReports(); },
+      fail('your reports')
+    )
+  );
+  baseUnsubs.push(
+    onSnapshot(
+      query(collection(db, 'reports'), where('shared', '==', true)),
+      (s) => { parts.shared = s.docs.map((d) => ({ ...d.data(), id: d.id })); gotParts.shared = true; mergeReports(); },
+      fail('shared reports')
+    )
+  );
 }
 
 export function stopData() {
@@ -124,7 +150,7 @@ export function stopData() {
   recordSubs.forEach((s) => s.unsub());
   recordSubs.clear();
   recordsByForm.clear();
-  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [] });
+  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false });
   store.recordsLoading.clear();
 }
 
@@ -236,6 +262,26 @@ export function watchTasks(recordId, onNext, onError) {
 /** Tick a task off or reopen it, writing only the fields Cadence's rules let an owner or assignee change. */
 export async function setTaskDone(taskId, patch) {
   await updateDoc(doc(db, 'tasks', taskId), patch);
+}
+
+/* ---------- Reports ---------- */
+
+/** Save a report you own. Owner never changes. */
+export async function saveReport(rep) {
+  const now = Date.now();
+  const data = plain({
+    name: String(rep.name || 'Untitled report').slice(0, 120) || 'Untitled report',
+    ownerId: store.user.uid,
+    shared: !!rep.shared,
+    widgets: (rep.widgets || []).slice(0, 60),
+    createdAt: rep.createdAt || now,
+    updatedAt: now,
+  });
+  await setDoc(doc(db, 'reports', rep.id), data);
+}
+
+export async function deleteReport(id) {
+  await deleteDoc(doc(db, 'reports', id));
 }
 
 /* ---------- Writes ---------- */

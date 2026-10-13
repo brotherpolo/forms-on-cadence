@@ -2,12 +2,15 @@
 // and a refreshed or shared page opens where it was.
 //   #/record/<recordId>   one record
 //   #/form/<formId>       a form's record list
+//   #/reports             the Reports list
+//   #/report/<reportId>   one report
 // Pure functions: no DOM, no Firebase.
 
-const RE = /^#\/(record|form)\/([^/?#]+)\/?$/;
+const RE = /^#\/(record|form|report)\/([^/?#]+)\/?$/;
 
-/** '#/record/abc' -> { kind: 'record', id: 'abc' }; anything else -> null */
+/** '#/record/abc' -> { kind: 'record', id: 'abc' }; '#/reports' -> { kind: 'reports' }; anything else -> null */
 export function parseRoute(hash) {
+  if (/^#\/reports\/?$/.test(String(hash || ''))) return { kind: 'reports' };
   const m = RE.exec(String(hash || ''));
   if (!m) return null;
   let id;
@@ -24,5 +27,7 @@ export function routeFor(view) {
   if (!view) return '';
   if (view.name === 'record' && view.recordId) return '#/record/' + encodeURIComponent(view.recordId);
   if (view.name === 'records' && view.formId) return '#/form/' + encodeURIComponent(view.formId);
+  if (view.name === 'reports') return '#/reports';
+  if (view.name === 'report' && view.reportId) return '#/report/' + encodeURIComponent(view.reportId);
   return '';
 }

@@ -5,6 +5,7 @@ import './designer.css';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
+import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy } from './reports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
 import { FX } from './formulas.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
@@ -130,6 +131,7 @@ export function go(v,push=true){
   if((v.name==='records'||v.name==='record')&&!canViewForm(store.me,v.formId)){toast('You don’t have access to that form.');return false;}
   if(!guard())return false;
   ui.leaveOk=false;ui.confirm=null;
+  if(view.name==='report')leaveReport();
   if(push&&view.name!=='loading')hist.push(view);
   view=v;closeMenu();syncHash();
   if(v.name==='records'){ui.search='';}
@@ -157,6 +159,14 @@ function syncHash(){
 /** Open the screen an address names. Returns true once handled (opened, refused or given up). */
 function openRoute(r){
   if(!r)return true;
+  if(r.kind==='reports'){go({name:'reports'},false);return true;}
+  if(r.kind==='report'){
+    if(!store.reports.some(x=>x.id===r.id)){
+      if(!store.reportsReady)return false; // still arriving
+      toast('That report isn’t available. It may have been deleted, or it isn’t shared with you.');return true;
+    }
+    go({name:'reports'},false);go({name:'report',reportId:r.id});return true;
+  }
   if(r.kind==='form'){
     const f=formById(r.id);
     if(!f||!canViewForm(store.me,f.id)){toast('That form isn’t available to you.');return true;}
@@ -195,6 +205,7 @@ function onData(){
   if(admin.isDirty(view))return;
   if(view.name==='formEdit')return;
   if(view.name==='record'&&rdraft?.dirty)return;
+  if(view.name==='report'&&reportBusy())return;
   if(view.name==='record'||view.name==='records'){if(!formById(view.formId)){home();return;}}
   if(view.name==='record'&&view.recordId&&!recById(view.recordId)){back();return;}
   renderMain();
@@ -211,6 +222,8 @@ function renderSide(){
     <div class="brand"><span class="brand-mark"><i></i></span><b>Formwright</b></div>
     <div class="navlabel">Forms</div>
     ${fs.length?fs.map(f=>`<button class="nav${activeForm===f.id?' on':''}" data-act="nav-form" data-id="${f.id}">${badge(f)}<span class="t">${esc(f.name)}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join(''):`<div class="nav-empty">No forms to show yet.</div>`}
+    <div class="navlabel" style="margin-top:12px">Reports</div>
+    <button class="nav${view.name==='reports'||view.name==='report'?' on':''}" data-act="nav-reports"><span class="glyph navg">▤</span><span class="t">Reports</span><span class="n">${store.reports.length}</span></button>
     ${adm?`<div class="navlabel" style="margin-top:12px">Administration</div>
     <button class="nav${view.name==='designer'||view.name==='formEdit'?' on':''}" data-act="nav-designer"><span class="glyph navg">⚙</span><span class="t">Form designer</span><span class="n">${store.forms.length}</span></button>
     <button class="nav${view.name==='groups'||view.name==='groupEdit'?' on':''}" data-act="nav-groups"><span class="glyph navg">◫</span><span class="t">Security groups</span><span class="n">${store.groups.length}</span></button>
@@ -220,14 +233,17 @@ function renderSide(){
 function renderMain(){
   const m=$('#main');let h='',title='Formwright';
   if(!store.ready){m.innerHTML='<div class="loading">Loading your forms…</div>';return;}
-  if(view.name==='records'){const f=formById(view.formId);title=f?.name;h=viewRecords(f);}
+  let wide=false;
+  if(view.name==='reports'){title='Reports';h=viewReportsList();}
+  else if(view.name==='report'){title=reportName(view.reportId);h=viewReport(view.reportId);wide=true;}
+  else if(view.name==='records'){const f=formById(view.formId);title=f?.name;h=viewRecords(f);}
   else if(view.name==='record'){const f=formById(view.formId);title=f?.name;h=viewRecord(f);}
   else if(view.name==='designer'){title='Form designer';h=viewDesigner();}
   else if(view.name==='formEdit'){title='Edit form';h=viewFormEdit();}
   else if(admin.handles(view)){const r=admin.renderView(view);title=r.title;h=r.html;}
   else if(view.name==='welcome'){title='Formwright';h=viewWelcome();}
   $('#topttl').textContent=title||'Formwright';
-  m.innerHTML=`<div class="wrap">${h}</div>`;
+  m.innerHTML=`<div class="wrap${wide?' wide':''}">${h}</div>`;
   document.querySelectorAll('canvas[data-sig]').forEach(initSig);
   syncTaskWatch();
 }
@@ -708,6 +724,7 @@ document.addEventListener('click',async e=>{
     case 'close-menu':closeMenu();break;
     case 'nav-form':case 'nav-records':go({name:'records',formId:id});break;
     case 'nav-designer':go({name:'designer'});break;
+    case 'nav-reports':go({name:'reports'});break;
     case 'nav-groups':go({name:'groups'});break;
     case 'nav-users':go({name:'users'});break;
     case 'sign-out':if(!guard())return;await signOutUser();break;
@@ -890,6 +907,7 @@ document.addEventListener('pointercancel',endFmDrag);
 /* ---------- Lifecycle (called from main.js) ---------- */
 export function startApp(){
   booted=false;pendingRoute=null;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
+  initReports({fmt,valOf,recTitle,go,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
   Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false});
   store.onChange=onData;
   store.onError=(err)=>{if(err?.code==='permission-denied')toast('Some data could not be loaded because of your permissions.');else toast('Lost the connection to the database. Changes will sync when it returns.');};
