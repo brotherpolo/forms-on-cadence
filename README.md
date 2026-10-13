@@ -60,10 +60,12 @@ src/
   access.js                Permission model (pure; mirrored by the rules)
   formulas.js              Formula parser and evaluator (no eval)
   route.js                 Web addresses for records, form lists and reports (pure)
-  reports.js, reports.css  Report builder screens
-  reportlogic.js           Report maths, joins and the gap-free grid (pure, unit-tested)
+  dash.js, dash.css        Reports and dashboards screens (charts reuse reports.css)
+  dashlogic.js             Report types, filters, periods, sharing, moving old reports (pure, unit-tested)
+  reportlogic.js           Field joins, totals, time buckets and the gap-free grid (pure, unit-tested)
   tasks.js                 Cadence task display helpers and links into Cadence (pure)
   lists.js, lists.css      Records list: saved views, columns, filters, select several
+  grids.css                Sub-form grids on the record page
   listlogic.js             List columns, views, sorting, filters and CSV (pure, unit-tested)
   app.js                   Navigation, record screens, form designer
   admin.js                 Security groups and users screens (admins only)
@@ -95,24 +97,46 @@ Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Si
 
 ---
 
-## Reports
+## Reports and dashboards
 
-**Reports** in the sidebar opens the report builder: a canvas of widgets built from your forms.
+**Reports** and **Dashboards** are under *Insights* in the sidebar.
 
-- **Adding fields:** drag a field from the **Fields** panel onto the canvas, or tap it.
-  - number fields become a total or average
-  - choice and text fields become a bar chart grouped by that field
-  - dates become a chart over time, by week or month
-  - a form's title field becomes a table
-- **Dropping onto a widget:** a number changes what it measures, a choice changes the grouping, a date makes it a chart over time, and any field dropped on a table adds a column.
-- **Linked forms join:** drop a Clients field on a Projects chart to group projects by client. Dropping a field from a form *below* (Site visits on a Projects chart) switches the widget to count that form's records.
-- **Layout:** drag widgets to move them, and drag the corner to resize, or use the arrow keys on the corner handle. Widgets in a row share one height, and every row fills the width, so there are no gaps.
-- **Widget tab:** title, chart type, value (count, total or average), grouping, date field, columns, one filter, width and height.
-- **Saving:** changes save automatically.
-- **Sharing:** **Share with everyone** lets anyone with a Formwright account open the report, view-only. **Make a copy** gives them their own copy to change.
-- **Whose data:** a report's numbers are always worked out from the records the *viewer* is allowed to see, so sharing a report never shares records.
+**A report** is one chart, table or number, saved by itself so it can go on any number of dashboards. Change it once and every dashboard that shows it updates.
 
-Reports are stored in `reports/{id}` (`name`, `ownerId`, `shared`, `widgets`, `createdAt`, `updatedAt`). The rules for them are in the Cadence folder, with the rest.
+- **Types:** Table, Grouped table (with subtotals), Pivot (rows × columns, like Client × Stage), Bar, Line, Area, Donut, and KPI (one number, optionally compared with the period before).
+- **Data from** picks the form. A report can also use fields of the forms above it: a Line items report can group by the project's stage or the client's name. That's how sub-form rows are reported "through" their parent.
+- **Value:** a count of records, or the total or average of a number field.
+- **Only records where:** any number of conditions (*Stage is not Done*), joined by **and** or **or**.
+- **Date for periods:** which date a dashboard's period (This month, This year…) looks at. Charts over time ignore the period; they always show the last 12 months or 26 weeks.
+- **Add to dashboard** puts it on an existing dashboard or a new one. The top of the editor lists the dashboards it's on.
+
+**A dashboard** lays out saved reports and text blocks on a grid with no gaps.
+
+- **Edit dashboard** to add reports (or make a new one from there), add text blocks, set each item's width and height, move items earlier or later, and remove them. Rows always fill the width. Press **Save dashboard** when done.
+- **Filters:** a period (All time, This month, Last 30 days, This quarter, This year) and any number of field filters you add while editing (*Clients › Company name*). Everyone can change them while viewing; the period picked while editing is saved as the starting one. A field filter applies to each report whose form is that form or sits below it; the others say it doesn't reach them.
+- **Home:** **Set as home** on any dashboard makes it open when you start Formwright. Everyone picks their own.
+
+**Sharing:** your reports and dashboards are private. Admins can share them with everyone or with chosen security groups. Sharing only decides who sees them in their lists; everyone sees numbers worked out from the records *they* are allowed to see, so sharing never reveals records.
+
+**Old reports:** the first time you open the app after this update, each report canvas you made becomes a dashboard of the same name, and each of its widgets becomes a saved report. A shared report made by someone else is converted the next time its owner opens Formwright.
+
+Stored in `reportDefs/{id}` (`name, ownerId, shared, groups, def`) and `dashboards/{id}` (`name, ownerId, shared, groups, tiles, filters`). Home is `homeDashboard` on `profiles/{uid}`. The rules are in the Cadence folder.
+
+## Sub-forms (grids)
+
+A child form can show **inside** its parent record as an editable grid, like line items on an invoice, instead of as separate records.
+
+- **Set it up:** Form designer › the parent form › **Relationships**.
+  - **+ New sub-form** creates a form with Description, Qty, Unit price and Amount (`{Qty} * {Unit price}`), hidden from the sidebar. Rename it and change its fields in its own editor.
+  - For any child form, **Show in the … as: Grid in the record / Separate records** switches between the two. Existing children (Site visits under Projects) can be switched either way at any time; nothing about their records changes.
+  - **Grid columns** picks which fields show. Long text, files, photos, signatures, locations and multiple choice open in a pop-up from their cell.
+  - **Rows follow this form's access:** people who can see a parent can see its rows, and editing works the same way. On for new sub-forms. The form then shows "Follows …" in Security groups instead of its own settings. Changing this recalculates everyone's access when you save the form.
+  - Sub-forms go one level deep: a form shown as a grid can't hold grids itself.
+- **On the record:** type straight into the cells. Click a heading to sort (again to reverse). **+ Add** puts a new row at the bottom, where it stays until you save. ✕ removes a row (it's deleted when you save; Discard brings it back). ↗ opens a row on its own screen.
+- **Saving:** one Save writes the record and every new, changed or removed row together. Rows are checked first (required fields and so on) and problems are listed under the grid.
+- **Calculations:** row calculations work as you type (`{Qty} * {Unit price}`), and so do the parent's `CHILDSUM("Line items", "Amount")`, `CHILDCOUNT(…)` and friends. A row's `PARENT("Field")` sees the parent's unsaved values too. Number columns get a total row.
+- **Data:** each row is an ordinary record of the sub-form, with `parentId` pointing at the parent. So rows can be listed, filtered and reported on by themselves, and reports on them can use the parent's fields.
+- Deleting a parent keeps its rows, as with any child records.
 
 ## Records lists
 
