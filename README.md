@@ -59,7 +59,9 @@ src/
   store.js                 Firestore subscriptions and writes, Storage uploads, group/access writes
   access.js                Permission model (pure; mirrored by the rules)
   formulas.js              Formula parser and evaluator (no eval)
-  route.js                 Web addresses for records and form lists (pure)
+  route.js                 Web addresses for records, form lists and reports (pure)
+  reports.js, reports.css  Report builder screens
+  reportlogic.js           Report maths, joins and the gap-free grid (pure, unit-tested)
   tasks.js                 Cadence task display helpers and links into Cadence (pure)
   app.js                   Navigation, record list and record screens, form designer
   admin.js                 Security groups and users screens (admins only)
@@ -90,12 +92,32 @@ Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Si
 
 ---
 
+## Reports
+
+**Reports** in the sidebar opens the report builder: a canvas of widgets built from your forms.
+
+- **Adding fields:** drag a field from the **Fields** panel onto the canvas, or tap it.
+  - number fields become a total or average
+  - choice and text fields become a bar chart grouped by that field
+  - dates become a chart over time, by week or month
+  - a form's title field becomes a table
+- **Dropping onto a widget:** a number changes what it measures, a choice changes the grouping, a date makes it a chart over time, and any field dropped on a table adds a column.
+- **Linked forms join:** drop a Clients field on a Projects chart to group projects by client. Dropping a field from a form *below* (Site visits on a Projects chart) switches the widget to count that form's records.
+- **Layout:** drag widgets to move them, and drag the corner to resize, or use the arrow keys on the corner handle. Widgets in a row share one height, and every row fills the width, so there are no gaps.
+- **Widget tab:** title, chart type, value (count, total or average), grouping, date field, columns, one filter, width and height.
+- **Saving:** changes save automatically.
+- **Sharing:** **Share with everyone** lets anyone with a Formwright account open the report, view-only. **Make a copy** gives them their own copy to change.
+- **Whose data:** a report's numbers are always worked out from the records the *viewer* is allowed to see, so sharing a report never shares records.
+
+Reports are stored in `reports/{id}` (`name`, `ownerId`, `shared`, `widgets`, `createdAt`, `updatedAt`). The rules for them are in the Cadence folder, with the rest.
+
 ## Links and Cadence tasks
 
 Each record and form list has its own address, so links and refreshes open the right screen:
 
 - `#/record/<recordId>`: one record. Back goes to its form's list.
 - `#/form/<formId>`: a form's records.
+- `#/reports` and `#/report/<reportId>`: the Reports list and one report.
 
 Cadence links to records this way, from the record chip on a task.
 
