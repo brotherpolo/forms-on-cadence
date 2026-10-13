@@ -8,6 +8,7 @@ import {
   connectFirestoreEmulator,
 } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 
 const env = import.meta.env || {};
 
@@ -29,6 +30,14 @@ export const configured = Boolean(config.apiKey && config.projectId) || usingEmu
 export const app = initializeApp(
   config.apiKey ? config : { apiKey: 'demo-key', projectId: 'demo-formwright', storageBucket: 'demo-formwright.appspot.com' }
 );
+// App Check (optional): proves requests come from this site, not a script reusing the
+// project's public settings. Turned on by VITE_APPCHECK_SITE_KEY.
+const appCheckKey = String(env.VITE_APPCHECK_SITE_KEY || '').trim();
+if (appCheckKey && !usingEmulators) {
+  if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(appCheckKey), isTokenAutoRefreshEnabled: true });
+}
+
 export const auth = getAuth(app);
 
 // Offline cache: forms and records stay readable, and edits queue, when a phone loses signal.

@@ -80,11 +80,29 @@ export async function ensureAccount(user) {
   }
 }
 
+/** Admins and people in at least one security group. The rules show a brand-new account nothing else. */
+const isMemberMe = () => isAdmin(store.me) || ((store.me && store.me.groups) || []).length > 0;
+let memberUnsubs = [];
+let memberOn = null;
+let memberParts = []; // { start: () => unsubscribe, empty: () => void }
+
+/** Start or stop the listeners that need membership, so a new account asks only for what it may read. */
+function syncMember() {
+  const m = !!store.me && isMemberMe();
+  if (m === memberOn) return;
+  memberOn = m;
+  memberUnsubs.forEach((u) => u());
+  memberUnsubs = [];
+  if (m) memberUnsubs = memberParts.map((x) => x.start());
+  else memberParts.forEach((x) => x.empty());
+}
+
 export function startData(user) {
   stopData();
   store.user = user;
   store.ready = false;
   got.forms = got.me = false;
+  memberParts = [];
 
   baseUnsubs.push(
     onSnapshot(
@@ -92,6 +110,7 @@ export function startData(user) {
       (s) => {
         store.me = s.exists() ? { uid: user.uid, ...s.data() } : null;
         got.me = true;
+        syncMember();
         syncAdminSubs();
         syncRecordSubs();
         changed();
@@ -99,99 +118,48 @@ export function startData(user) {
       fail('your account')
     )
   );
-  baseUnsubs.push(
-    onSnapshot(
-      collection(db, 'forms'),
-      (s) => {
-        store.forms = s.docs.map((d) => ({ ...d.data(), id: d.id }));
-        got.forms = true;
-        syncRecordSubs();
-        changed();
-      },
-      fail('forms')
-    )
-  );
-  baseUnsubs.push(
-    onSnapshot(
-      collection(db, 'profiles'),
-      (s) => {
-        store.profiles = Object.fromEntries(s.docs.map((d) => [d.id, d.data()]));
-        changed();
-      },
-      fail('profiles')
-    )
-  );
-  // Reports: mine, and the ones others have shared. Two queries, because the rules only
-  // let a list through when it asks for exactly what you may read.
-  const parts = { mine: [], shared: [] }, gotParts = { mine: false, shared: false };
-  const mergeReports = () => {
-    store.reportsReady = gotParts.mine && gotParts.shared;
-    const m = new Map();
-    [...parts.mine, ...parts.shared].forEach((r) => m.set(r.id, r));
-    store.reports = [...m.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    changed();
-  };
-  baseUnsubs.push(
-    onSnapshot(
-      query(collection(db, 'reports'), where('ownerId', '==', user.uid)),
-      (s) => { parts.mine = s.docs.map((d) => ({ ...d.data(), id: d.id })); gotParts.mine = true; mergeReports(); },
-      fail('your reports')
-    )
-  );
-  baseUnsubs.push(
-    onSnapshot(
-      query(collection(db, 'reports'), where('shared', '==', true)),
-      (s) => { parts.shared = s.docs.map((d) => ({ ...d.data(), id: d.id })); gotParts.shared = true; mergeReports(); },
-      fail('shared reports')
-    )
-  );
-  // Saved reports and dashboards: the same two-query pattern.
-  const ready = { reportDefs: false, dashboards: false };
-  const both = (key, label) => {
-    const parts = { mine: [], shared: [] }, got = { mine: false, shared: false };
-    const done = (part) => (s) => {
-      parts[part] = s.docs.map((d) => ({ ...d.data(), id: d.id }));
-      got[part] = true;
+  // Form designs and display names: for members only.
+  const onForms = (docs) => { store.forms = docs.map((d) => ({ ...d.data(), id: d.id })); got.forms = true; syncRecordSubs(); changed(); };
+  memberParts.push({ start: () => onSnapshot(collection(db, 'forms'), (s) => onForms(s.docs), fail('forms')), empty: () => onForms([]) });
+  const onProfiles = (docs) => { store.profiles = Object.fromEntries(docs.map((d) => [d.id, d.data()])); changed(); };
+  memberParts.push({ start: () => onSnapshot(collection(db, 'profiles'), (s) => onProfiles(s.docs), fail('profiles')), empty: () => onProfiles([]) });
+
+  /**
+   * Mine plus shared, as two queries, because the rules only let a list through when it asks
+   * for exactly what you may read. The shared half waits for membership.
+   */
+  const pair = (col, label, merge) => {
+    const parts = { mine: [], shared: [] }, have = { mine: false, shared: false };
+    const done = (part) => (snap) => {
+      parts[part] = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+      have[part] = true;
       const m = new Map();
       [...parts.mine, ...parts.shared].forEach((x) => m.set(x.id, x));
-      store[key] = [...m.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-      ready[key] = got.mine && got.shared;
-      store.dashReady = ready.reportDefs && ready.dashboards;
-      changed();
+      merge([...m.values()], have.mine && have.shared);
     };
-    baseUnsubs.push(onSnapshot(query(collection(db, key), where('ownerId', '==', user.uid)), done('mine'), fail('your ' + label)));
-    baseUnsubs.push(onSnapshot(query(collection(db, key), where('shared', '==', true)), done('shared'), fail('shared ' + label)));
+    baseUnsubs.push(onSnapshot(query(collection(db, col), where('ownerId', '==', user.uid)), done('mine'), fail('your ' + label)));
+    memberParts.push({
+      start: () => onSnapshot(query(collection(db, col), where('shared', '==', true)), done('shared'), fail('shared ' + label)),
+      empty: () => done('shared')({ docs: [] }),
+    });
   };
-  both('reportDefs', 'saved reports');
-  both('dashboards', 'dashboards');
-  // Saved list views: the same two-query pattern as reports.
-  const vparts = { mine: [], shared: [] }, gotViews = { mine: false, shared: false };
-  const mergeViews = () => {
-    store.listViewsReady = gotViews.mine && gotViews.shared;
-    const m = new Map();
-    [...vparts.mine, ...vparts.shared].forEach((v) => m.set(v.id, v));
-    store.listViews = [...m.values()];
+  pair('reports', 'old reports', (list, ok) => { store.reports = list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)); store.reportsReady = ok; changed(); });
+  const ready = { reportDefs: false, dashboards: false };
+  ['reportDefs', 'dashboards'].forEach((key) => pair(key, key === 'reportDefs' ? 'saved reports' : 'dashboards', (list, ok) => {
+    store[key] = list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    ready[key] = ok;
+    store.dashReady = ready.reportDefs && ready.dashboards;
     changed();
-  };
-  baseUnsubs.push(
-    onSnapshot(
-      query(collection(db, 'listViews'), where('ownerId', '==', user.uid)),
-      (s) => { vparts.mine = s.docs.map((d) => ({ ...d.data(), id: d.id })); gotViews.mine = true; mergeViews(); },
-      fail('your list views')
-    )
-  );
-  baseUnsubs.push(
-    onSnapshot(
-      query(collection(db, 'listViews'), where('shared', '==', true)),
-      (s) => { vparts.shared = s.docs.map((d) => ({ ...d.data(), id: d.id })); gotViews.shared = true; mergeViews(); },
-      fail('shared list views')
-    )
-  );
+  }));
+  pair('listViews', 'list views', (list, ok) => { store.listViews = list; store.listViewsReady = ok; changed(); });
 }
 
 export function stopData() {
   baseUnsubs.forEach((u) => u());
   baseUnsubs = [];
+  memberUnsubs.forEach((u) => u());
+  memberUnsubs = [];
+  memberOn = null;
   adminUnsubs.forEach((u) => u());
   adminUnsubs = [];
   recordSubs.forEach((s) => s.unsub());
