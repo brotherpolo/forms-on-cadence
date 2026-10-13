@@ -30,6 +30,8 @@ export const store = {
   users: [],
   reports: [], // my reports and reports shared with everyone, newest first
   reportsReady: false,
+  listViews: [], // saved list views: mine and shared ones, all forms
+  listViewsReady: false,
   recordsLoading: new Set(),
   onChange: () => {},
   onError: () => {},
@@ -140,6 +142,29 @@ export function startData(user) {
       fail('shared reports')
     )
   );
+  // Saved list views: the same two-query pattern as reports.
+  const vparts = { mine: [], shared: [] }, gotViews = { mine: false, shared: false };
+  const mergeViews = () => {
+    store.listViewsReady = gotViews.mine && gotViews.shared;
+    const m = new Map();
+    [...vparts.mine, ...vparts.shared].forEach((v) => m.set(v.id, v));
+    store.listViews = [...m.values()];
+    changed();
+  };
+  baseUnsubs.push(
+    onSnapshot(
+      query(collection(db, 'listViews'), where('ownerId', '==', user.uid)),
+      (s) => { vparts.mine = s.docs.map((d) => ({ ...d.data(), id: d.id })); gotViews.mine = true; mergeViews(); },
+      fail('your list views')
+    )
+  );
+  baseUnsubs.push(
+    onSnapshot(
+      query(collection(db, 'listViews'), where('shared', '==', true)),
+      (s) => { vparts.shared = s.docs.map((d) => ({ ...d.data(), id: d.id })); gotViews.shared = true; mergeViews(); },
+      fail('shared list views')
+    )
+  );
 }
 
 export function stopData() {
@@ -150,7 +175,7 @@ export function stopData() {
   recordSubs.forEach((s) => s.unsub());
   recordSubs.clear();
   recordsByForm.clear();
-  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false });
+  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false });
   store.recordsLoading.clear();
 }
 
@@ -284,6 +309,31 @@ export async function deleteReport(id) {
   await deleteDoc(doc(db, 'reports', id));
 }
 
+/* ---------- List views and bulk record changes ---------- */
+
+export async function saveListView(id, data) {
+  await setDoc(doc(db, 'listViews', id), plain(data));
+}
+
+export async function deleteListView(id) {
+  await deleteDoc(doc(db, 'listViews', id));
+}
+
+/** Delete many records. Each one is checked by the rules, so pass only ones you may delete. */
+export async function deleteRecords(ids) {
+  await commitOps(ids.map((id) => (b) => b.delete(doc(db, 'records', id))));
+}
+
+/** Set one field to the same value on many records (owner and creator unchanged). */
+export async function setRecordsValue(recs, fieldId, value) {
+  const me = store.user.uid, now = Date.now();
+  await commitOps(
+    recs.map((r) => (b) =>
+      b.update(doc(db, 'records', r.id), { ['values.' + fieldId]: plain(value), updatedAt: now, updatedBy: me })
+    )
+  );
+}
+
 /* ---------- Writes ---------- */
 
 const plain = (o) => JSON.parse(JSON.stringify(o ?? null));
@@ -338,6 +388,9 @@ export async function deleteFormCascade(formId) {
     .forEach((f) =>
       ops.push((b) => b.update(doc(db, 'forms', f.id), { children: f.children.filter((c) => c.formId !== formId) }))
     );
+  store.listViews
+    .filter((v) => v.formId === formId)
+    .forEach((v) => ops.push((b) => b.delete(doc(db, 'listViews', v.id))));
   ops.push((b) => b.delete(doc(db, 'forms', formId)));
   await commitOps(ops);
 }

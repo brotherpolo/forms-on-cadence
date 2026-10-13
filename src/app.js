@@ -6,6 +6,7 @@ import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, wa
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
 import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy } from './reports.js';
+import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
 import { FX } from './formulas.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
@@ -245,6 +246,7 @@ function renderMain(){
   $('#topttl').textContent=title||'Formwright';
   m.innerHTML=`<div class="wrap${wide?' wide':''}">${h}</div>`;
   document.querySelectorAll('canvas[data-sig]').forEach(initSig);
+  if(view.name==='records')afterRecords();
   syncTaskWatch();
 }
 
@@ -298,40 +300,7 @@ function viewWelcome(){
   return `<div class="panel empty"><h2>You’re signed in</h2><p>No forms are shared with you yet. An administrator needs to add you to a security group.</p><p class="help">Signed in as ${esc(store.user?.email||'')}</p></div>`;
 }
 
-/* Records list */
-function viewRecords(form){
-  if(!form)return '';
-  const all=recordsOf(form.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-  const tf=titleFieldOf(form);
-  const cols=(form.fields||[]).filter(f=>f.inList&&!NOCOL.has(f.type)&&f.id!==tf?.id).slice(0,5);
-  const parents=parentsOf(form.id);
-  const lvl=formLevel(store.me,form.id),mayCreate=canCreate(store.me,form.id);
-  const q=ui.search.trim().toLowerCase();
-  const recs=q?all.filter(r=>(recTitle(r,form)+' '+(form.fields||[]).map(f=>fmt(f,valOf(f,r))).join(' ')).toLowerCase().includes(q)):all;
-  const parentCell=r=>{const p=r.parentId&&recById(r.parentId);return p?esc(recTitle(p)):''};
-  const cell=(f,r)=>{const t=fmt(f,valOf(f,r,form));if(f.type==='url'&&t)return `<a href="${esc(/^https?:/i.test(t)?t:'https://'+t)}" target="_blank" rel="noopener" data-stop>${esc(t)}</a>`;return `<span class="${NUMERIC.has(f.type)&&f.type!=='rating'?'num':''}">${esc(t)}</span>`};
-  return `
-  <div class="head">
-    <div class="ttl">${badge(form,1)}<div><h1>${esc(form.name)}</h1>${form.description?`<p class="sub">${esc(form.description)}</p>`:''}</div></div>
-    <div class="actions">${isAdmin(store.me)?`<button class="btn ghost" data-act="edit-form" data-id="${form.id}">Edit form</button>`:''}${mayCreate?`<button class="btn primary" data-act="new-record" data-id="${form.id}">+ New ${esc(itemName(form).toLowerCase())}</button>`:''}</div>
-  </div>
-  ${lvl.view==='own'?`<p class="scope-note"><span class="chip acc">Only yours</span> You see the ${esc(form.name.toLowerCase())} you created.${lvl.edit==='none'?' Read only.':''}</p>`:lvl.edit==='none'?`<p class="scope-note"><span class="chip">Read only</span> You can view these ${esc(form.name.toLowerCase())} but not change them.</p>`:lvl.edit==='own'?`<p class="scope-note"><span class="chip">Edit yours</span> You can view all ${esc(form.name.toLowerCase())} and edit the ones you created.</p>`:''}
-  ${all.length?`
-  <div class="search"><input class="in" id="search" type="search" placeholder="Search ${esc(form.name.toLowerCase())}" value="${esc(ui.search)}" aria-label="Search records"><span class="chip">${recs.length} of ${all.length}</span></div>
-  <div class="panel">
-    ${recs.length?`<div class="tblwrap"><table class="tbl"><thead><tr><th>${esc(tf?.label||'Title')}</th>${parents.length?'<th>Belongs to</th>':''}${cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>
-      ${recs.map(r=>`<tr data-act="open-record" data-id="${r.id}"><td class="title">${esc(recTitle(r,form))}</td>${parents.length?`<td>${parentCell(r)}</td>`:''}${cols.map(c=>`<td>${cell(c,r)}</td>`).join('')}</tr>`).join('')}
-    </tbody>${totalsRow(cols,recs,form,parents.length)}</table></div>
-    <div class="cards">${recs.map(r=>`<button class="card" data-act="open-record" data-id="${r.id}"><b>${esc(recTitle(r,form))}</b><div class="meta">${parents.length&&parentCell(r)?`<span>↳ ${parentCell(r)}</span>`:''}${cols.map(c=>{const t=fmt(c,valOf(c,r));return t?`<span>${esc(t)}</span>`:''}).join('')}</div></button>`).join('')}${totalsStrip(cols,recs,form)}</div>
-    `:`<div class="empty"><p>No ${esc(form.name.toLowerCase())} match “${esc(ui.search)}”.</p></div>`}
-  </div>`:`
-  <div class="panel empty">${store.recordsLoading.has(form.id)?`<p>Loading ${esc(form.name.toLowerCase())}…</p>`:`<h2>No ${esc(form.name.toLowerCase())} yet</h2>${mayCreate?`<p>Add the first ${esc(itemName(form).toLowerCase())} to start the list.</p><button class="btn primary" data-act="new-record" data-id="${form.id}">+ New ${esc(itemName(form).toLowerCase())}</button>`:`<p>Nothing has been shared with you here yet.</p>`}`}</div>`}`;
-}
-
-const SUMMABLE=new Set(['number','decimal','currency','formula']);
-function colTotal(c,recs,form){if(!SUMMABLE.has(c.type)||(c.type==='formula'&&c.format==='text'))return null;let s=0,n=0;recs.forEach(r=>{const v=valOf(c,r,form);if(typeof v==='number'&&isFinite(v)){s+=v;n++;}});return n?s:null;}
-function totalsRow(cols,recs,form,hasParent){const t=cols.map(c=>colTotal(c,recs,form));if(recs.length<2||!t.some(x=>x!=null))return '';return `<tfoot><tr><td>Total</td>${hasParent?'<td></td>':''}${cols.map((c,i)=>`<td class="num">${t[i]==null?'':esc(fmt(c,t[i]))}</td>`).join('')}</tr></tfoot>`;}
-function totalsStrip(cols,recs,form){const t=cols.map(c=>[c,colTotal(c,recs,form)]).filter(x=>x[1]!=null);if(recs.length<2||!t.length)return '';return `<div class="totals">${t.map(([c,v])=>`<span>Total ${esc(c.label.toLowerCase())}: <b class="num">${esc(fmt(c,v))}</b></span>`).join('')}</div>`;}
+/* Records list: see lists.js */
 
 /* Record page */
 function newRecordDraft(form,parent){
@@ -654,7 +623,7 @@ function fieldEditor(x){
   if(x.type==='range')h+=P('Step',num('step',x.step))+P('Unit after value',inp('suffix',x.suffix,'placeholder="e.g. %"'));
   if(x.type==='rating')h+=P('Number of stars',num('max',x.max));
   if(x.type==='relation')h+=P('Links to form',`<select class="in" data-prop="relForm"><option value="">Choose a form…</option>${[...store.forms].sort(byOrder).map(o=>`<option value="${o.id}"${o.id===x.relForm?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`);
-  if(x.type!=='heading')h+=`<div class="props-sw">${x.type==='formula'?'':sw('required','Required')}${NOCOL.has(x.type)?'':sw('inList','Show as list column')}<label class="switch"><input type="checkbox" data-prop="width" data-kind="half"${x.width==='half'?' checked':''}><span class="tr"></span><span>Half width on wide screens</span></label></div>`;
+  if(x.type!=='heading')h+=`<div class="props-sw">${x.type==='formula'?'':sw('required','Required')}${NOCOL.has(x.type)?'':sw('inList','Column in the starting list')}<label class="switch"><input type="checkbox" data-prop="width" data-kind="half"${x.width==='half'?' checked':''}><span class="tr"></span><span>Half width on wide screens</span></label></div>`;
   h+=`<div class="prop full"><span class="keyline">Field ID ${esc(x.id)}</span></div>`;
   return `<div class="fedit">${h}</div>`;
 }
@@ -908,12 +877,13 @@ document.addEventListener('pointercancel',endFmDrag);
 export function startApp(){
   booted=false;pendingRoute=null;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
   initReports({fmt,valOf,recTitle,go,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
+  initLists({fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,search:()=>ui.search});
   Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false});
   store.onChange=onData;
   store.onError=(err)=>{if(err?.code==='permission-denied')toast('Some data could not be loaded because of your permissions.');else toast('Lost the connection to the database. Changes will sync when it returns.');};
 }
 export function stopApp(){
-  booted=false;store.onChange=()=>{};$('#app').hidden=true;closeMenu();
+  booted=false;store.onChange=()=>{};$('#app').hidden=true;closeMenu();resetLists();
   if(tw.unsub){tw.unsub();tw.unsub=null;}tw.recordId=null;
 }
 export { view as currentView, ui, byOrder, formById, recordsOf, renderMain };
