@@ -48,6 +48,33 @@ export function effectiveAccess(groups) {
   return out;
 }
 
+/**
+ * Sub-forms whose rows follow their parent's access ("inheritAccess" on the form) get the
+ * most permissive level of the forms that hold them. Applied after effectiveAccess, so the
+ * stored users/{uid}.access already has the inherited levels and the rules need no change.
+ */
+export function withInherited(access, forms) {
+  const out = { ...access };
+  (forms || []).forEach((f) => {
+    if (!f.inheritAccess) return;
+    const parents = (forms || []).filter((p) => p.id !== f.id && (p.children || []).some((c) => c.formId === f.id));
+    if (!parents.length) return;
+    let v = 0, e = 0;
+    parents.forEach((p) => { const l = levelFor(access, p.id); v = Math.max(v, rank(l.view)); e = Math.max(e, rank(l.edit)); });
+    out[f.id] = normalize({ view: LEVELS[v], edit: LEVELS[e] });
+  });
+  for (const k of Object.keys(out)) {
+    if (k !== '*' && out['*'] && out[k].view === out['*'].view && out[k].edit === out['*'].edit) delete out[k];
+  }
+  return out;
+}
+
+/** The forms a sub-form's access follows, or [] when it has its own. */
+export function accessParents(form, forms) {
+  if (!form?.inheritAccess) return [];
+  return (forms || []).filter((p) => p.id !== form.id && (p.children || []).some((c) => c.formId === form.id));
+}
+
 export const isAdmin = (me) => me?.role === 'admin';
 
 export function formLevel(me, formId) {

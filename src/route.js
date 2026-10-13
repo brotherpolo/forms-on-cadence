@@ -3,14 +3,17 @@
 //   #/record/<recordId>   one record
 //   #/form/<formId>       a form's record list
 //   #/reports             the Reports list
-//   #/report/<reportId>   one report
+//   #/report/<reportId>   one saved report
+//   #/dashboards          the Dashboards list
+//   #/dashboard/<id>      one dashboard
 // Pure functions: no DOM, no Firebase.
 
-const RE = /^#\/(record|form|report)\/([^/?#]+)\/?$/;
+const RE = /^#\/(record|form|report|dashboard)\/([^/?#]+)\/?$/;
 
 /** '#/record/abc' -> { kind: 'record', id: 'abc' }; '#/reports' -> { kind: 'reports' }; anything else -> null */
 export function parseRoute(hash) {
   if (/^#\/reports\/?$/.test(String(hash || ''))) return { kind: 'reports' };
+  if (/^#\/dashboards\/?$/.test(String(hash || ''))) return { kind: 'dashboards' };
   const m = RE.exec(String(hash || ''));
   if (!m) return null;
   let id;
@@ -29,5 +32,7 @@ export function routeFor(view) {
   if (view.name === 'records' && view.formId) return '#/form/' + encodeURIComponent(view.formId);
   if (view.name === 'reports') return '#/reports';
   if (view.name === 'report' && view.reportId) return '#/report/' + encodeURIComponent(view.reportId);
+  if (view.name === 'dashboards') return '#/dashboards';
+  if (view.name === 'dashboard' && view.dashboardId) return '#/dashboard/' + encodeURIComponent(view.dashboardId);
   return '';
 }

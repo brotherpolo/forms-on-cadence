@@ -5,7 +5,7 @@
 import { store, saveGroup, deleteGroup, setUserGroups, setUserRole, recomputeAllAccess } from './store.js';
 import { go, render, renderMain, byOrder } from './app.js';
 import { esc, uid, clone, toast, badge } from './ui.js';
-import { LEVELS, NONE, PRESETS, normalize, describeLevel, levelFor, isAdmin } from './access.js';
+import { LEVELS, NONE, PRESETS, normalize, describeLevel, levelFor, isAdmin, accessParents } from './access.js';
 
 const VIEWS = new Set(['users', 'groups', 'groupEdit']);
 let gdraft = null;
@@ -90,6 +90,8 @@ function viewGroupEdit() {
     <div class="panel">${forms.length ? `<div class="tblwrap"><table class="tbl acc-tbl"><thead><tr><th>Form</th><th>Can see</th><th>Can edit</th><th>Result</th></tr></thead><tbody>${forms.map((f) => {
       const own = g.access[f.id];
       const eff = normalize(own || def);
+      const follows = accessParents(f, store.forms);
+      if (follows.length) return `<tr><td><span class="formcell">${badge(f)}${esc(f.name)}</span></td><td colspan="3"><span class="chip">Follows ${follows.map((p) => esc(p.name)).join(' and ')}</span></td></tr>`;
       return `<tr><td><span class="formcell">${badge(f)}${esc(f.name)}</span></td><td>${levelSelect(f.id, 'view', own?.view, true)}</td><td>${levelSelect(f.id, 'edit', own?.edit, true)}</td><td><span class="chip${own ? ' acc' : ''}">${esc(describeLevel(eff))}</span></td></tr>`;
     }).join('')}</tbody></table></div>` : `<p class="note">No forms yet. The default above will apply to forms you create later.</p>`}</div></section>
 

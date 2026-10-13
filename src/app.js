@@ -1,11 +1,12 @@
 // Formwright application: navigation, record screens and the form designer.
 import './designer.css';
+import './grids.css';
 // Admin screens (users and groups) live in admin.js; data access in store.js.
 
-import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone } from './store.js';
+import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
-import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy } from './reports.js';
+import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts } from './dash.js';
 import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
 import { FX } from './formulas.js';
@@ -90,10 +91,11 @@ function evalFormula(form,f,rec,depth=0,check=false){
   const ctx={check,
     ref:name=>{const g=fieldByName(form,name);if(!g)throw FX.E(`There is no field called {${name}} on this form.`);if(g.id===f.id)throw FX.E('A calculation can’t use itself.');return rawFor(g,rec,form,depth,check)},
     family:(fn,a)=>{
-      if(fn==='PARENT'){const g=a[0];const p=rec.parentId&&recById(rec.parentId);if(!p){if(check)return 0;return null}const pf=formById(p.formId);const pg=fieldByName(pf,g);if(!pg)throw FX.E(`The parent form has no field called “${g}”.`);return rawFor(pg,p,pf,depth,check)}
+      if(fn==='PARENT'){const g=a[0];const p=rec._parentDraft?draftRec(rec._parentDraft):(rec.parentId&&recById(rec.parentId));if(!p){if(check)return 0;return null}const pf=formById(p.formId);const pg=fieldByName(pf,g);if(!pg)throw FX.E(`The parent form has no field called “${g}”.`);return rawFor(pg,p,pf,depth,check)}
       const cf=store.forms.find(x=>lc(x.name)===lc(a[0]))||(check&&fdraft&&lc(fdraft.name)===lc(a[0])?fdraft:null);
       if(!cf)throw FX.E(`There is no form called “${a[0]}”.`);
-      const kids=rec.id?store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id):[];
+      const dg=rec._draft?.grids?.[cf.id];
+      const kids=dg?dg.rows.map(r=>rowRec(r,cf,rec._draft)):rec.id?store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id):[];
       if(fn==='CHILDCOUNT')return kids.length;
       const g=fieldByName(cf,a[1]);if(!g)throw FX.E(`${cf.name} has no field called “${a[1]}”.`);
       const vals=kids.map(k=>FX.num(rawFor(g,k,cf,depth,check)));
@@ -124,7 +126,7 @@ function fmtCalc(f,v){
 let view={name:'loading'},hist=[],rdraft=null,fdraft=null,pdraft=null;
 const ui={search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false};
 
-function dirty(){return (view.name==='record'&&rdraft?.dirty)||(view.name==='formEdit'&&fdraft?.dirty)||admin.isDirty(view)}
+function dirty(){return (view.name==='record'&&rdraft?.dirty)||(view.name==='formEdit'&&fdraft?.dirty)||(view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId))||admin.isDirty(view)}
 function guard(){if(dirty()&&!ui.leaveOk){ui.leaveOk=true;toast('You have unsaved changes. Tap again to leave without saving.');setTimeout(()=>ui.leaveOk=false,4000);return false;}ui.leaveOk=true;return true;}
 export function goRec(draft,v){if(!guard())return;rdraft=draft;go(v);}
 export function go(v,push=true){
@@ -133,6 +135,8 @@ export function go(v,push=true){
   if(!guard())return false;
   ui.leaveOk=false;ui.confirm=null;
   if(view.name==='report')leaveReport();
+  if((view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId)))forgetDrafts();
+  if(v.name==='record'||v.name==='records')cdraft=null;
   if(push&&view.name!=='loading')hist.push(view);
   view=v;closeMenu();syncHash();
   if(v.name==='records'){ui.search='';}
@@ -144,11 +148,13 @@ function sidebarForms(){return store.forms.filter(f=>f.showInSidebar&&canViewFor
 export function home(){
   const fs=sidebarForms();
   ui.leaveOk=true;
+  const hd=store.profiles[store.user?.uid]?.homeDashboard;
+  if(hd){go({name:'dashboard',dashboardId:hd},false);return;}
   if(fs.length)go({name:'records',formId:fs[0].id},false);
   else if(isAdmin(store.me))go({name:'designer'},false);
   else go({name:'welcome'},false);
 }
-let booted=false,pendingRoute=null;
+let booted=false,pendingRoute=null,homeCheck=false;
 /* ---------- Web addresses (#/record/<id>, #/form/<id>) ---------- */
 // The address follows the screen without adding browser history; the in-app Back
 // button keeps its own history. Links from Cadence open a record directly.
@@ -161,9 +167,18 @@ function syncHash(){
 function openRoute(r){
   if(!r)return true;
   if(r.kind==='reports'){go({name:'reports'},false);return true;}
+  if(r.kind==='dashboards'){go({name:'dashboards'},false);return true;}
+  if(r.kind==='dashboard'){
+    if(!store.dashboards.some(x=>x.id===r.id)){
+      if(!store.dashReady)return false; // still arriving
+      toast('That dashboard isn’t available. It may have been deleted, or it isn’t shared with you.');return true;
+    }
+    go({name:'dashboards'},false);go({name:'dashboard',dashboardId:r.id});return true;
+  }
   if(r.kind==='report'){
-    if(!store.reports.some(x=>x.id===r.id)){
-      if(!store.reportsReady)return false; // still arriving
+    if(!store.reportDefs.some(x=>x.id===r.id)){
+      if(!store.dashReady||!store.reportsReady)return false; // still arriving
+      if(store.dashboards.some(x=>x.id==='mig-'+r.id)){go({name:'dashboards'},false);go({name:'dashboard',dashboardId:'mig-'+r.id});return true;} // an old report, now a dashboard
       toast('That report isn’t available. It may have been deleted, or it isn’t shared with you.');return true;
     }
     go({name:'reports'},false);go({name:'report',reportId:r.id});return true;
@@ -196,9 +211,12 @@ function onData(){
     booted=true;$('#boot').hidden=true;$('#app').hidden=false;
     const r=parseRoute(location.hash);
     home();
+    homeCheck=!r&&!store.profiles[store.user?.uid];
     if(r&&!openRoute(r))pendingRoute=r;
     return;
   }
+  // the home dashboard is on the profile, which can arrive after the first screen
+  if(homeCheck&&store.profiles[store.user?.uid]){homeCheck=false;if(!hist.length&&store.profiles[store.user.uid].homeDashboard&&view.name!=='dashboard'&&!dirty()){home();return;}}
   if(pendingRoute&&openRoute(pendingRoute))pendingRoute=null;
   if(ADMIN_VIEWS.has(view.name)&&!isAdmin(store.me)){ui.leaveOk=true;home();return;}
   if((view.name==='records'||view.name==='record')&&!canViewForm(store.me,view.formId)){ui.leaveOk=true;home();return;}
@@ -206,7 +224,8 @@ function onData(){
   if(admin.isDirty(view))return;
   if(view.name==='formEdit')return;
   if(view.name==='record'&&rdraft?.dirty)return;
-  if(view.name==='report'&&reportBusy())return;
+  maybeMigrate();
+  if((view.name==='report'||view.name==='dashboard')&&reportBusy())return;
   if(view.name==='record'||view.name==='records'){if(!formById(view.formId)){home();return;}}
   if(view.name==='record'&&view.recordId&&!recById(view.recordId)){back();return;}
   renderMain();
@@ -223,8 +242,9 @@ function renderSide(){
     <div class="brand"><span class="brand-mark"><i></i></span><b>Formwright</b></div>
     <div class="navlabel">Forms</div>
     ${fs.length?fs.map(f=>`<button class="nav${activeForm===f.id?' on':''}" data-act="nav-form" data-id="${f.id}">${badge(f)}<span class="t">${esc(f.name)}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join(''):`<div class="nav-empty">No forms to show yet.</div>`}
-    <div class="navlabel" style="margin-top:12px">Reports</div>
-    <button class="nav${view.name==='reports'||view.name==='report'?' on':''}" data-act="nav-reports"><span class="glyph navg">▤</span><span class="t">Reports</span><span class="n">${store.reports.length}</span></button>
+    <div class="navlabel" style="margin-top:12px">Insights</div>
+    <button class="nav${view.name==='dashboards'||view.name==='dashboard'?' on':''}" data-act="nav-dashboards"><span class="glyph navg">▦</span><span class="t">Dashboards</span><span class="n">${counts().dashboards}</span></button>
+    <button class="nav${view.name==='reports'||view.name==='report'?' on':''}" data-act="nav-reports"><span class="glyph navg">▤</span><span class="t">Reports</span><span class="n">${counts().reports}</span></button>
     ${adm?`<div class="navlabel" style="margin-top:12px">Administration</div>
     <button class="nav${view.name==='designer'||view.name==='formEdit'?' on':''}" data-act="nav-designer"><span class="glyph navg">⚙</span><span class="t">Form designer</span><span class="n">${store.forms.length}</span></button>
     <button class="nav${view.name==='groups'||view.name==='groupEdit'?' on':''}" data-act="nav-groups"><span class="glyph navg">◫</span><span class="t">Security groups</span><span class="n">${store.groups.length}</span></button>
@@ -237,6 +257,8 @@ function renderMain(){
   let wide=false;
   if(view.name==='reports'){title='Reports';h=viewReportsList();}
   else if(view.name==='report'){title=reportName(view.reportId);h=viewReport(view.reportId);wide=true;}
+  else if(view.name==='dashboards'){title='Dashboards';h=viewDashboards();}
+  else if(view.name==='dashboard'){title=dashName(view.dashboardId);h=viewDashboard(view.dashboardId);wide=true;}
   else if(view.name==='records'){const f=formById(view.formId);title=f?.name;h=viewRecords(f);}
   else if(view.name==='record'){const f=formById(view.formId);title=f?.name;h=viewRecord(f);}
   else if(view.name==='designer'){title='Form designer';h=viewDesigner();}
@@ -320,6 +342,7 @@ function viewRecord(form){
   if(!rdraft||rdraft.formId!==form.id||rdraft.recordId!==(view.recordId||null)){rdraft=rec?{formId:form.id,recordId:rec.id,values:{},errors:{},dirty:false}:newRecordDraft(form,null);}
   if(rec&&!rdraft.dirty){rdraft.values=clone(rec.values||{});rdraft.parentId=rec.parentId||null;rdraft.parentFormId=rec.parentFormId||null;}
   const ro=rec?!canEditRecord(store.me,rec):!canCreate(store.me,form.id);rdraft.readOnly=ro;
+  const grels=gridRels(form);syncGrids(rdraft,rec,grels);
   const parent=rdraft.parentId?recById(rdraft.parentId):null;
   const pform=parent?formById(parent.formId):null;
   const parentForms=parentsOf(form.id);
@@ -331,7 +354,8 @@ function viewRecord(form){
     const opts=parentForms.map(pf=>`<optgroup label="${esc(pf.name)}">${recordsOf(pf.id).map(r=>`<option value="${r.id}"${r.id===rdraft.parentId?' selected':''}>${esc(recTitle(r,pf))}</option>`).join('')}</optgroup>`).join('');
     parentPick=`<div class="panel parentcard"><div class="grow"><small>Belongs to</small><select class="in" id="parent-pick" style="margin-top:6px" aria-label="Parent record"${ro?' disabled':''}><option value="">No parent</option>${opts}</select></div>${parent?`<button class="btn sm" data-act="open-record" data-id="${parent.id}">Open ${esc(itemName(pform).toLowerCase())}</button>`:''}</div>`;
   }
-  const children=(form.children||[]).map(c=>({rel:c,cf:formById(c.formId)})).filter(x=>x.cf&&canViewForm(store.me,x.cf.id));
+  const children=(form.children||[]).filter(c=>c.display!=='grid').map(c=>({rel:c,cf:formById(c.formId)})).filter(x=>x.cf&&canViewForm(store.me,x.cf.id));
+  const gridHTML=grels.map(({rel,cf})=>gridSection(form,rel,cf,rdraft,ro)).join('');
   const childHTML=rec?children.map(({cf})=>{
     const rs=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
     const cols=(cf.fields||[]).filter(f=>f.inList&&!NOCOL.has(f.type)&&f.id!==titleFieldOf(cf)?.id).slice(0,3);
@@ -359,9 +383,11 @@ function viewRecord(form){
       ${ro?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
     </div>
   </div>
+  ${gridHTML}
   ${rec?`<section class="section" id="rec-tasks">${tasksInner()}</section>`:''}
   ${childHTML}${backHTML}
-  ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}`;
+  ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}
+  ${cellPopup()}`;
 }
 
 const personName=id=>store.profiles[id]?.displayName||(id===store.user?.uid?'you':'someone');
@@ -371,6 +397,130 @@ function recordMeta(rec){
   let s=`Created by ${esc(by)}`;
   if(rec.updatedAt)s+=` · edited ${esc(when(rec.updatedAt))}`+(rec.updatedBy&&rec.updatedBy!==rec.ownerId?` by ${esc(personName(rec.updatedBy))}`:'');
   return s;
+}
+
+/* ---------- Sub-form grids ----------
+   A child form whose relationship is shown as a grid is edited inside the parent record.
+   Rows live in rdraft.grids[childFormId] = {rows:[{id, values, ownerId, createdAt, isNew, dirty, errors}], removed:[ids], sort}
+   and are saved with the parent in one batch (saveRecordBundle). Long text, files, photos,
+   signatures, locations and multiple choice open in a pop-up (cdraft) from their cell. */
+const POPUP_TYPES=new Set(['textarea','file','image','signature','location','multiselect']);
+const GRID_SUM=new Set(['number','decimal','currency']);
+let cdraft=null;
+function gridRels(form){return (form.children||[]).filter(c=>c.display==='grid').map(rel=>({rel,cf:formById(rel.formId)})).filter(x=>x.cf&&x.cf.id!==form.id&&canViewForm(store.me,x.cf.id));}
+function gridCols(rel,cf){
+  const usable=(cf.fields||[]).filter(f=>f.type!=='heading');
+  const picked=Array.isArray(rel.cols)&&rel.cols.length?rel.cols.map(id=>usable.find(f=>f.id===id)).filter(Boolean):usable.filter(f=>!POPUP_TYPES.has(f.type)).slice(0,8);
+  return picked.length?picked:usable.slice(0,1);
+}
+function rowRec(row,cf,d){return {id:row.id,formId:cf.id,values:row.values,parentId:d.recordId||null,ownerId:row.ownerId,_parentDraft:d};}
+function syncGrids(d,rec,rels){
+  d.grids=d.grids||{};
+  rels.forEach(({cf})=>{
+    let g=d.grids[cf.id];
+    if(!g)g=d.grids[cf.id]={rows:[],removed:[],sort:null};
+    if(!d.dirty){
+      g.rows=rec?store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)).map(r=>({id:r.id,values:clone(r.values||{}),ownerId:r.ownerId,createdAt:r.createdAt,isNew:false,dirty:false,errors:{}})):[];
+      g.removed=[];
+    }
+  });
+}
+function newRowValues(cf,d,parentForm){
+  const values={};
+  (cf.fields||[]).forEach(f=>{if(f.type==='checkbox')values[f.id]=false;if(f.type==='range')values[f.id]=f.min??0;if(f.type==='relation'&&f.relForm===parentForm.id&&d.recordId)values[f.id]=d.recordId;});
+  return values;
+}
+function rowEditable(row,cf){return row.isNew?canCreate(store.me,cf.id):canEditRecord(store.me,{formId:cf.id,ownerId:row.ownerId});}
+function sortRowsGrid(g,cf,d){
+  const old=g.rows.filter(r=>!r.isNew),fresh=g.rows.filter(r=>r.isNew);
+  if(!g.sort)return old.concat(fresh);
+  const f=(cf.fields||[]).find(x=>x.id===g.sort.key);if(!f)return old.concat(fresh);
+  const val=r=>{const v=valOf(f,rowRec(r,cf,d),cf);if(v==null||v==='')return null;if(typeof v==='number'||typeof v==='boolean')return Number(v);return fmt(f,v).toLowerCase();};
+  const dir=g.sort.dir==='asc'?1:-1;
+  return old.map(r=>({r,v:val(r)})).sort((a,b)=>{if(a.v==null||b.v==null)return a.v==null&&b.v==null?0:a.v==null?1:-1;return (typeof a.v==='number'&&typeof b.v==='number'?a.v-b.v:String(a.v).localeCompare(String(b.v),undefined,{numeric:true}))*dir;}).map(x=>x.r).concat(fresh);
+}
+function popupSummary(f,v){
+  if(isEmpty(v))return '';
+  if(f.type==='textarea'){const s=String(v);return s.length>36?s.slice(0,36)+'…':s;}
+  return fmt(f,v);
+}
+function gridCell(cf,row,f,d,ro){
+  const ids=`data-grid="${cf.id}" data-row="${row.id}" data-gf="${f.id}"`,v=row.values[f.id],val=v==null?'':esc(v),dis=ro?' disabled':'';
+  const lab=` aria-label="${esc(f.label)}"`;
+  if(f.type==='formula'){const r=calc(cf,f,rowRec(row,cf,d));return `<span class="gcalc" id="gc-${cf.id}-${row.id}-${f.id}">${esc(r.e?'—':fmtCalc(f,r.v))}</span>`;}
+  if(POPUP_TYPES.has(f.type)){const s=popupSummary(f,v);return `<button type="button" class="gpopbtn${s?' has':''}" data-act="grid-cell" data-grid="${cf.id}" data-row="${row.id}" data-fid="${f.id}">${esc(s||(ro?'—':f.type==='signature'?'Sign':'Add'))}</button>`;}
+  switch(f.type){
+    case 'checkbox':return `<input type="checkbox" class="gck" ${ids}${lab}${v?' checked':''}${dis}>`;
+    case 'select':case 'radio':return `<select class="gin" ${ids}${lab}${dis}><option value=""></option>${(f.options||[]).map(o=>`<option${o===v?' selected':''}>${esc(o)}</option>`).join('')}</select>`;
+    case 'relation':{const tf=formById(f.relForm);const rs=tf?recordsOf(tf.id).map(r=>({r,t:recTitle(r,tf)})).sort((x,y)=>x.t.localeCompare(y.t)):[];return `<select class="gin" ${ids}${lab}${dis}><option value=""></option>${rs.map(({r,t})=>`<option value="${r.id}"${r.id===v?' selected':''}>${esc(t)}</option>`).join('')}</select>`;}
+    case 'rating':{const mx=f.max||5;let o='<option value="0">—</option>';for(let i=1;i<=mx;i++)o+=`<option value="${i}"${v===i?' selected':''}>${'★'.repeat(i)}</option>`;return `<select class="gin" ${ids}${lab}${dis}>${o}</select>`;}
+    case 'number':case 'decimal':case 'currency':case 'percent':case 'range':return `<input class="gin num" type="number" step="any" inputmode="decimal" ${ids}${lab} value="${val}"${dis}>`;
+    case 'date':return `<input class="gin" type="date" ${ids}${lab} value="${val}"${dis}>`;
+    case 'time':return `<input class="gin" type="time" ${ids}${lab} value="${val}"${dis}>`;
+    case 'datetime':return `<input class="gin" type="datetime-local" ${ids}${lab} value="${val}"${dis}>`;
+    case 'color':return `<input class="gin" type="color" ${ids}${lab} value="${esc(v||'#3346c8')}"${dis}>`;
+    case 'email':return `<input class="gin" type="email" ${ids}${lab} value="${val}"${dis}>`;
+    case 'phone':return `<input class="gin" type="tel" ${ids}${lab} value="${val}"${dis}>`;
+    default:return `<input class="gin" type="text" ${ids}${lab} value="${val}"${dis}>`;
+  }
+}
+function gridTotal(cf,f,d,rows){
+  const sum=GRID_SUM.has(f.type)||(f.type==='formula'&&['number','decimal','currency'].includes(f.format||'decimal'));
+  if(!sum)return null;
+  let s=0,n=0;rows.forEach(r=>{const v=valOf(f,rowRec(r,cf,d),cf);if(typeof v==='number'&&isFinite(v)){s+=v;n++;}});
+  return n?s:null;
+}
+function gridSection(form,rel,cf,d,parentRo){
+  const g=d.grids[cf.id];const cols=gridCols(rel,cf);
+  const rows=sortRowsGrid(g,cf,d);
+  const mayAdd=!parentRo&&canCreate(store.me,cf.id);
+  const errs=[];
+  const body=rows.map((row,i)=>{
+    const ro=parentRo||!rowEditable(row,cf);
+    const bad=row.errors&&Object.keys(row.errors).length;
+    if(bad)Object.entries(row.errors).forEach(([fid,m])=>{const f=cf.fields.find(x=>x.id===fid);errs.push(`Row ${i+1}: ${f?f.label+' – ':''}${m}`);});
+    return `<tr class="${row.isNew?'gnew':''}${bad?' gbad':''}" data-growid="${row.id}">${cols.map(f=>`<td class="${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?'num':''}${row.errors?.[f.id]?' bad':''}">${gridCell(cf,row,f,d,ro)}</td>`).join('')}
+      <td class="gact">${row.isNew?'':`<button type="button" class="ibtn" data-act="open-record" data-id="${row.id}" aria-label="Open this row on its own" title="Open on its own">↗</button>`}${ro?'':`<button type="button" class="ibtn" data-act="grid-del" data-grid="${cf.id}" data-row="${row.id}" aria-label="Delete row ${i+1}" title="Delete row">✕</button>`}</td></tr>`;
+  }).join('');
+  const totals=cols.map(f=>gridTotal(cf,f,d,rows));
+  const showTot=rows.length>1&&totals.some(t=>t!=null);
+  const head=cols.map(f=>{const on=g.sort?.key===f.id;return `<th${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?' class="num"':''} aria-sort="${on?(g.sort.dir==='asc'?'ascending':'descending'):'none'}"><button type="button" class="ghb${on?' on':''}" data-act="grid-sort" data-grid="${cf.id}" data-key="${f.id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}<span class="arr" aria-hidden="true">${on?(g.sort.dir==='asc'?'▲':'▼'):''}</span></button></th>`;}).join('');
+  return `<section class="section gsec" id="grid-${cf.id}"><div class="section-h"><h2>${badge(cf)}${esc(cf.name)} <span class="count">${rows.length}</span></h2><span class="chip acc">Grid</span></div>
+    <div class="panel"><div class="gwrap"><table class="gtbl"><thead><tr>${head}<th class="gact"><span class="sr">Row actions</span></th></tr></thead>
+      <tbody>${body||`<tr><td class="gempty" colspan="${cols.length+1}">No ${esc(cf.name.toLowerCase())} yet.</td></tr>`}</tbody>
+      ${showTot?`<tfoot><tr>${cols.map((f,i)=>`<td class="num" id="gt-${cf.id}-${f.id}">${totals[i]==null?(i===0?'Total':''):esc(f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i]))}</td>`).join('')}<td></td></tr></tfoot>`:''}
+    </table></div>
+    ${errs.length?`<div class="gerrs" role="alert">${errs.slice(0,6).map(e=>`<p>${esc(e)}</p>`).join('')}</div>`:''}
+    <div class="gfoot">${mayAdd?`<button type="button" class="btn sm" data-act="grid-add" data-grid="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}<span class="help">${g.sort?'Click a heading again to reverse. ':'Click a heading to sort. '}${mayAdd?'New rows stay at the bottom until you save.':''}</span></div></div></section>`;
+}
+function refreshGrids(d){
+  if(!d?.grids)return;
+  const form=formById(d.formId);if(!form)return;
+  gridRels(form).forEach(({rel,cf})=>{
+    const g=d.grids[cf.id];if(!g)return;const cols=gridCols(rel,cf);
+    cols.filter(f=>f.type==='formula').forEach(f=>g.rows.forEach(row=>{const el=document.getElementById(`gc-${cf.id}-${row.id}-${f.id}`);if(el){const r=calc(cf,f,rowRec(row,cf,d));el.textContent=r.e?'—':fmtCalc(f,r.v);}}));
+    cols.forEach(f=>{const el=document.getElementById(`gt-${cf.id}-${f.id}`);if(!el)return;const t=gridTotal(cf,f,d,g.rows);if(t!=null)el.textContent=f.type==='formula'?fmtCalc(f,t):fmt(f,t);});
+  });
+}
+function setGridVal(t){
+  const d=rdraft;const g=d?.grids?.[t.dataset.grid];if(!g)return;
+  const row=g.rows.find(r=>r.id===t.dataset.row);const cf=formById(t.dataset.grid);const f=cf?.fields.find(x=>x.id===t.dataset.gf);if(!row||!f)return;
+  let v;
+  if(f.type==='checkbox')v=t.checked;
+  else if(f.type==='rating')v=Number(t.value)||0;
+  else if(NUMERIC.has(f.type))v=t.value===''?null:Number(t.value);
+  else v=t.value;
+  row.values[f.id]=v;row.dirty=true;
+  if(row.errors?.[f.id]){delete row.errors[f.id];t.closest('td')?.classList.remove('bad');}
+  markDirty(d);
+}
+function cellPopup(){
+  if(!cdraft)return '';
+  const cf=formById(cdraft.formId);const f=cf?.fields.find(x=>x.id===cdraft._fid);if(!f)return '';
+  return `<div class="fscrim gscrim"><div class="gpop" role="dialog" aria-modal="true" aria-labelledby="gpop-h">
+    <div class="gpop-h"><b id="gpop-h">${esc(cf.name)} · ${esc(f.label)}</b><button class="ibtn" data-act="cell-close" aria-label="Close">✕</button></div>
+    <fieldset class="fset gpop-b" data-scope="cell"${cdraft.readOnly?' disabled':''}>${fieldBlock(f,cdraft.values[f.id],null,'cell')}</fieldset>
+    <div class="gpop-f"><button class="btn primary" data-act="cell-close">Done</button></div></div></div>`;
 }
 
 /* Field rendering */
@@ -390,7 +540,7 @@ function control(f,v,id,scope){
   const mm=(f.min!=null&&f.min!==''?` min="${f.min}"`:'')+(f.max!=null&&f.max!==''?` max="${f.max}"`:'');
   const val=v==null?'':esc(v);
   switch(f.type){
-    case 'formula':{const d=scope==='record'?rdraft:pdraft;const form=d?formOfDraft(d):null;const r=form?calc(form,f,draftRec(d)):{e:''};return `<div class="calc${r.e?' bad':''}" id="calc-${scope}-${f.id}" aria-live="polite">${esc(r.e||fmtCalc(f,r.v)||'—')}</div><span class="fxsrc">= ${esc(f.expr||'')}</span>`;}
+    case 'formula':{const d=draftFor(scope);const form=d?formOfDraft(d):null;const r=form?calc(form,f,d===cdraft?rowRec(cdraft._row,form,rdraft):draftRec(d)):{e:''};return `<div class="calc${r.e?' bad':''}" id="calc-${scope}-${f.id}" aria-live="polite">${esc(r.e||fmtCalc(f,r.v)||'—')}</div><span class="fxsrc">= ${esc(f.expr||'')}</span>`;}
     case 'text':return `<input class="in" type="text" ${a} value="${val}"${ph}>`;
     case 'textarea':return `<textarea class="in" ${a}${ph}>${val}</textarea>`;
     case 'email':return `<input class="in" type="email" inputmode="email" autocomplete="email" ${a} value="${val}"${ph||' placeholder="name@example.com"'}>`;
@@ -420,12 +570,14 @@ function control(f,v,id,scope){
   }
   return '';
 }
-function draftRec(d){return {id:d.recordId||null,formId:d.formId,values:d.values,parentId:d.parentId||null};}
-function refreshCalcs(d){const form=formOfDraft(d);const scope=d===pdraft?'preview':'record';(form?.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const el=document.getElementById(`calc-${scope}-${f.id}`);if(!el)return;const r=calc(form,f,draftRec(d));el.textContent=r.e||fmtCalc(f,r.v)||'—';el.classList.toggle('bad',!!r.e);});}
-function draftOf(el){const s=el.closest('[data-scope]')?.dataset.scope;return s==='record'?rdraft:s==='preview'?pdraft:null;}
+function draftRec(d){return {id:d.recordId||null,formId:d.formId,values:d.values,parentId:d.parentId||null,_draft:d.grids?d:null};}
+const scopeOf=d=>d===pdraft?'preview':d===cdraft&&cdraft?'cell':'record';
+const draftFor=scope=>scope==='record'?rdraft:scope==='cell'?cdraft:scope==='preview'?pdraft:null;
+function refreshCalcs(d){const form=formOfDraft(d);const scope=scopeOf(d);(form?.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const el=document.getElementById(`calc-${scope}-${f.id}`);if(!el)return;const r=calc(form,f,d===cdraft?rowRec(cdraft._row,form,rdraft):draftRec(d));el.textContent=r.e||fmtCalc(f,r.v)||'—';el.classList.toggle('bad',!!r.e);});}
+function draftOf(el){return draftFor(el.closest('[data-scope]')?.dataset.scope);}
 function formOfDraft(d){return d===pdraft?fdraft:formById(d.formId);}
-function repaint(d,f){const scope=d===pdraft?'preview':'record';const el=document.getElementById(`fb-${scope}-${f.id}`);if(!el)return;el.outerHTML=fieldBlock(f,d.values[f.id],d.errors?.[f.id],scope);const c=document.querySelector(`#fb-${scope}-${f.id} canvas[data-sig]`);if(c)initSig(c);}
-function markDirty(d){d.dirty=true;refreshCalcs(d);if(d===rdraft){const n=$('#dirtynote');if(n)n.textContent='Unsaved changes';const b=document.querySelector('[data-act="back"]');if(b)b.textContent='Discard';}}
+function repaint(d,f){const scope=scopeOf(d);const el=document.getElementById(`fb-${scope}-${f.id}`);if(!el)return;el.outerHTML=fieldBlock(f,d.values[f.id],d.errors?.[f.id],scope);const c=document.querySelector(`#fb-${scope}-${f.id} canvas[data-sig]`);if(c)initSig(c);}
+function markDirty(d){d.dirty=true;refreshCalcs(d);if(d===cdraft&&cdraft){cdraft._row.dirty=true;if(cdraft._row.errors)delete cdraft._row.errors[cdraft._fid];markDirty(rdraft);return;}if(d===rdraft)refreshGrids(d);if(d===rdraft){const n=$('#dirtynote');if(n)n.textContent='Unsaved changes';const b=document.querySelector('[data-act="back"]');if(b)b.textContent='Discard';}}
 function setVal(t){
   const d=draftOf(t);if(!d)return;const form=formOfDraft(d);const f=(form?.fields||[]).find(x=>x.id===t.dataset.fid);if(!f)return;
   let v;
@@ -453,7 +605,7 @@ async function onFile(t){
   }catch(e){fb.classList.remove('pending');toast(e?.code==='storage/unauthorized'?'You don’t have permission to upload files to this form.':'The upload failed. Check your connection and try again.');console.error(e);}
 }
 function initSig(c){
-  const scope=c.dataset.scope,d=scope==='record'?rdraft:pdraft;if(!d)return;const fid=c.dataset.sig;
+  const scope=c.dataset.scope,d=draftFor(scope);if(!d)return;const fid=c.dataset.sig;
   const dpr=Math.min(2,window.devicePixelRatio||1),w=c.clientWidth||300;c.width=w*dpr;c.height=160*dpr;
   const ctx=c.getContext('2d');ctx.scale(dpr,dpr);ctx.fillStyle='#fbfbf7';ctx.fillRect(0,0,w,160);
   ctx.strokeStyle='#15182a';ctx.lineWidth=2.2;ctx.lineCap='round';ctx.lineJoin='round';
@@ -487,10 +639,25 @@ function validate(form,vals){
 async function saveRecord(){
   const d=rdraft,form=formById(d.formId);if(d.readOnly){toast('This record is read only for you.');return;}const errs=validate(form,d.values);
   if(Object.keys(errs).length){d.errors=errs;renderMain();toast('Fix the highlighted fields, then save.');document.querySelector('.fld.bad')?.scrollIntoView({block:'center',behavior:'smooth'});return;}
-  (form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,draftRec(d));d.values[f.id]=r.e?null:r.v;});
+  // sub-form rows: check, then work out their calculations
+  const grels=gridRels(form);let rowErr=0;
+  grels.forEach(({cf})=>{const g=d.grids?.[cf.id];if(!g)return;g.rows.forEach(row=>{row.errors={};if(!(row.isNew||row.dirty))return;const e=validate(cf,row.values);if(Object.keys(e).length){row.errors=e;rowErr++;}});});
+  if(rowErr){renderMain();toast(`${rowErr} row${rowErr>1?'s need':' needs'} attention before saving.`);document.querySelector('.gtbl tr.gbad')?.scrollIntoView({block:'center',behavior:'smooth'});return;}
   const now=Date.now(),old=d.recordId?recById(d.recordId):null,id=d.recordId||uid('r');
+  if(!d.recordId)d.recordId=id; // rows' PARENT() and the parent's CHILD…() see the final ID
+  const rowsOut=[],removed=[];
+  grels.forEach(({cf})=>{const g=d.grids?.[cf.id];if(!g)return;
+    g.rows.forEach(row=>{
+      const r=rowRec(row,cf,d);let changed=row.isNew||row.dirty;
+      (cf.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const c=calc(cf,f,r);const v=c.e?null:c.v;if(row.values[f.id]!==v){row.values[f.id]=v;changed=true;}});
+      if(changed&&rowEditable(row,cf))rowsOut.push({id:row.id,formId:cf.id,values:row.values,parentId:id,parentFormId:form.id,createdAt:row.createdAt||now,updatedAt:now});
+    });
+    removed.push(...g.removed);});
+  (form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,draftRec(d));d.values[f.id]=r.e?null:r.v;});
   const rec={id,formId:form.id,values:d.values,parentId:d.parentId||null,parentFormId:d.parentFormId||null,createdAt:old?.createdAt||now,updatedAt:now};
-  try{await store.put('records',rec);}catch(e){console.error(e);toast(e?.code==='permission-denied'?'You don’t have permission to save this record.':'Saving failed. Check your connection and try again.');return;}
+  try{if(rowsOut.length||removed.length)await saveRecordBundle(rec,rowsOut,removed);else await store.put('records',rec);}
+  catch(e){console.error(e);if(!old)d.recordId=null;toast(e?.code==='permission-denied'?'You don’t have permission to save this record or one of its rows.':'Saving failed. Check your connection and try again.');return;}
+  if(rowsOut.length||removed.length){const n=rowsOut.length+removed.length;setTimeout(()=>toast(`Saved with ${n} row change${n>1?'s':''}`),0);}
   d.dirty=false;d.errors={};d.recordId=id;d.copied=0;view.recordId=id;toast('Saved');render();
 }
 
@@ -544,15 +711,34 @@ function viewFormEdit(){
       </main>
     </div>${ui.openField?fieldModal():''}`;
   }else if(ui.tab==='relations'){
-    const others=store.forms.filter(x=>x.id!==f.id).sort(byOrder);
+    const pending=f._newForms||[];
+    const others=[...store.forms.filter(x=>x.id!==f.id),...pending];
     const par=parentsOf(f.id);
     const linkers=[];store.forms.forEach(o=>(o.fields||[]).filter(x=>x.type==='relation'&&x.relForm===f.id).forEach(x=>linkers.push(o.name+' · '+x.label)));
-    body=`<section class="section"><div class="section-h"><h2>Child forms</h2><button class="btn sm" data-act="add-rel">+ Add child form</button></div>
-      <p class="help">From any ${esc(itemName(f).toLowerCase()||'record')}, people can create records in these forms. The new record is attached as its child and listed on the ${esc(itemName(f).toLowerCase()||'record')} page.</p>
-      <div class="panel">${(f.children||[]).length?f.children.map((c,i)=>`<div class="rel"><select class="in" data-crel="${i}" data-cprop="formId" aria-label="Child form">${others.map(o=>`<option value="${o.id}"${o.id===c.formId?' selected':''}>${esc(o.name)}</option>`).join('')}<option value="${f.id}"${c.formId===f.id?' selected':''}>${esc(f.name||'This form')} (itself)</option></select>
+    const noun=esc(itemName(f).toLowerCase()||'record');
+    const relCard=(c,i)=>{
+      const cf=others.find(o=>o.id===c.formId)||(c.formId===f.id?f:null);
+      const isNew=pending.some(x=>x.id===c.formId);
+      const grid=c.display==='grid';
+      const inh=f._inherit&&c.formId in f._inherit?f._inherit[c.formId]:!!cf?.inheritAccess;
+      const colIds=new Set(cf&&grid?gridCols(c,cf).map(x=>x.id):[]);
+      const pick=isNew?`<input class="in" data-crel="${i}" data-cprop="newname" value="${esc(cf.name)}" aria-label="Sub-form name" placeholder="Sub-form name, e.g. Line items">`
+        :`<select class="in" data-crel="${i}" data-cprop="formId" aria-label="Child form">${others.filter(o=>!pending.includes(o)).sort(byOrder).map(o=>`<option value="${o.id}"${o.id===c.formId?' selected':''}>${esc(o.name)}</option>`).join('')}<option value="${f.id}"${c.formId===f.id?' selected':''}>${esc(f.name||'This form')} (itself)</option></select>`;
+      return `<div class="relcard"><div class="rel">${pick}
         <label class="switch"><input type="checkbox" data-crel="${i}" data-cprop="copy"${c.copy?' checked':''}><span class="tr"></span><span>Copy matching fields</span></label>
-        <button class="ibtn" data-act="del-rel" data-i="${i}" aria-label="Remove child form">✕</button></div>`).join(''):`<p class="note">No child forms. Add one to create records from this form.</p>`}</div>
-      <p class="help">“Copy matching fields” fills in any child field whose label and type match a field on the parent.</p></section>
+        <button class="ibtn" data-act="del-rel" data-i="${i}" aria-label="Remove ${esc(cf?.name||'child form')}">✕</button></div>
+        <div class="relopts"><span class="help">Show in the ${noun} as</span><div class="segs" role="group" aria-label="How ${esc(cf?.name||'it')} shows">
+          <button type="button" class="${grid?'on':''}" aria-pressed="${grid}" data-act="rel-display" data-i="${i}" data-v="grid">Grid in the record</button>
+          <button type="button" class="${grid?'':'on'}" aria-pressed="${!grid}" data-act="rel-display" data-i="${i}" data-v="records">Separate records</button></div>
+          ${isNew?'<span class="chip acc">New sub-form · saved with this form</span>':''}</div>
+        ${grid&&cf&&cf.id!==f.id?`<div class="relcols"><span class="help">Grid columns</span><div class="colchecks">${(cf.fields||[]).filter(x=>x.type!=='heading').map(x=>`<label class="colcheck"><input type="checkbox" data-crel="${i}" data-cprop="col" value="${x.id}"${colIds.has(x.id)?' checked':''}><span>${esc(x.label)}</span>${POPUP_TYPES.has(x.type)?'<small>pop-up</small>':x.type==='formula'?'<small>calc</small>':''}</label>`).join('')}</div></div>`:''}
+        ${cf&&cf.id!==f.id?`<label class="switch relinh"><input type="checkbox" data-crel="${i}" data-cprop="inherit"${inh?' checked':''}><span class="tr"></span><span>Rows follow this form’s access</span></label><p class="help">${inh?`Anyone who can see a ${noun} can see its ${esc(cf.name.toLowerCase())}, and editing works the same way. ${esc(cf.name)} no longer has its own row in Security groups.`:`${esc(cf.name)} keeps its own access in Security groups.`}</p>`:''}
+      </div>`;
+    };
+    body=`<section class="section"><div class="section-h"><h2>Sub-forms and child forms</h2><button class="btn sm" data-act="add-rel">+ Add child form</button><button class="btn sm primary" data-act="add-subform">+ New sub-form</button></div>
+      <p class="help">A <b>grid</b> shows the rows inside the ${noun}, saved together with it, like line items. <b>Separate records</b> lists them as cards under the ${noun}; each opens on its own.</p>
+      <div class="panel">${(f.children||[]).length?f.children.map(relCard).join(''):`<p class="note">No sub-forms or child forms yet.</p>`}</div>
+      <p class="help">“Copy matching fields” fills in any child field whose label and type match a field on the parent. Sub-forms go one level deep: a form shown as a grid can’t have grids of its own.</p></section>
       <section class="section"><div class="section-h"><h2>Parents</h2></div><div class="panel"><p class="note">${par.length?`This form is a child of ${par.map(p=>`<b>${esc(p.name)}</b>`).join(', ')}. Its records can belong to one of their records.`:'No form lists this one as a child.'}</p></div></section>
       <section class="section"><div class="section-h"><h2>Linked by fields</h2></div><div class="panel"><p class="note">${linkers.length?'Link-to-record fields that point here: '+linkers.map(esc).join(', ')+'.':'Add a “Link to record” field to any form to point at records in another form, like a lookup.'}</p></div></section>`;
   }else if(ui.tab==='settings'){
@@ -669,11 +855,30 @@ async function saveForm(){
     });});
     if(changed){try{await store.put('forms',{...o,fields});}catch(e){}}
   }
+  // sub-forms: new ones, access inheritance, one-level nesting
+  const pending=(f._newForms||[]).filter(nf=>(f.children||[]).some(c=>c.formId===nf.id));
+  if(pending.some(nf=>!nf.name.trim())){toast('Give the new sub-form a name.');return;}
+  for(const c of (f.children||[]).filter(c=>c.display==='grid')){const cf=formById(c.formId);if(cf&&(cf.children||[]).some(x=>x.display==='grid')){toast(`${cf.name} has grids of its own, so it can’t be a grid here.`);return;}}
+  if((f.children||[]).some(c=>c.display==='grid')&&store.forms.some(o=>o.id!==f.id&&(o.children||[]).some(c=>c.formId===f.id&&c.display==='grid'))){toast('This form is shown as a grid elsewhere, so it can’t hold grids itself.');return;}
+  const inheritChanges=Object.entries(f._inherit||{}).map(([id,v])=>[formById(id),v]).filter(([o,v])=>o&&!!o.inheritAccess!==v);
+  const before=formById(f.id);
+  const kidsKey=x=>JSON.stringify(((x?.children)||[]).map(c=>c.formId).sort());
+  const accessMoves=pending.length||inheritChanges.length||(kidsKey(before)!==kidsKey(f)&&store.forms.some(o=>o.inheritAccess));
+  try{
+    for(const nf of pending){const o=clone(nf);o.name=o.name.trim();o.order=Math.max(0,...store.forms.map(x=>x.order||0))+1;o.updatedAt=Date.now();await store.put('forms',o);}
+    for(const [o,v] of inheritChanges)await store.put('forms',{...o,inheritAccess:v,updatedAt:Date.now()});
+  }catch(e){toast('Saving the sub-forms failed. Check your connection and try again.');return;}
   f._labels=Object.fromEntries(f.fields.map(x=>[x.id,x.label]));
-  const out=clone(f);delete out.dirty;delete out.isNew;delete out._labels;out.name=out.name.trim();
+  const out=clone(f);delete out.dirty;delete out.isNew;delete out._labels;delete out._newForms;delete out._inherit;out.name=out.name.trim();
   if(f.isNew)out.order=Math.max(0,...store.forms.map(x=>x.order||0))+1;
   out.updatedAt=Date.now();
   try{await store.put('forms',out);}catch(e){toast('Saving failed. Check your connection and try again.');return;}
+  f._newForms=[];f._inherit={};
+  if(accessMoves&&isAdmin(store.me)){
+    const changed=new Map([[out.id,{...out,id:out.id}],...pending.map(nf=>[nf.id,nf]),...inheritChanges.map(([o,v])=>[o.id,{...o,inheritAccess:v}])]);
+    const formsAfter=[...store.forms.filter(x=>!changed.has(x.id)),...changed.values()];
+    try{await recomputeAllAccess(formsAfter);}catch(e){toast('Form saved, but people’s access wasn’t updated. Use Recalculate access in Security groups.');f.dirty=false;f.isNew=false;render();return;}
+  }
   f.dirty=false;f.isNew=false;toast('Form saved');render();
 }
 function editForm(id){
@@ -694,6 +899,7 @@ document.addEventListener('click',async e=>{
     case 'nav-form':case 'nav-records':go({name:'records',formId:id});break;
     case 'nav-designer':go({name:'designer'});break;
     case 'nav-reports':go({name:'reports'});break;
+    case 'nav-dashboards':go({name:'dashboards'});break;
     case 'nav-groups':go({name:'groups'});break;
     case 'nav-users':go({name:'users'});break;
     case 'sign-out':if(!guard())return;await signOutUser();break;
@@ -702,6 +908,11 @@ document.addEventListener('click',async e=>{
     case 'open-record':{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});break;}
     case 'add-child':{const parent=recById(view.recordId);const cf=formById(id);if(!parent||!cf)return;if(rdraft?.dirty){toast('Save this record first.');return;}goRec(newRecordDraft(cf,parent),{name:'record',formId:cf.id,recordId:null});break;}
     case 'save-record':saveRecord();break;
+    case 'grid-add':{const cf=formById(el.dataset.grid);const g=rdraft?.grids?.[el.dataset.grid];if(!cf||!g)return;const row={id:uid('r'),values:newRowValues(cf,rdraft,formById(rdraft.formId)),ownerId:store.user.uid,isNew:true,dirty:true,errors:{}};g.rows.push(row);markDirty(rdraft);renderMain();document.querySelector(`tr[data-growid="${row.id}"] .gin, tr[data-growid="${row.id}"] .gck, tr[data-growid="${row.id}"] .gpopbtn`)?.focus();break;}
+    case 'grid-del':{const g=rdraft?.grids?.[el.dataset.grid];if(!g)return;const row=g.rows.find(r=>r.id===el.dataset.row);if(!row)return;g.rows=g.rows.filter(r=>r!==row);if(!row.isNew)g.removed.push(row.id);markDirty(rdraft);renderMain();toast('Row removed. It’s deleted when you save; Discard brings it back.');break;}
+    case 'grid-sort':{const g=rdraft?.grids?.[el.dataset.grid];if(!g)return;const k=el.dataset.key;g.sort=g.sort?.key===k?{key:k,dir:g.sort.dir==='asc'?'desc':'asc'}:{key:k,dir:'asc'};renderMain();document.querySelector(`[data-act="grid-sort"][data-grid="${el.dataset.grid}"][data-key="${k}"]`)?.focus();break;}
+    case 'grid-cell':{const g=rdraft?.grids?.[el.dataset.grid];const cf=formById(el.dataset.grid);const row=g?.rows.find(r=>r.id===el.dataset.row);if(!row||!cf)return;cdraft={formId:cf.id,values:row.values,errors:{},_row:row,_fid:el.dataset.fid,readOnly:rdraft.readOnly||!rowEditable(row,cf)};renderMain();document.querySelector('.gpop [data-scope="cell"] input, .gpop [data-scope="cell"] textarea, .gpop [data-scope="cell"] canvas')?.focus();break;}
+    case 'cell-close':{const back=cdraft&&`[data-act="grid-cell"][data-row="${cdraft._row.id}"][data-fid="${cdraft._fid}"]`;cdraft=null;renderMain();if(back)document.querySelector(back)?.focus();break;}
     case 'task-done':toggleTask(id);break;
     case 'task-open':if(cadenceUrl)window.open(cadenceLink(cadenceUrl,{task:id}),'cadence');break;
     case 'add-task':if(cadenceUrl&&view.recordId)window.open(cadenceLink(cadenceUrl,{addTaskFor:view.recordId}),'cadence');break;
@@ -720,7 +931,26 @@ document.addEventListener('click',async e=>{
     case 'field-dup':{const i=fdraft.fields.findIndex(x=>x.id===id);const c={...clone(fdraft.fields[i]),id:uid('x')};c.label+=' (copy)';fdraft.fields.splice(i+1,0,c);ui.openField=c.id;setFdirty();renderMain();break;}
     case 'field-del':{if(ui.confirm!=='f-'+id){ui.confirm='f-'+id;renderMain();toast('Tap the check to delete this field. Values already saved in records are kept but hidden.');return;}ui.confirm=null;fdraft.fields=fdraft.fields.filter(x=>x.id!==id);if(fdraft.titleField===id)fdraft.titleField='';setFdirty();renderMain();break;}
     case 'add-rel':{const cand=store.forms.find(x=>x.id!==fdraft.id&&!(fdraft.children||[]).some(c=>c.formId===x.id));if(!cand){toast('Create another form first, then add it here as a child.');return;}fdraft.children.push({formId:cand.id,copy:true});setFdirty();renderMain();break;}
-    case 'del-rel':fdraft.children.splice(+el.dataset.i,1);setFdirty();renderMain();break;
+    case 'del-rel':{const [c]=fdraft.children.splice(+el.dataset.i,1);if(c&&fdraft._newForms)fdraft._newForms=fdraft._newForms.filter(x=>x.id!==c.formId);setFdirty();renderMain();break;}
+    case 'add-subform':{
+      const pend=fdraft._newForms=fdraft._newForms||[];
+      const names=new Set([...store.forms,...pend].map(x=>x.name.toLowerCase()));let name='Line items',n=2;while(names.has(name.toLowerCase()))name='Line items '+n++;
+      const qty={...newField('decimal'),label:'Qty',inList:true},price={...newField('currency'),label:'Unit price',inList:true};
+      const nf={id:uid('f'),name,itemName:'Line item',description:'',color:(store.forms.length+pend.length)%COLORS.length,showInSidebar:false,inheritAccess:true,titleField:'',children:[],
+        fields:[{...newField('text'),label:'Description',required:true,inList:true,width:'full'},qty,price,{...newField('formula'),label:'Amount',expr:'{Qty} * {Unit price}',format:'currency',currency:'CAD'}]};
+      nf.titleField=nf.fields[0].id;
+      pend.push(nf);fdraft.children.push({formId:nf.id,copy:false,display:'grid'});setFdirty();renderMain();
+      document.querySelector(`[data-cprop="newname"][data-crel="${fdraft.children.length-1}"]`)?.select();break;}
+    case 'rel-display':{
+      const c=fdraft.children[+el.dataset.i];if(!c)return;
+      if(el.dataset.v==='grid'){
+        const cf=formById(c.formId);
+        if(cf&&(cf.children||[]).some(x=>x.display==='grid')){toast(`${cf.name} has grids of its own. Sub-forms go one level deep.`);return;}
+        const host=store.forms.find(o=>o.id!==fdraft.id&&(o.children||[]).some(x=>x.formId===fdraft.id&&x.display==='grid'));
+        if(host){toast(`${fdraft.name||'This form'} is shown as a grid in ${host.name}, so it can’t hold grids itself.`);return;}
+        if(c.formId===fdraft.id){toast('A form can’t be a grid inside itself.');return;}
+      }
+      c.display=el.dataset.v;setFdirty();renderMain();break;}
     case 'set-color':fdraft.color=+el.dataset.i;setFdirty();renderMain();break;
     case 'save-form':saveForm();break;
     case 'done-form':if(fdraft.dirty&&!ui.leaveOk){ui.leaveOk=true;toast('Tap Discard again to drop your changes.');setTimeout(()=>ui.leaveOk=false,4000);return;}fdraft.dirty=false;go({name:'designer'});break;
@@ -734,6 +964,7 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('input',e=>{
   const t=e.target;
+  if(t.dataset.grid&&t.dataset.gf){if(t.type!=='checkbox'&&t.tagName!=='SELECT')setGridVal(t);return;}
   if(t.id==='search'){ui.search=t.value;const pos=t.selectionStart;renderMain();const s=$('#search');if(s){s.focus();s.setSelectionRange(pos,pos);}return;}
   if(t.dataset.fid&&t.type!=='file'&&!(t.type==='radio'||t.type==='checkbox'))setVal(t);
   if(t.dataset.fprop&&t.dataset.kind!=='bool'){fdraft[t.dataset.fprop]=t.value;setFdirty();}
@@ -748,6 +979,7 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('change',async e=>{
   const t=e.target;
+  if(t.dataset.grid&&t.dataset.gf){setGridVal(t);return;}
   if(t.dataset.fid){if(t.type==='file')return onFile(t);if(t.type==='radio'||t.type==='checkbox'||t.tagName==='SELECT')setVal(t);return;}
   if(t.id==='parent-pick'){const r=t.value?recById(t.value):null;rdraft.parentId=r?.id||null;rdraft.parentFormId=r?.formId||null;markDirty(rdraft);renderMain();return;}
   if(t.dataset.actChange==='toggle-sidebar'){const f=formById(t.dataset.id);if(!f)return;try{await store.put('forms',{...f,showInSidebar:t.checked});toast(t.checked?`${f.name} is in the sidebar`:`${f.name} is hidden from the sidebar`);}catch(err){toast('Could not save that change. Try again.');t.checked=!t.checked;}return;}
@@ -762,9 +994,16 @@ document.addEventListener('change',async e=>{
     if(['type','relForm','required','inList','format'].includes(p)||k==='bool')renderMain();
     return;
   }
-  if(t.dataset.crel!=null){const c=fdraft.children[+t.dataset.crel];if(t.dataset.cprop==='copy')c.copy=t.checked;else c.formId=t.value;setFdirty();renderMain();return;}
+  if(t.dataset.crel!=null){const c=fdraft.children[+t.dataset.crel];const p=t.dataset.cprop;
+    if(p==='copy')c.copy=t.checked;
+    else if(p==='newname'){const nf=(fdraft._newForms||[]).find(x=>x.id===c.formId);if(nf)nf.name=t.value;setFdirty();return;}
+    else if(p==='col'){const cf=formById(c.formId)||(fdraft._newForms||[]).find(x=>x.id===c.formId);if(!cf)return;const cur=gridCols(c,cf).map(x=>x.id);const next=t.checked?[...cur.filter(x=>x!==t.value),t.value]:cur.filter(x=>x!==t.value);const order=(cf.fields||[]).map(x=>x.id);c.cols=next.sort((a,b)=>order.indexOf(a)-order.indexOf(b));if(!c.cols.length){c.cols=cur;t.checked=true;toast('A grid needs at least one column.');return;}}
+    else if(p==='inherit'){fdraft._inherit={...(fdraft._inherit||{}),[c.formId]:t.checked};}
+    else{c.formId=t.value;if(c.display==='grid'){const cf=formById(t.value);if(cf&&(cf.children||[]).some(x=>x.display==='grid'))c.display='records';}delete c.cols;}
+    setFdirty();renderMain();return;}
   await admin.onChange(t);
 });
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cdraft){e.preventDefault();document.querySelector('[data-act="cell-close"]')?.click();}});
 function closeMenu(){$('#side').classList.remove('open');$('#scrim').classList.remove('open');}
 
 async function deleteForm(id){
@@ -876,14 +1115,14 @@ document.addEventListener('pointercancel',endFmDrag);
 /* ---------- Lifecycle (called from main.js) ---------- */
 export function startApp(){
   booted=false;pendingRoute=null;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
-  initReports({fmt,valOf,recTitle,go,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
+  initReports({fmt,valOf,recTitle,go,renderMain,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
   initLists({fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,search:()=>ui.search});
   Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false});
   store.onChange=onData;
   store.onError=(err)=>{if(err?.code==='permission-denied')toast('Some data could not be loaded because of your permissions.');else toast('Lost the connection to the database. Changes will sync when it returns.');};
 }
 export function stopApp(){
-  booted=false;store.onChange=()=>{};$('#app').hidden=true;closeMenu();resetLists();
+  booted=false;store.onChange=()=>{};$('#app').hidden=true;closeMenu();resetLists();forgetDrafts();
   if(tw.unsub){tw.unsub();tw.unsub=null;}tw.recordId=null;
 }
 export { view as currentView, ui, byOrder, formById, recordsOf, renderMain };

@@ -15,7 +15,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { isAdmin, formLevel, effectiveAccess } from './access.js';
+import { isAdmin, formLevel, effectiveAccess, withInherited } from './access.js';
 import { clone } from './util.js';
 
 export const store = {
@@ -31,6 +31,9 @@ export const store = {
   reports: [], // my reports and reports shared with everyone, newest first
   reportsReady: false,
   listViews: [], // saved list views: mine and shared ones, all forms
+  reportDefs: [], // saved reports: mine and shared ones
+  dashboards: [], // dashboards: mine and shared ones
+  dashReady: false,
   listViewsReady: false,
   recordsLoading: new Set(),
   onChange: () => {},
@@ -71,7 +74,7 @@ export async function ensureAccount(user) {
   }
   const name = user.displayName || (user.email || '').split('@')[0] || 'User';
   try {
-    await setDoc(doc(db, 'profiles', user.uid), { displayName: name });
+    await setDoc(doc(db, 'profiles', user.uid), { displayName: name }, { merge: true });
   } catch (e) {
     console.warn('[formwright] profile not saved', e);
   }
@@ -142,6 +145,25 @@ export function startData(user) {
       fail('shared reports')
     )
   );
+  // Saved reports and dashboards: the same two-query pattern.
+  const ready = { reportDefs: false, dashboards: false };
+  const both = (key, label) => {
+    const parts = { mine: [], shared: [] }, got = { mine: false, shared: false };
+    const done = (part) => (s) => {
+      parts[part] = s.docs.map((d) => ({ ...d.data(), id: d.id }));
+      got[part] = true;
+      const m = new Map();
+      [...parts.mine, ...parts.shared].forEach((x) => m.set(x.id, x));
+      store[key] = [...m.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+      ready[key] = got.mine && got.shared;
+      store.dashReady = ready.reportDefs && ready.dashboards;
+      changed();
+    };
+    baseUnsubs.push(onSnapshot(query(collection(db, key), where('ownerId', '==', user.uid)), done('mine'), fail('your ' + label)));
+    baseUnsubs.push(onSnapshot(query(collection(db, key), where('shared', '==', true)), done('shared'), fail('shared ' + label)));
+  };
+  both('reportDefs', 'saved reports');
+  both('dashboards', 'dashboards');
   // Saved list views: the same two-query pattern as reports.
   const vparts = { mine: [], shared: [] }, gotViews = { mine: false, shared: false };
   const mergeViews = () => {
@@ -175,7 +197,7 @@ export function stopData() {
   recordSubs.forEach((s) => s.unsub());
   recordSubs.clear();
   recordsByForm.clear();
-  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false });
+  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, reportDefs: [], dashboards: [], dashReady: false });
   store.recordsLoading.clear();
 }
 
@@ -265,7 +287,12 @@ function flattenRecords() {
 
 /** Update the display name other people see. */
 export async function saveProfileName(userId, displayName) {
-  await setDoc(doc(db, 'profiles', userId), { displayName: String(displayName).slice(0, 120) });
+  await setDoc(doc(db, 'profiles', userId), { displayName: String(displayName).slice(0, 120) }, { merge: true });
+}
+
+/** The dashboard that opens when you start Formwright ('' for none). */
+export async function setHomeDashboard(id) {
+  await setDoc(doc(db, 'profiles', store.user.uid), { homeDashboard: String(id || '').slice(0, 100) }, { merge: true });
 }
 
 /* ---------- Cadence tasks linked to a record ---------- */
@@ -334,6 +361,21 @@ export async function setRecordsValue(recs, fieldId, value) {
   );
 }
 
+/* ---------- Saved reports and dashboards ---------- */
+
+export async function saveReportDef(id, data) { await setDoc(doc(db, 'reportDefs', id), plain(data)); }
+export async function deleteReportDef(id) { await deleteDoc(doc(db, 'reportDefs', id)); }
+export async function saveDashboard(id, data) { await setDoc(doc(db, 'dashboards', id), plain(data)); }
+export async function deleteDashboard(id) { await deleteDoc(doc(db, 'dashboards', id)); }
+
+/** Write a converted old report (its saved reports, then its dashboard), then remove the old one. */
+export async function writeMigration(mig, legacyId) {
+  const ops = mig.reports.map((r) => (b) => b.set(doc(db, 'reportDefs', r.id), plain(r.data)));
+  ops.push((b) => b.set(doc(db, 'dashboards', mig.dashboard.id), plain(mig.dashboard.data)));
+  ops.push((b) => b.delete(doc(db, 'reports', legacyId)));
+  await commitOps(ops);
+}
+
 /* ---------- Writes ---------- */
 
 const plain = (o) => JSON.parse(JSON.stringify(o ?? null));
@@ -351,10 +393,25 @@ async function del(col, id) {
 
 /** Save a record, stamping ownership. Owner and creator never change after creation. */
 export async function putRecord(rec) {
+  await setDoc(doc(db, 'records', rec.id), recordData(rec));
+}
+
+/**
+ * Save a record together with its sub-form rows: rows to write (new or changed) and row
+ * IDs to delete. Up to 450 writes go in one batch, so a normal save is all-or-nothing.
+ */
+export async function saveRecordBundle(rec, rows, removedIds) {
+  const ops = [(b) => b.set(doc(db, 'records', rec.id), recordData(rec))];
+  rows.forEach((r) => ops.push((b) => b.set(doc(db, 'records', r.id), recordData(r))));
+  removedIds.forEach((id) => ops.push((b) => b.delete(doc(db, 'records', id))));
+  await commitOps(ops);
+}
+
+function recordData(rec) {
   const me = store.user.uid;
   const existing = store.records.find((r) => r.id === rec.id);
   const now = Date.now();
-  const data = {
+  return {
     formId: rec.formId,
     values: plain(rec.values || {}),
     parentId: rec.parentId || null,
@@ -365,7 +422,6 @@ export async function putRecord(rec) {
     updatedAt: rec.updatedAt || now,
     updatedBy: me,
   };
-  await setDoc(doc(db, 'records', rec.id), data);
 }
 
 /** Commit many writes in chunks under Firestore's 500-operation batch limit. */
@@ -435,8 +491,8 @@ export async function uploadFile(file, formId) {
 
 /* ---------- Admin: users and groups ---------- */
 
-function accessFor(groupIds, groups) {
-  return effectiveAccess(groups.filter((g) => groupIds.includes(g.id)));
+function accessFor(groupIds, groups, forms = store.forms) {
+  return withInherited(effectiveAccess(groups.filter((g) => groupIds.includes(g.id))), forms);
 }
 
 /**
@@ -477,9 +533,9 @@ export async function setUserRole(userId, role) {
 }
 
 /** Recompute everyone's access from their groups (repair tool). */
-export async function recomputeAllAccess() {
+export async function recomputeAllAccess(forms = store.forms) {
   const ops = store.users.map((u) => (b) =>
-    b.update(doc(db, 'users', u.id), { access: accessFor(u.groups || [], store.groups) })
+    b.update(doc(db, 'users', u.id), { access: accessFor(u.groups || [], store.groups, forms) })
   );
   await commitOps(ops);
 }
