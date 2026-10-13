@@ -1,0 +1,133 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  rowsFor, condHit, periodRange, kpiOf, slicesOf, groupRows, pivotOf, normalizeDef, newDef, defFromWidget,
+  migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, sortRecs, chainFields,
+} from '../../src/dashlogic.js';
+import { parseRoute, routeFor } from '../../src/route.js';
+
+const forms = [
+  { id: 'clients', name: 'Clients', titleField: 'name', children: [{ formId: 'projects' }], fields: [
+    { id: 'name', type: 'text', label: 'Company name' },
+    { id: 'status', type: 'select', label: 'Status', options: ['Lead', 'Active'] }] },
+  { id: 'projects', name: 'Projects', titleField: 'title', children: [{ formId: 'lines', display: 'grid' }], fields: [
+    { id: 'title', type: 'text', label: 'Project name' },
+    { id: 'stage', type: 'select', label: 'Stage', options: ['Scoping', 'In progress', 'Done'] },
+    { id: 'due', type: 'date', label: 'Due date' }] },
+  { id: 'lines', name: 'Line items', titleField: 'desc', children: [], fields: [
+    { id: 'desc', type: 'text', label: 'Description' },
+    { id: 'cat', type: 'select', label: 'Category', options: ['Labour', 'Materials'] },
+    { id: 'amt', type: 'currency', label: 'Amount' },
+    { id: 'tags', type: 'multiselect', label: 'Tags', options: ['A', 'B'] },
+    { id: 'bill', type: 'checkbox', label: 'Billable' }] },
+];
+const T = (s) => new Date(s).getTime();
+const rec = (id, formId, values, parentId = null, createdAt = T('2026-10-05T10:00')) => ({ id, formId, values, parentId, ownerId: 'u1', createdAt });
+const records = [
+  rec('c1', 'clients', { name: 'Acme', status: 'Active' }), rec('c2', 'clients', { name: 'Globex', status: 'Lead' }),
+  rec('p1', 'projects', { title: 'Lobby', stage: 'In progress', due: '2026-10-20' }, 'c1'),
+  rec('p2', 'projects', { title: 'Roof', stage: 'Done', due: '2026-09-02' }, 'c2'),
+  rec('l1', 'lines', { desc: 'Design', cat: 'Labour', amt: 100, tags: ['A'], bill: true }, 'p1', T('2026-10-03T09:00')),
+  rec('l2', 'lines', { desc: 'Panels', cat: 'Materials', amt: 300, tags: ['A', 'B'], bill: false }, 'p1', T('2026-10-08T09:00')),
+  rec('l3', 'lines', { desc: 'Survey', cat: 'Labour', amt: 50, tags: [], bill: true }, 'p2', T('2026-09-12T09:00')),
+];
+const byF = new Map(forms.map((f) => [f.id, f])), byR = new Map(records.map((r) => [r.id, r]));
+const ctx = { forms, records, profiles: {}, formById: (id) => byF.get(id) || null, recById: (id) => byR.get(id) || null, fmt: (f, v) => String(v), recTitle: (r) => r.values.name || r.values.title || r.values.desc };
+const ids = (l) => l.map((r) => r.id).sort().join();
+const NOW = T('2026-10-13T12:00');
+
+test('conditions: AND, OR, is not, multiple choice, yes/no, parent fields', () => {
+  const base = { form: 'lines', measure: { fn: 'count' } };
+  assert.equal(ids(rowsFor(ctx, { ...base, conditions: [{ ref: { form: 'lines', id: 'cat' }, op: 'is', value: 'Labour' }] })), 'l1,l3');
+  assert.equal(ids(rowsFor(ctx, { ...base, conditions: [{ ref: { form: 'lines', id: 'cat' }, op: 'not', value: 'Labour' }] })), 'l2');
+  assert.equal(ids(rowsFor(ctx, { ...base, join: 'or', conditions: [{ ref: { form: 'lines', id: 'cat' }, op: 'is', value: 'Materials' }, { ref: { form: 'clients', id: 'status' }, op: 'is', value: 'Lead' }] })), 'l2,l3');
+  assert.equal(ids(rowsFor(ctx, { ...base, conditions: [{ ref: { form: 'lines', id: 'cat' }, op: 'is', value: 'Labour' }, { ref: { form: 'clients', id: 'status' }, op: 'is', value: 'Active' }] })), 'l1');
+  assert.equal(ids(rowsFor(ctx, { ...base, conditions: [{ ref: { form: 'lines', id: 'tags' }, op: 'is', value: 'B' }] })), 'l2');
+  assert.equal(ids(rowsFor(ctx, { ...base, conditions: [{ ref: { form: 'lines', id: 'bill' }, op: 'is', value: 'No' }] })), 'l2');
+  assert.equal(ids(rowsFor(ctx, { ...base, conditions: [{ ref: { form: 'lines', id: 'tags' }, op: 'is', value: '(blank)' }] })), 'l3');
+  assert.equal(ids(rowsFor(ctx, { ...base, conditions: [{ ref: { form: 'lines', id: 'cat' }, op: 'is', value: '' }] })), 'l1,l2,l3'); // unfinished condition ignored
+  assert.equal(condHit(ctx, byR.get('l1'), { ref: { form: 'projects', id: 'title' }, op: 'is', value: 'Lobby' }), true);
+});
+
+test('dashboard filters reach reports only through linked forms; periods use the report’s date', () => {
+  const def = { form: 'lines', measure: { fn: 'count' } };
+  assert.equal(filterReaches(ctx, def, { form: 'clients', id: 'name' }), true);
+  assert.equal(filterReaches(ctx, { form: 'clients' }, { form: 'lines', id: 'cat' }), false);
+  assert.equal(ids(rowsFor(ctx, def, { fields: [{ ref: { form: 'clients', id: 'name' }, values: ['Acme'] }] })), 'l1,l2');
+  assert.equal(ids(rowsFor(ctx, { form: 'clients' }, { fields: [{ ref: { form: 'lines', id: 'cat' }, values: ['Labour'] }] })), 'c1,c2'); // doesn't reach: ignored
+  const m = periodRange('month', NOW);
+  assert.equal(ids(rowsFor(ctx, def, { range: { from: m.from, to: m.to } })), 'l1,l2'); // by Created on
+  assert.deepEqual(dateRefOf(ctx, { form: 'projects' }), { form: 'projects', id: 'due' });
+  assert.equal(ids(rowsFor(ctx, { form: 'projects' }, { range: { from: m.from, to: m.to } })), 'p1');
+  assert.equal(periodRange('all', NOW), null);
+  const q = periodRange('quarter', NOW);
+  assert.equal(new Date(q.from).getMonth(), 9); assert.equal(new Date(q.prevFrom).getMonth(), 6);
+  const y = periodRange('year', NOW);
+  assert.equal(new Date(y.from).getFullYear(), 2026); assert.equal(new Date(y.prevFrom).getFullYear(), 2025);
+  const d = periodRange('30d', NOW);
+  assert.equal(Math.round((d.to - d.from) / 864e5), 30);
+});
+
+test('KPI compares with the period before', () => {
+  const def = { form: 'lines', type: 'kpi', measure: { fn: 'sum', ref: { form: 'lines', id: 'amt' } }, compare: true };
+  const k = kpiOf(ctx, def, {}, NOW); // this month vs last month
+  assert.equal(k.value, 400); assert.equal(k.prev, 50); assert.equal(Math.round(k.delta), 700);
+  const m = periodRange('month', NOW);
+  const k2 = kpiOf(ctx, def, { periodKey: 'month', range: { from: m.from, to: m.to } }, NOW);
+  assert.equal(k2.value, 400); assert.equal(k2.prevLabel, 'last month');
+  assert.equal(kpiOf(ctx, { ...def, compare: false }, {}, NOW).value, 450);
+});
+
+test('groups, slices, pivots', () => {
+  const def = { form: 'lines', measure: { fn: 'sum', ref: { form: 'lines', id: 'amt' } }, group: { form: 'lines', id: 'cat' } };
+  const list = rowsFor(ctx, def);
+  assert.deepEqual(groupRows(ctx, def, def.group, list).map((g) => [g.key, g.value]), [['Labour', 150], ['Materials', 300]]); // option order
+  assert.deepEqual(slicesOf(ctx, { ...def, group: { form: 'clients', id: 'name' } }, list).map((x) => [x.key, x.value]), [['Acme', 400], ['Globex', 50]]); // largest first
+  assert.deepEqual(slicesOf(ctx, { ...def, conditions: [{ ref: def.group, op: 'not', value: 'Labour' }] }, list).map((x) => x.key), ['Materials']);
+  const p = pivotOf(ctx, { ...def, col: { form: 'projects', id: 'stage' } }, list);
+  assert.deepEqual(p.cols, ['In progress', 'Done']);
+  assert.deepEqual(p.rows.map((r) => [r.key, r.cells, r.total]), [['Labour', [100, 50], 150], ['Materials', [300, null], 300]]);
+  assert.deepEqual(p.colTotals, [400, 50]); assert.equal(p.grand, 450);
+  assert.equal(pivotOf(ctx, { ...def, col: null }, list), null);
+  const s = sortRecs(ctx, list, { form: 'lines', id: 'amt' }, -1);
+  assert.deepEqual(s.map((r) => r.id), ['l2', 'l1', 'l3']);
+});
+
+test('reports fill in what their type needs', () => {
+  const d = normalizeDef(ctx, { form: 'lines', type: 'pivot' });
+  assert.ok(d.group && d.col && (d.group.id !== d.col.id || d.group.form !== d.col.form));
+  assert.deepEqual(normalizeDef(ctx, { form: 'lines', type: 'line' }).time, { form: 'lines', id: '_created' });
+  assert.ok(normalizeDef(ctx, { form: 'lines', type: 'table' }).columns.length >= 2);
+  assert.deepEqual(normalizeDef(ctx, { form: 'lines', type: 'kpi', measure: { fn: 'sum', ref: { form: 'lines', id: 'gone' } } }).measure, { fn: 'count' });
+  assert.equal(newDef(ctx, 'lines').type, 'bar');
+  assert.ok(chainFields(ctx, 'lines').some((x) => x.ref.form === 'clients'));
+});
+
+test('old report canvases become a dashboard of saved reports', () => {
+  const w = { id: 'w1', type: 'bar', form: 'lines', title: null, measure: { fn: 'count' }, group: { form: 'lines', id: 'cat' }, filter: { ref: { form: 'lines', id: 'bill' }, op: 'not', value: 'No' }, cols: 6, rows: 2 };
+  assert.deepEqual(defFromWidget(w).conditions, [{ ref: { form: 'lines', id: 'bill' }, op: 'not', value: 'No' }]);
+  const mig = migrateLegacy({ id: 'R', name: 'Ops', ownerId: 'u1', shared: true, widgets: [w, { id: 'w2', type: 'kpi', form: 'lines', title: 'Lines', measure: { fn: 'count' }, cols: 3, rows: 1 }] }, () => 'Auto');
+  assert.equal(mig.dashboard.id, 'mig-R');
+  assert.deepEqual(mig.dashboard.data.tiles.map((t) => [t.report, t.cols]), [['mig-R-w1', 6], ['mig-R-w2', 3]]);
+  assert.deepEqual(mig.reports.map((r) => r.data.name), ['Auto', 'Lines']);
+  assert.equal(mig.dashboard.data.shared, true);
+});
+
+test('who sees shared items; where a report is used', () => {
+  const memberA = { role: 'member', groups: ['g1'] }, memberB = { role: 'member', groups: [] };
+  const item = { ownerId: 'x', shared: true, groups: ['g1'] };
+  assert.equal(visibleTo(item, memberA, 'a'), true);
+  assert.equal(visibleTo(item, memberB, 'b'), false);
+  assert.equal(visibleTo({ ...item, groups: [] }, memberB, 'b'), true);
+  assert.equal(visibleTo({ ...item, shared: false }, memberA, 'a'), false);
+  assert.equal(visibleTo({ ...item, shared: false }, { role: 'admin' }, 'z'), true);
+  assert.equal(visibleTo({ ...item, shared: false }, memberB, 'x'), true);
+  assert.deepEqual(usedOn([{ id: 'd1', tiles: [{ report: 'r1' }] }, { id: 'd2', tiles: [{ text: {} }] }], 'r1').map((d) => d.id), ['d1']);
+});
+
+test('dashboard addresses', () => {
+  assert.deepEqual(parseRoute('#/dashboards'), { kind: 'dashboards' });
+  assert.deepEqual(parseRoute('#/dashboard/db1'), { kind: 'dashboard', id: 'db1' });
+  assert.equal(routeFor({ name: 'dashboard', dashboardId: 'a b' }), '#/dashboard/a%20b');
+  assert.equal(routeFor({ name: 'dashboards' }), '#/dashboards');
+});

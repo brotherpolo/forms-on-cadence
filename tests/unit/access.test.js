@@ -51,3 +51,23 @@ test('record checks', () => {
 test('administrators have full access', () => {
   assert.deepEqual(formLevel({ uid: 'a', role: 'admin', access: {} }, 'anything'), { view: 'all', edit: 'all' });
 });
+
+import { withInherited, accessParents } from '../../src/access.js';
+
+test('sub-forms that follow their parent get the parent’s access', () => {
+  const forms = [
+    { id: 'projects', children: [{ formId: 'lines', display: 'grid' }, { formId: 'visits' }] },
+    { id: 'orders', children: [{ formId: 'lines', display: 'grid' }] },
+    { id: 'lines', inheritAccess: true },
+    { id: 'visits' },
+  ];
+  const acc = { '*': { view: 'none', edit: 'none' }, projects: { view: 'all', edit: 'own' }, orders: { view: 'own', edit: 'all' }, lines: { view: 'none', edit: 'none' } };
+  const out = withInherited(acc, forms);
+  assert.deepEqual(out.lines, { view: 'all', edit: 'all' }); // most permissive of both parents
+  assert.equal(out.visits, undefined); // keeps its own (the default)
+  assert.deepEqual(accessParents(forms[2], forms).map((f) => f.id), ['projects', 'orders']);
+  assert.deepEqual(accessParents(forms[3], forms), []);
+  // equal to the default: dropped to keep the document small
+  const out2 = withInherited({ '*': { view: 'all', edit: 'all' } }, forms);
+  assert.equal(out2.lines, undefined);
+});
