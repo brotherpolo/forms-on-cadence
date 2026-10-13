@@ -63,7 +63,9 @@ src/
   reports.js, reports.css  Report builder screens
   reportlogic.js           Report maths, joins and the gap-free grid (pure, unit-tested)
   tasks.js                 Cadence task display helpers and links into Cadence (pure)
-  app.js                   Navigation, record list and record screens, form designer
+  lists.js, lists.css      Records list: saved views, columns, filters, select several
+  listlogic.js             List columns, views, sorting, filters and CSV (pure, unit-tested)
+  app.js                   Navigation, record screens, form designer
   admin.js                 Security groups and users screens (admins only)
   auth.js                  Sign-in screen: Google, email and password, password reset
   ui.js, util.js           Shared helpers
@@ -87,6 +89,7 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | `groups/{id}` | `name, description, access{formId or "*": {view, edit}}` | admins |
 | `users/{uid}` | `email, displayName, role, groups[], access{…}, createdAt` | self on first sign-in; admins after |
 | `profiles/{uid}` | `displayName` (readable by everyone signed in, for "Created by") | self |
+| `listViews/{id}` | `formId, name, ownerId, shared, cols[], sort{key, dir}, filters{fieldId: [options]}, density, createdAt, updatedAt` | owner (private); admins (shared, and `dflt-<formId>`) |
 
 Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Signatures are stored inline as small PNG data URLs.
 
@@ -110,6 +113,27 @@ Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Si
 - **Whose data:** a report's numbers are always worked out from the records the *viewer* is allowed to see, so sharing a report never shares records.
 
 Reports are stored in `reports/{id}` (`name`, `ownerId`, `shared`, `widgets`, `createdAt`, `updatedAt`). The rules for them are in the Cadence folder, with the rest.
+
+## Records lists
+
+Each form's list can be set up from the list itself.
+
+- **Columns:** **Columns** opens a picker. Tick fields to show them and use the arrows to reorder. Besides the form's own fields, you can add the parent record (**Belongs to**), fields of the parent (Clients › Status), counts of child records (how many Site visits), and **Last updated**, **Created** and **Created by**. The record's title is always the first column.
+- **Sort:** click a column heading; click again to reverse. Empty values always go last.
+- **Filter:** **Filter** lists the form's choice fields (dropdown, single choice, multiple choice, yes/no). Tick options to show records with any of them; every field you filter must match.
+- **Row height:** Comfortable or Compact.
+- **Saved views:** tabs above the list. When you change anything, **Reset**, **Save view** and **Save as new view** appear.
+  - The first tab, **All …**, is the form's default list. Until an admin saves it, it shows the fields with **Column in the starting list** turned on in the form designer. An admin's **Save view for everyone** changes it for everyone; **View options › Go back to the form's list columns** undoes that.
+  - Your own views are private (**Just me**). Admins can also save a view for everyone, or share or unshare one under **View options**.
+  - The app remembers the last view you used for each form on each device.
+- **Select several:** tick rows (or **select all**, which picks only the rows shown). A bar appears with:
+  - **Set field:** set a dropdown, single choice or yes/no field to the same value on all of them.
+  - **Export CSV:** the selected records with the columns you're showing.
+  - **Delete:** asks first, then gives you about 6 seconds to **Undo** before anything is deleted. Child records stay (without a parent), and linked Cadence tasks show the record as removed. Closing the app during those seconds cancels the delete.
+  - Records you aren't allowed to edit are skipped, and the bar and dialog say how many.
+- **Phones:** the list shows cards with tick boxes, and menus open as a sheet at the bottom.
+
+A view only decides how the list looks. It never shows anyone records they couldn't already see.
 
 ## Links and Cadence tasks
 
