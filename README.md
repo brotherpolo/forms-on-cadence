@@ -67,6 +67,8 @@ src/
   lists.js, lists.css      Records list: saved views, columns, filters, select several
   grids.css                Sub-form grids on the record page
   listlogic.js             List columns, views, sorting, filters and CSV (pure, unit-tested)
+  attach.js, attach.css    Attach existing records to a parent, Attach to…, and Detach
+  attachlogic.js           Which records can be attached, and what attaching or detaching changes (pure, unit-tested)
   imports.js, imports.css  Import screens: templates menu, choose file, match columns, check rows, history and undo
   importlogic.js           Templates, column matching, checking rows, undo plans (pure, unit-tested)
   xlsx.js                  Reads and writes .xlsx and .csv with no extra packages (unit-tested)
@@ -152,6 +154,17 @@ A child form can show **inside** its parent record as an editable grid, like lin
 - **Calculations:** row calculations work as you type (`{Qty} * {Unit price}`), and so do the parent's `CHILDSUM("Line items", "Amount")`, `CHILDCOUNT(…)` and friends. A row's `PARENT("Field")` sees the parent's unsaved values too. Number columns get a total row.
 - **Data:** each row is an ordinary record of the sub-form, with `parentId` pointing at the parent. So rows can be listed, filtered and reported on by themselves, and reports on them can use the parent's fields.
 - Deleting a parent keeps its rows, as with any child records.
+
+### Attaching existing records
+
+Records made on their own (imported line items, say) can be put under a parent later, for any child form, grid or separate records.
+
+- **Attach existing** (under a grid, or in a child section's header) opens a window of the child form's records that aren't on any parent yet. Search, tick, **Attach**. **Include … attached elsewhere** adds ones already under another parent (of any form); attaching those moves them, and the window says from where.
+- In a **grid**, attached rows are saved with the parent, so they also work on a new parent before its first save; Discard undoes them. For **separate records**, attaching saves straight away.
+- **Detach** (the broken-link button on a row or card) takes a record off its parent without deleting it, so it shows up as unattached again. In a grid it happens when you save.
+- From a child form's **list**: tick records, **Attach to…**, pick the parent.
+- With **Copy matching fields** on, attaching fills matching fields that are empty on the child; it never overwrites. "Link to record" fields that point at the parent's form follow the move, and are cleared on detach. Calculations that use `PARENT(…)` are worked out again.
+- You need edit rights on the parent and on the records being attached. Access is per form, so attaching or detaching doesn't change who can see a record.
 
 ## Records lists
 
