@@ -1,6 +1,6 @@
 /* Sub-form grids on the record page, the cell pop-up, and the designer's sub-form options. */
 .gsec .section-h .chip{margin-left:2px}
-.gwrap{overflow-x:auto}
+.gwrap{overflow-x:auto;position:relative} /* keeps hidden screen-reader text inside the scroll box */
 .gtbl{width:100%;border-collapse:collapse;font-size:14px}
 .gtbl th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--sunk)}
 .gtbl th.num{text-align:right}

@@ -263,7 +263,7 @@ function renderSide(){
 function renderMain(){
   const m=$('#main');let h='',title='Formwright';
   if(!store.ready){m.innerHTML='<div class="loading">Loading your forms…</div>';return;}
-  let wide=false;
+  let wide=true; // every screen uses the room it has (up to 1600px); dashboards the whole width
   if(view.name==='reports'){title='Reports';h=viewReportsList();}
   else if(view.name==='report'){title=reportName(view.reportId);h=viewReport(view.reportId);wide=true;}
   else if(view.name==='dashboards'){title='Dashboards';h=viewDashboards();}
@@ -697,7 +697,7 @@ function viewDesigner(){
     return `<div class="fcard">${badge(f,1)}<div class="info"><b>${esc(f.name)}</b><div class="tags"><span class="chip">${(f.fields||[]).filter(x=>x.type!=='heading').length} fields</span><span class="chip">${recordsOf(f.id).length} record${recordsOf(f.id).length===1?'':'s'}</span>${par.length?`<span class="chip acc">Child of ${par.map(p=>esc(p.name)).join(', ')}</span>`:''}${kids.length?`<span class="chip acc">Parent of ${kids.map(k=>esc(k.name)).join(', ')}</span>`:''}${f.showInSidebar?'':'<span class="chip warn">Hidden</span>'}</div></div>
       <div class="ctl"><label class="switch vis"><input type="checkbox" data-act-change="toggle-sidebar" data-id="${f.id}"${f.showInSidebar?' checked':''}><span class="tr"></span><span>Sidebar</span></label>
       <button class="ibtn" data-act="form-move" data-id="${f.id}" data-dir="-1" aria-label="Move up"${i===0?' disabled':''}>↑</button><button class="ibtn" data-act="form-move" data-id="${f.id}" data-dir="1" aria-label="Move down"${i===fs.length-1?' disabled':''}>↓</button>
-      <button class="btn sm" data-act="nav-records" data-id="${f.id}">Records</button><button class="btn sm primary" data-act="edit-form" data-id="${f.id}">Edit</button></div></div>`;}).join('')}</div>`
+      <button class="btn sm" data-act="new-record" data-id="${f.id}" aria-label="Add ${/^[aeiou]/i.test(itemName(f))?'an':'a'} ${esc(itemName(f).toLowerCase())}" title="New ${esc(itemName(f).toLowerCase())}">+ Add</button><button class="btn sm" data-act="nav-records" data-id="${f.id}">Records</button><button class="btn sm primary" data-act="edit-form" data-id="${f.id}">Edit</button></div></div>`;}).join('')}</div>`
   :`<div class="panel empty"><h2>No forms yet</h2><p>Create your first form, or load a set of connected example forms (Clients, Projects, Site visits, Contacts) to see how relationships work.</p><div class="actions"><button class="btn" data-act="load-examples">Load example forms</button><button class="btn primary" data-act="new-form">+ New form</button></div></div>`}`;
 }
 function newField(type){
