@@ -174,7 +174,9 @@ Records made on their own (imported line items, say) can be put under a parent l
 
 ## Records lists
 
-Under a record's fields come its sub-form grids, Tasks and child forms. Their order is set per form in the designer: **Fields** tab › **Under the fields**, with ↑ ↓ on each card (saved as `sectionOrder` on the form; fields always come first for now). New sub-forms and child forms join next to their kind.
+Under a record's fields come its sub-form grids, Tasks and child forms. Their order is set per form in the designer: **Fields** tab › **Under the fields**, by dragging a card by its handle or with ↑ ↓ (saved as `sectionOrder` on the form; fields always come first for now). New sub-forms and child forms join next to their kind.
+
+In the designer, fields and section cards move by dragging their handle (⠿), with a mouse or a finger; only the handle starts a drag, so scrolling never moves anything. With a handle focused, the up and down arrow keys move it one place. Field types are added by tapping them, or by dragging them onto the form with a mouse.
 
 In the designer, **Search field types** at the top of the field types filters as you type (other words work too: "money" finds Currency, "lookup" finds Link to record); **Enter** adds the first match.
 
