@@ -9,6 +9,7 @@ import { parseRoute, routeFor } from './route.js';
 import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts, drillNav, fitTiles } from './dash.js';
 import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { initAttach, openPickChildren, closeAttach } from './attach.js';
+import { titleSortOf } from './listlogic.js';
 import { copyPatch, linkPatch, attachChange, detachChange } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
@@ -417,6 +418,7 @@ function recordMeta(rec){
    Rows live in rdraft.grids[childFormId] = {rows:[{id, values, ownerId, createdAt, isNew, dirty, errors}], removed:[ids], sort}
    and are saved with the parent in one batch (saveRecordBundle). Long text, files, photos,
    signatures, locations and multiple choice open in a pop-up (cdraft) from their cell. */
+const SORT_H={valOf:(f,r,fm)=>valOf(f,r,fm),fmt:(f,v)=>fmt(f,v),recTitle:(r,fm)=>recTitle(r,fm),recById:id=>recById(id),formById:id=>formById(id)};
 const DETACH_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 4 8"/><path d="M8 12h3"/><path d="M3 3l18 18"/></svg>';
 const POPUP_TYPES=new Set(['textarea','file','image','signature','location','multiselect']);
 const GRID_SUM=new Set(['number','decimal','currency']);
@@ -451,7 +453,7 @@ function sortRowsGrid(g,cf,d){
   const old=g.rows.filter(r=>!r.isNew),fresh=g.rows.filter(r=>r.isNew);
   if(!g.sort)return old.concat(fresh);
   const f=(cf.fields||[]).find(x=>x.id===g.sort.key);if(!f)return old.concat(fresh);
-  const val=r=>{const v=valOf(f,rowRec(r,cf,d),cf);if(v==null||v==='')return null;if(typeof v==='number'||typeof v==='boolean')return Number(v);return fmt(f,v).toLowerCase();};
+  const val=r=>{const v=valOf(f,rowRec(r,cf,d),cf);if(v==null||v==='')return null;if(typeof v==='number'||typeof v==='boolean')return Number(v);if(['date','datetime','time'].includes(f.type))return String(v);if(f.type==='relation'){const t=recById(v);return t?titleSortOf(t,formById(t.formId),SORT_H):null;}return fmt(f,v).toLowerCase();};
   const dir=g.sort.dir==='asc'?1:-1;
   return old.map(r=>({r,v:val(r)})).sort((a,b)=>{if(a.v==null||b.v==null)return a.v==null&&b.v==null?0:a.v==null?1:-1;return (typeof a.v==='number'&&typeof b.v==='number'?a.v-b.v:String(a.v).localeCompare(String(b.v),undefined,{numeric:true}))*dir;}).map(x=>x.r).concat(fresh);
 }
@@ -937,7 +939,7 @@ document.addEventListener('click',async e=>{
     case 'grid-attach':{
       const d=rdraft,cf=formById(el.dataset.grid),form=formById(d?.formId),g=d?.grids?.[el.dataset.grid];if(!cf||!g||!form)return;
       const rel=(form.children||[]).find(c=>c.formId===cf.id);
-      openPickChildren({parentForm:form,parentId:d.recordId||null,parentTitle:d.recordId?recTitle({formId:form.id,values:d.values},form):'this new '+itemName(form).toLowerCase(),childForm:cf,exclude:new Set(g.rows.map(r=>r.id)),
+      openPickChildren({parentForm:form,parentId:d.recordId||null,parentValues:d.values,parentTitle:d.recordId?recTitle({formId:form.id,values:d.values},form):'this new '+itemName(form).toLowerCase(),childForm:cf,exclude:new Set(g.rows.map(r=>r.id)),
         onPick:recs=>{
           if(rdraft!==d)return;
           recs.forEach(r=>{const values=clone(r.values||{});if(rel?.copy)Object.assign(values,copyPatch(form,cf,d.values,values));
@@ -960,7 +962,7 @@ document.addEventListener('click',async e=>{
       const parent=recById(view.recordId),cf=formById(id),pf=parent&&formById(parent.formId);if(!parent||!cf||!pf)return;
       if(rdraft?.dirty){toast('Save this record first.');return;}
       const rel=(pf.children||[]).find(c=>c.formId===cf.id);
-      openPickChildren({parentForm:pf,parentId:parent.id,parentTitle:recTitle(parent,pf),childForm:cf,exclude:new Set(store.records.filter(r=>r.parentId===parent.id&&r.formId===cf.id).map(r=>r.id)),
+      openPickChildren({parentForm:pf,parentId:parent.id,parentValues:parent.values||{},parentTitle:recTitle(parent,pf),childForm:cf,exclude:new Set(store.records.filter(r=>r.parentId===parent.id&&r.formId===cf.id).map(r=>r.id)),
         onPick:async recs=>{
           try{await attachRecords(recs.map(r=>withFormulas(cf,r,attachChange(r,parent,pf,cf,!!rel?.copy))));}
           catch(err){console.error('[formwright] attach',err);toast(err?.code==='permission-denied'?'You don’t have permission to change one of those. Nothing was attached.':'Attaching failed. Check your connection and try again.');return false;}

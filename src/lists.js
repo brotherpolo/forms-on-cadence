@@ -106,7 +106,7 @@ export function viewRecords(form) {
   let rows = filtered.map((rec) => ({ rec, title: H.recTitle(rec, form), cells: shown.map((col) => cellOf(col.key, rec, h)) }));
   rows = searchRows(rows, H.search());
   const sk = cfg.sort.key, si = shown.findIndex((x) => x.key === sk);
-  rows.forEach((r) => { r.sortVal = sk === 'title' ? r.title.toLowerCase() : si >= 0 ? r.cells[si].sort : cellOf(sk, r.rec, h).sort; });
+  rows.forEach((r) => { r.sortVal = sk === 'title' ? cellOf('title', r.rec, h).sort : si >= 0 ? r.cells[si].sort : cellOf(sk, r.rec, h).sort; });
   rows = sortRows(rows, cfg.sort.dir);
 
   // selection: drop anything that no longer exists
@@ -438,7 +438,7 @@ function exportCsv() {
   const recs = H.recordsOf(form.id).filter((r) => LV.sel.has(r.id));
   let rows = recs.map((rec) => ({ rec, title: H.recTitle(rec, form), cells: shown.map((col) => cellOf(col.key, rec, h)) }));
   const sk = LV.cfg.sort.key, si = shown.findIndex((x) => x.key === sk);
-  rows.forEach((r) => { r.sortVal = sk === 'title' ? r.title.toLowerCase() : si >= 0 ? r.cells[si].sort : cellOf(sk, r.rec, h).sort; });
+  rows.forEach((r) => { r.sortVal = sk === 'title' ? cellOf('title', r.rec, h).sort : si >= 0 ? r.cells[si].sort : cellOf(sk, r.rec, h).sort; });
   rows = sortRows(rows, LV.cfg.sort.dir);
   const csv = toCsv([c.titleField?.label || 'Title', ...shown.map((x) => x.label)], rows.map((r) => [r.title, ...r.cells.map((x) => x.text)]));
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });

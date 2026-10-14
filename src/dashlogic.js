@@ -282,21 +282,30 @@ export function pivotOf(ctx, def, list) {
 }
 
 /** Value used to sort a table column. */
-export function sortKey(ctx, rec, ref) {
+export function sortKey(ctx, rec, ref, depth = 0) {
   const f = fieldOf(ctx, ref);
   const v = valueOf(ctx, rec, ref);
   if (!f) return null;
   if (['date', 'datetime'].includes(f.type) || ref.id === '_created' || ref.id === '_updated') return timeOf(v);
   if (typeof v === 'number') return v;
-  if (f.type === 'relation') { const t = v && ctx.recById(v); return t ? ctx.recTitle(t).toLowerCase() : null; }
+  if (f.type === 'relation') { const t = v && ctx.recById(v); return t ? titleKey(ctx, t, depth) : null; }
   const t = textOf(ctx, f, v);
   return t ? t.toLowerCase() : null;
 }
+
+/** A record's title as a sort key: its title field's real value (a date by calendar, a number by size). */
+export function titleKey(ctx, rec, depth = 0) {
+  const form = rec && ctx.formById(rec.formId);
+  const tf = form && titleFieldOf(form);
+  if (!tf || depth > 4) return rec && ctx.recTitle ? String(ctx.recTitle(rec) || '').toLowerCase() || null : null;
+  return sortKey(ctx, rec, { form: form.id, id: tf.id }, depth + 1);
+}
+const natural = (a, b) => (typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }));
 export function sortRecs(ctx, list, ref, dir) {
   if (!ref) return list;
   return list.map((r) => ({ r, k: sortKey(ctx, r, ref) })).sort((a, b) => {
     if (a.k == null || b.k == null) return a.k == null && b.k == null ? 0 : a.k == null ? 1 : -1;
-    return (a.k > b.k ? 1 : a.k < b.k ? -1 : 0) * (dir < 0 ? -1 : 1);
+    return natural(a.k, b.k) * (dir < 0 ? -1 : 1);
   }).map((x) => x.r);
 }
 

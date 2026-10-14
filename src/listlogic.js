@@ -12,6 +12,8 @@
 //   filters  { <fieldId>: [option, …] }    choice fields only; a record matches any ticked option
 //   density  'cozy' | 'compact'
 
+import { titleFieldOf } from './reportlogic.js';
+
 export const NOCOL = new Set(['heading', 'signature']);
 export const NUMERIC = new Set(['number', 'decimal', 'currency', 'percent', 'range', 'rating']);
 export const FILTERABLE = new Set(['select', 'radio', 'multiselect', 'checkbox']);
@@ -105,12 +107,38 @@ export function filterCount(cfg) {
 
 const shortDate = (t) => (t ? new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '');
 
-function sortValueOf(f, v, text) {
+/** A "Link to record" value sorts by the linked record's title value. */
+function relSort(f, v, h) {
+  if (!f || f.type !== 'relation' || !v || !h.recById) return undefined;
+  const t = h.recById(v);
+  return t ? titleSortOf(t, h.formById ? h.formById(t.formId) : null, h) : null;
+}
+
+export function sortValueOf(f, v, text) {
   if (v == null || v === '') return null;
   if (f && (NUMERIC.has(f.type) || f.type === 'formula') && typeof v === 'number') return v;
   if (f && f.type === 'checkbox') return v ? 1 : 0;
   if (f && (f.type === 'date' || f.type === 'datetime' || f.type === 'time')) return String(v);
   return text ? text.toLowerCase() : null;
+}
+
+/**
+ * A record's title as a sort key: its title field's real value, so a date title sorts by
+ * calendar and a number title by size, not by the text shown. Blank titles sort last.
+ * h: { valOf, fmt, recTitle }
+ */
+export function titleSortOf(rec, form, h, depth = 0) {
+  if (!rec || !form || depth > 4) return null;
+  const tf = titleFieldOf(form);
+  if (tf) {
+    const v = h.valOf(tf, rec, form);
+    if (v == null || v === '' || (Array.isArray(v) && !v.length)) return null;
+    if (tf.type === 'relation') { const t = h.recById?.(v); return titleSortOf(t, t && h.formById?.(t.formId), h, depth + 1); }
+    const k = sortValueOf(tf, v, h.fmt(tf, v));
+    if (k != null) return k;
+  }
+  const t = h.recTitle(rec, form);
+  return t ? t.toLowerCase() : null;
 }
 
 /**
@@ -123,19 +151,19 @@ const oneLine = (f, t) => (f.type === 'textarea' ? String(t ?? '').replace(/\s*\
 export function cellOf(key, rec, h) {
   if (key === 'title') {
     const t = h.recTitle(rec, h.form);
-    return { text: t, sort: t.toLowerCase(), num: false };
+    return { text: t, sort: titleSortOf(rec, h.form, h), num: false };
   }
   if (key === 'parent') {
     const p = rec.parentId ? h.recById(rec.parentId) : null;
     const t = p ? h.recTitle(p) : '';
-    return { text: t, sort: t ? t.toLowerCase() : null, num: false };
+    return { text: t, sort: p ? titleSortOf(p, h.formById ? h.formById(p.formId) : null, h) : null, num: false };
   }
   if (key.startsWith('f:')) {
     const f = fieldIn(h.form, key.slice(2));
     if (!f) return { text: '', sort: null, num: false };
     const v = h.valOf(f, rec, h.form);
     const text = oneLine(f, h.fmt(f, v));
-    return { text, sort: sortValueOf(f, v, text), num: isNumField(f), field: f, value: v, long: f.type === 'textarea' };
+    return { text, sort: relSort(f, v, h) ?? sortValueOf(f, v, text), num: isNumField(f), field: f, value: v, long: f.type === 'textarea' };
   }
   if (key.startsWith('p:')) {
     const [, pfId, fid] = key.split(':');
@@ -146,7 +174,7 @@ export function cellOf(key, rec, h) {
     if (!f) return { text: '', sort: null, num: false };
     const v = h.valOf(f, p, pf);
     const text = oneLine(f, h.fmt(f, v));
-    return { text, sort: sortValueOf(f, v, text), num: isNumField(f), field: f, value: v, long: f.type === 'textarea' };
+    return { text, sort: relSort(f, v, h) ?? sortValueOf(f, v, text), num: isNumField(f), field: f, value: v, long: f.type === 'textarea' };
   }
   if (key.startsWith('kids:')) {
     const n = h.kids(rec.id, key.slice(5));

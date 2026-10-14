@@ -335,7 +335,7 @@ function drillData(c, dd) {
   const q = dd.q.trim().toLowerCase();
   if (q) rows = rows.filter((rec) => [c.recTitle(rec), ...cols.map((r) => cellText(c, r, rec))].join(' ').toLowerCase().includes(q));
   if (dd.sort) {
-    if (dd.sort.i < 0) rows = rows.slice().sort((a, b) => c.recTitle(a).localeCompare(c.recTitle(b), undefined, { numeric: true }) * dd.sort.dir);
+    if (dd.sort.i < 0) { const tf = titleFieldOf(c.formById(def.form) || {}); rows = tf ? sortRecs(c, rows, { form: def.form, id: tf.id }, dd.sort.dir) : rows; }
     else rows = sortRecs(c, rows, cols[dd.sort.i] || cols[0], dd.sort.dir);
   }
   return { cols, rows, all };

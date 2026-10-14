@@ -36,7 +36,7 @@ body.at-open{overflow:hidden}
   .at-scrim{padding:0;place-items:stretch}
   .at-dlg{border-radius:0;max-height:none;height:100dvh;width:100%}
   .at-tbl td:nth-child(n+4),.at-tbl th:nth-child(n+4){display:none}
-  .at-tbl td.at-from,.at-tbl th:last-child{display:table-cell}
+  .at-tbl td.at-from,.at-tbl th.at-fromh{display:table-cell}
   .at-foot .btn{flex:1}
 }
 
@@ -45,3 +45,42 @@ body.at-open{overflow:hidden}
 .at-card > .card{flex:1;padding-right:44px}
 .at-card > .at-det{position:absolute;top:6px;right:6px}
 .gact .at-det{font-size:13px}
+
+/* filters: the suggested match and any others, as chips */
+.at-chips{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:0 20px 12px;border-bottom:1px solid var(--line)}
+.at-lab{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.at-chip{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:3px 3px 3px 12px;border-radius:999px;background:var(--sunk);border:1px solid var(--line-strong);font-size:13.5px;font-weight:500;max-width:100%}
+.at-chip > span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.at-chip.sug{background:var(--accent-soft);border-color:var(--accent);color:var(--fg)}
+.at-chip.sug svg{color:var(--accent);flex:none}
+.at-chip button{width:30px;height:30px;border:0;border-radius:999px;background:none;color:inherit;cursor:pointer;flex:none;font-size:12px}
+.at-chip button:hover,.at-chip button:focus-visible{background:var(--line)}
+.at-tag{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--surface);color:var(--accent);white-space:nowrap}
+.at-add{min-height:36px;padding:6px 12px;border-radius:999px;border:1px dashed var(--line-strong);background:none;color:var(--fg);cursor:pointer;font:inherit;font-size:13.5px}
+.at-add:hover,.at-add[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
+.at-restore{border:0;background:none;padding:0;min-height:36px;color:var(--accent);cursor:pointer;font:inherit;font-size:13.5px;text-decoration:underline;text-underline-offset:2px}
+.at-pop{position:absolute;z-index:5;left:20px;top:calc(100% - 4px);width:min(340px,calc(100% - 40px));max-height:360px;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 16px 36px rgba(10,12,20,.3);padding:6px}
+.at-plab{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 10px 4px}
+.at-popl{overflow:auto;display:flex;flex-direction:column;gap:1px;min-height:0}
+.at-opt{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:40px;padding:6px 10px;border:0;border-radius:8px;background:none;color:var(--fg);cursor:pointer;font:inherit;text-align:left;width:100%}
+.at-opt:hover,.at-opt:focus-within,.at-opt:focus-visible{background:var(--sunk)}
+.at-optl{display:inline-flex;align-items:center;gap:9px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.at-optl input{width:17px;height:17px;accent-color:var(--accent);margin:0;flex:none}
+.at-n{font:12px var(--mono);color:var(--muted)}
+.at-phead{display:flex;align-items:center;gap:4px;padding:0 4px 4px}
+.at-pdone{margin:6px 4px 2px}
+.at-hid{color:var(--muted)}
+.at-none{color:var(--muted);font-size:13.5px;padding:4px 10px}
+
+/* Attach to…: the suggested parent */
+.at-sugwrap{padding:4px 20px 12px}
+.at-sugcard{display:flex;align-items:center;gap:14px;width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line-strong);background:var(--sunk);color:var(--fg);cursor:pointer;font:inherit;text-align:left}
+.at-sugcard.on{border-color:var(--accent);background:var(--accent-soft)}
+.at-sugic{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--surface);color:var(--accent);flex:none}
+.at-sugt{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.at-sugt b{font-size:16px}
+.at-sugm{color:var(--muted)}
+.at-sugw{flex-basis:100%;font-size:13.5px}
+.at-radio{width:20px;height:20px;border-radius:50%;border:2px solid var(--line-strong);flex:none}
+.at-radio.on{border:6px solid var(--accent)}
+@media (max-width:640px){.at-pop{left:12px;width:calc(100% - 24px)}.at-chips{padding:0 12px 12px}.at-sugwrap{padding:4px 12px 12px}}
