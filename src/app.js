@@ -12,6 +12,7 @@ import { initAttach, openPickChildren, closeAttach } from './attach.js';
 import { titleSortOf } from './listlogic.js';
 import { headingOf, readFolds, isFolded, setFold, setFolds, foldKeys } from './foldlogic.js';
 import { sectionOrder, moveSection, TASKS as TASKS_KEY } from './sectionlogic.js';
+import { searchForms } from './navlogic.js';
 import { copyPatch, linkPatch, attachChange, detachChange, searchHit } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey, taskText } from './tasks.js';
@@ -245,15 +246,34 @@ function onData(){
 
 /* ---------- Rendering ---------- */
 export function render(){renderSide();renderMain();}
+/* ---------- the sidebar's form search: no list, a pop-up of matches as you type ---------- */
+function formResults(){
+  const res=searchForms(store.forms,ui.fq,f=>canViewForm(store.me,f.id));
+  ui.fi=Math.min(ui.fi||0,Math.max(0,res.length-1));
+  if(!String(ui.fq||'').trim())return '';
+  if(!res.length)return `<p class="fs-none">No forms match “${esc(ui.fq)}”.</p>`;
+  return res.map(({form:f,at,len},i)=>`<button type="button" class="nav fs-item${i===ui.fi?' hi':''}" id="fs-o${i}" role="option" aria-selected="${i===ui.fi}" data-act="nav-form" data-id="${f.id}" tabindex="-1">${badge(f)}<span class="t">${esc(f.name.slice(0,at))}<mark>${esc(f.name.slice(at,at+len))}</mark>${esc(f.name.slice(at+len))}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join('')+`<p class="fs-hint">Enter opens · Esc closes</p>`;
+}
+function paintFormResults(){
+  const box=$('#fs-res'),q=$('#fs-q');if(!box||!q)return;
+  box.innerHTML=formResults();box.hidden=!String(ui.fq||'').trim();
+  q.setAttribute('aria-expanded',box.hidden?'false':'true');
+  const hi=box.querySelector('.fs-item.hi');if(hi){q.setAttribute('aria-activedescendant',hi.id);hi.scrollIntoView({block:'nearest'});}else q.removeAttribute('aria-activedescendant');
+}
 function renderSide(){
+  const fsFocus=document.activeElement?.id==='fs-q'?document.activeElement.selectionStart:null; // a redraw while searching keeps the cursor
   const fs=sidebarForms();
   const activeForm=(view.name==='records'||view.name==='record')?view.formId:null;
   const me=store.me||{};const name=store.profiles[me.uid]?.displayName||store.user?.displayName||store.user?.email||'You';
   const adm=isAdmin(me);
   $('#side').innerHTML=`
     <div class="brand"><span class="brand-mark"><i></i></span><b>Formwright</b></div>
-    <div class="navlabel">Forms</div>
-    ${fs.length?fs.map(f=>`<button class="nav${activeForm===f.id?' on':''}" data-act="nav-form" data-id="${f.id}">${badge(f)}<span class="t">${esc(f.name)}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join(''):`<div class="nav-empty">No forms to show yet.</div>`}
+    <div class="navlabel" id="fs-lab">Forms</div>
+    <div class="fsearch">
+      <svg class="fs-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      <input type="search" class="in" id="fs-q" role="combobox" aria-autocomplete="list" aria-controls="fs-res" aria-expanded="${ui.fq?'true':'false'}" aria-labelledby="fs-lab" placeholder="Search forms" autocomplete="off" value="${esc(ui.fq||'')}">
+      <div id="fs-res" class="fs-res" role="listbox" aria-label="Forms"${ui.fq?'':' hidden'}>${formResults()}</div>
+    </div>
     <div class="navlabel" style="margin-top:12px">Insights</div>
     <button class="nav${view.name==='dashboards'||view.name==='dashboard'?' on':''}" data-act="nav-dashboards"><span class="glyph navg">▦</span><span class="t">Dashboards</span><span class="n">${counts().dashboards}</span></button>
     <button class="nav${view.name==='reports'||view.name==='report'?' on':''}" data-act="nav-reports"><span class="glyph navg">▤</span><span class="t">Reports</span><span class="n">${counts().reports}</span></button>
@@ -263,6 +283,7 @@ function renderSide(){
     <button class="nav${view.name==='users'?' on':''}" data-act="nav-users"><span class="glyph navg">☺</span><span class="t">Users</span><span class="n">${store.users.length}</span></button>
     <button class="nav${view.name==='imports'?' on':''}" data-act="nav-imports"><span class="glyph navg">⇪</span><span class="t">Import history</span><span class="n">${store.imports.length}</span></button>`:''}
     <div class="side-foot"><div class="who"><b>${esc(name)}</b><span>${adm?'Administrator':'Member'}</span></div><button class="btn sm ghost" data-act="sign-out">Sign out</button></div>`;
+  if(fsFocus!=null){const q=$('#fs-q');if(q){q.focus({preventScroll:true});try{q.setSelectionRange(fsFocus,fsFocus)}catch(e){}paintFormResults();}}
 }
 function renderMain(){
   const m=$('#main');let h='',title='Formwright';
@@ -1023,6 +1044,7 @@ function editForm(id){
 }
 
 /* ---------- Events ---------- */
+document.addEventListener('pointerdown',e=>{if(ui.fq&&!e.target.closest?.('.fsearch')){ui.fq='';ui.fi=0;const q=$('#fs-q');if(q)q.value='';paintFormResults();}},true);
 document.addEventListener('click',async e=>{
   if(e.target.closest('[data-stop]'))return;
   const el=e.target.closest('[data-act]');if(!el)return;
@@ -1031,7 +1053,8 @@ document.addEventListener('click',async e=>{
   switch(a){
     case 'menu':$('#side').classList.add('open');$('#scrim').classList.add('open');break;
     case 'close-menu':closeMenu();break;
-    case 'nav-form':case 'nav-records':go({name:'records',formId:id});break;
+    case 'nav-form':ui.fq='';ui.fi=0;go({name:'records',formId:id});break;
+    case 'nav-records':go({name:'records',formId:id});break;
     case 'nav-designer':go({name:'designer'});break;
     case 'nav-reports':go({name:'reports'});break;
     case 'nav-dashboards':go({name:'dashboards'});break;
@@ -1143,6 +1166,7 @@ document.addEventListener('click',async e=>{
 document.addEventListener('input',e=>{
   const t=e.target;
   if(t.dataset.dzq!==undefined){ui.dzq=t.value;applyDzq();return;}
+  if(t.id==='fs-q'){ui.fq=t.value;ui.fi=0;paintFormResults();return;}
   if(t.dataset.grid&&t.dataset.gf){if(t.type!=='checkbox'&&t.tagName!=='SELECT')setGridVal(t);return;}
   if(t.dataset.ksearch&&rdraft){rdraft.kq={...(rdraft.kq||{}),[t.dataset.ksearch]:t.value};const k=t.dataset.ksearch,pos=t.selectionStart;renderMain();const s=document.querySelector(`[data-ksearch="${CSS.escape(k)}"]`);if(s){s.focus({preventScroll:true});try{s.setSelectionRange(pos,pos)}catch(err){}}return;}
   if(t.id==='search'){ui.search=t.value;const pos=t.selectionStart;renderMain();const s=$('#search');if(s){s.focus();s.setSelectionRange(pos,pos);}return;}
@@ -1184,6 +1208,13 @@ document.addEventListener('change',async e=>{
   await admin.onChange(t);
 });
 document.addEventListener('keydown',e=>{
+  if(e.target?.id==='fs-q'){
+    const items=[...document.querySelectorAll('#fs-res .fs-item')];
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){if(!items.length)return;e.preventDefault();ui.fi=((ui.fi||0)+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;paintFormResults();return;}
+    if(e.key==='Enter'){e.preventDefault();items[ui.fi||0]?.click();return;}
+    if(e.key==='Escape'&&ui.fq){e.preventDefault();ui.fq='';ui.fi=0;e.target.value='';paintFormResults();return;}
+    return;
+  }
   if(e.target?.dataset?.dzq!==undefined){
     if(e.key==='Enter'){e.preventDefault();const first=[...document.querySelectorAll('.dz-types .dz-chip')].find(c=>!c.hidden&&!c.closest('.pgroup')?.hidden);if(first)first.click();return;}
     if(e.key==='Escape'&&e.target.value){e.preventDefault();ui.dzq='';applyDzq();return;}
