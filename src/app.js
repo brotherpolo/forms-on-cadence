@@ -13,7 +13,7 @@ import { initAttach, openPickChildren, closeAttach } from './attach.js';
 import { titleSortOf } from './listlogic.js';
 import { headingOf, readFolds, isFolded, setFold, setFolds, foldKeys } from './foldlogic.js';
 import { sectionOrder, moveSection, TASKS as TASKS_KEY } from './sectionlogic.js';
-import { searchForms } from './navlogic.js';
+import { searchForms, allSearchable, designerMatch } from './navlogic.js';
 import { copyPatch, linkPatch, attachChange, detachChange, searchHit } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey, taskText } from './tasks.js';
@@ -149,13 +149,15 @@ export function go(v,push=true){
   if((view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId)))forgetDrafts();
   if(v.name==='record'||v.name==='records')cdraft=null;
   drillNav(v);
-  if(push&&view.name!=='loading')hist.push(view);
-  view=v;closeMenu();syncHash();
+  const pushed=push&&view.name!=='loading';
+  if(pushed){hist.push(view);fwd=[];}
+  view=v;closeMenu();syncHash(pushed);
   if(v.name==='records'){ui.search='';}
   if(v.name==='formEdit'){ui.tab=v.tab||'fields';ui.openField=null;ui.palette=false;ui.dzq='';}
   render();window.scrollTo(0,0);return true;
 }
-export function back(){if(!guard())return;const v=hist.pop();if(v){if(v.name==='record')rdraft=null;go(v,false)}else home()}
+// The in-app Back button goes through the browser's history, so it and the phone's back button always agree
+export function back(){if(backPending)return;if(hist.length&&history.state&&history.state.b===BOOT&&history.state.fw===hist.length){backPending=true;setTimeout(()=>{backPending=false;},600);history.back();return;}if(!guard())return;const v=hist.pop();if(v){if(v.name==='record')rdraft=null;go(v,false)}else home()}
 function sidebarForms(){return store.forms.filter(f=>f.showInSidebar&&canViewForm(store.me,f.id)).sort(byOrder);}
 export function home(){
   const fs=sidebarForms();
@@ -167,14 +169,61 @@ export function home(){
   else go({name:'welcome'},false);
 }
 let booted=false,pendingRoute=null,homeCheck=false;
-/* ---------- Web addresses (#/record/<id>, #/form/<id>) ---------- */
-// The address follows the screen without adding browser history; the in-app Back
-// button keeps its own history. Links from Cadence open a record directly.
-function syncHash(){
-  const h=routeFor(view);
-  if((location.hash||'')===h)return;
-  history.replaceState(null,'',location.pathname+location.search+h);
+/* ---------- Web addresses (#/record/<id>, #/form/<id>) and the back button ----------
+   Each screen you open is a step in the browser's history ({fw: how many screens are behind it}),
+   so the phone's or browser's Back goes one screen back, like the in-app Back button.
+   Below the first screen sits one extra step ({fw:-1}): reaching it shows "Press back again to exit",
+   and a second Back leaves. Links from Cadence open a record directly. */
+let fwd=[],exitArmed=false,exitTimer=null,popIgnore=0,backPending=false;
+const BOOT=Date.now().toString(36); // steps from an earlier page load are left to the browser
+const st=fw=>({fw,b:BOOT});
+const urlFor=v=>location.pathname+location.search+routeFor(v);
+function rearm(){if(!exitArmed)return;exitArmed=false;clearTimeout(exitTimer);history.pushState(st(hist.length),'',urlFor(view));}
+function syncHash(push){
+  rearm();
+  if(push)history.pushState(st(hist.length),'',urlFor(view));
+  else history.replaceState(st(hist.length),'',urlFor(view));
 }
+/** Anything open on top of the screen (a pop-up, the phone menu): Back closes it first. */
+function closeOverlay(){
+  if($('#side')?.classList.contains('open')){closeMenu();return true;}
+  if(fsShown()){closeFormSearch();return true;}
+  const fc=document.querySelector('[data-act="close-field"]');if(fc){fc.click();return true;}
+  if(cdraft){document.querySelector('[data-act="cell-close"]')?.click();return true;}
+  if(document.querySelector('#at-root, #db-dd, .lv-scrim, .lv-pop, .im-scrim')){document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return true;}
+  return false;
+}
+window.addEventListener('popstate',e=>{
+  if(!booted)return;
+  backPending=false;
+  if(popIgnore){popIgnore--;return;}
+  const n=e.state&&e.state.b===BOOT&&typeof e.state.fw==='number'?e.state.fw:null;
+  if(n===null)return; // an address typed or followed by hand: the hashchange handler opens it
+  if(n===-1&&!hist.length){
+    if(closeOverlay()){history.pushState(st(0),'',urlFor(view));return;}
+    // the first screen: warn once; a second Back within a few seconds leaves the app
+    if(dirty()&&!guard()){history.pushState(st(0),'',urlFor(view));return;}
+    exitArmed=true;toast('Press back again to exit');
+    clearTimeout(exitTimer);exitTimer=setTimeout(rearm,3500);
+    return;
+  }
+  const here=hist.length;
+  if(n<here||n===-1){
+    // Back: close a pop-up if one is open; otherwise step back, asking first if there are unsaved changes
+    if(closeOverlay()||!guard()){history.pushState(st(here),'',urlFor(view));return;}
+    const to=Math.max(0,n);let v=null;
+    while(hist.length>to){fwd.push(view);v=hist.pop();if(hist.length>to)view=v;}
+    if(v){if(v.name==='record')rdraft=null;ui.leaveOk=true;go(v,false);}
+    return;
+  }
+  if(n>here){
+    // Forward, after going back
+    const v=fwd.pop();
+    if(!v||!guard()){popIgnore++;history.back();if(v)fwd.push(v);return;}
+    hist.push(view);ui.leaveOk=true;
+    if(!go(v,false)){hist.pop();}
+  }
+});
 /** Open the screen an address names. Returns true once handled (opened, refused or given up). */
 function openRoute(r){
   if(!r)return true;
@@ -214,13 +263,19 @@ window.addEventListener('hashchange',()=>{
   if(!booted)return;
   const r=parseRoute(location.hash);
   if(!r||location.hash===routeFor(view))return;
-  if(dirty()&&!guard()){syncHash();return;}
-  if(!openRoute(r))pendingRoute=r;
+  const foreign=!(history.state&&history.state.b===BOOT); // a new step the browser added for a typed or followed link
+  if(dirty()&&!guard()){if(foreign){popIgnore++;history.back();}else syncHash();return;}
+  // the browser already added a step for this address: count the screen we're leaving as one step back
+  if(foreign&&view.name!=='loading'){hist.push(view);fwd=[];}
+  const n0=hist.length;
+  if(!openRoute(r)){pendingRoute=r;if(foreign&&hist.length===n0){hist.pop();history.replaceState(st(hist.length),'',urlFor(view));}}
 });
 function onData(){
   if(!store.ready)return;
   if(!booted){
     booted=true;$('#boot').hidden=true;$('#app').hidden=false;
+    // the exit step below the first screen (see the back button notes above)
+    if(!(history.state&&history.state.b===BOOT)){history.replaceState(st(-1),'',location.href);history.pushState(st(0),'',location.href);}
     const r=parseRoute(location.hash);
     home();
     homeCheck=!r&&!store.profiles[store.user?.uid];
@@ -248,16 +303,18 @@ function onData(){
 /* ---------- Rendering ---------- */
 export function render(){renderSide();renderMain();}
 /* ---------- the sidebar's form search: no list, a pop-up of matches as you type ---------- */
+const fsShown=()=>!!(ui.fsOpen||String(ui.fq||'').trim());
 function formResults(){
-  const res=searchForms(store.forms,ui.fq,f=>canViewForm(store.me,f.id));
+  const typed=String(ui.fq||'').trim(),can=f=>canViewForm(store.me,f.id);
+  const res=typed?searchForms(store.forms,ui.fq,can):allSearchable(store.forms,can);
   ui.fi=Math.min(ui.fi||0,Math.max(0,res.length-1));
-  if(!String(ui.fq||'').trim())return '';
-  if(!res.length)return `<p class="fs-none">No forms match “${esc(ui.fq)}”.</p>`;
-  return res.map(({form:f,at,len},i)=>`<button type="button" class="nav fs-item${i===ui.fi?' hi':''}" id="fs-o${i}" role="option" aria-selected="${i===ui.fi}" data-act="nav-form" data-id="${f.id}" tabindex="-1">${badge(f)}<span class="t">${esc(f.name.slice(0,at))}<mark>${esc(f.name.slice(at,at+len))}</mark>${esc(f.name.slice(at+len))}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join('')+`<p class="fs-hint">Enter opens · Esc closes</p>`;
+  if(!fsShown())return '';
+  if(!res.length)return typed?`<p class="fs-none">No forms match “${esc(ui.fq)}”.</p>`:`<p class="fs-none">No forms to open yet.</p>`;
+  return res.map(({form:f,at,len},i)=>`<button type="button" class="nav fs-item${i===ui.fi?' hi':''}" id="fs-o${i}" role="option" aria-selected="${i===ui.fi}" data-act="nav-form" data-id="${f.id}" tabindex="-1">${badge(f)}<span class="t">${len?`${esc(f.name.slice(0,at))}<mark>${esc(f.name.slice(at,at+len))}</mark>${esc(f.name.slice(at+len))}`:esc(f.name)}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join('')+`<p class="fs-hint">${typed?'':'Type to narrow · '}↑ ↓ choose · Enter opens · Esc closes</p>`;
 }
 function paintFormResults(){
   const box=$('#fs-res'),q=$('#fs-q');if(!box||!q)return;
-  box.innerHTML=formResults();box.hidden=!String(ui.fq||'').trim();
+  box.innerHTML=formResults();box.hidden=!fsShown();
   q.setAttribute('aria-expanded',box.hidden?'false':'true');
   const hi=box.querySelector('.fs-item.hi');if(hi){q.setAttribute('aria-activedescendant',hi.id);hi.scrollIntoView({block:'nearest'});}else q.removeAttribute('aria-activedescendant');
 }
@@ -282,8 +339,8 @@ function renderSide(){
     <div class="navlabel" id="fs-lab">Forms</div>
     <div class="fsearch">
       <svg class="fs-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-      <input type="search" class="in" id="fs-q" role="combobox" aria-autocomplete="list" aria-controls="fs-res" aria-expanded="${ui.fq?'true':'false'}" aria-labelledby="fs-lab" placeholder="Search forms" autocomplete="off" value="${esc(ui.fq||'')}">
-      <div id="fs-res" class="fs-res" role="listbox" aria-label="Forms"${ui.fq?'':' hidden'}>${formResults()}</div>
+      <input type="search" class="in" id="fs-q" role="combobox" aria-autocomplete="list" aria-controls="fs-res" aria-expanded="${fsShown()?'true':'false'}" aria-labelledby="fs-lab" placeholder="Search forms" autocomplete="off" value="${esc(ui.fq||'')}">
+      <div id="fs-res" class="fs-res" role="listbox" aria-label="Forms"${fsShown()?'':' hidden'}>${formResults()}</div>
     </div>
     <div class="navlabel" style="margin-top:12px">Insights</div>
     <button class="nav${view.name==='dashboards'||view.name==='dashboard'?' on':''}" data-act="nav-dashboards"><span class="glyph navg">▦</span><span class="t">Dashboards</span><span class="n">${counts().dashboards}</span></button>
@@ -799,14 +856,26 @@ async function saveRecord(){
 }
 
 /* Designer */
+/** The designer's search box: narrows the list to forms whose name contains what's typed */
+function designerSearch(fs){
+  const q=String(ui.dq||''),n=fs.filter(f=>designerMatch(f,q)).length;
+  return `<div class="dsearch"><svg class="fs-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg><input type="search" class="in" id="dq" data-ksearch="designer" placeholder="Search forms by name" aria-label="Search forms by name" autocomplete="off" value="${esc(q)}"><span class="help" id="dq-n" role="status">${q.trim()?(n?`${n} of ${fs.length} forms`:`No forms match “${esc(q.trim())}”`):''}</span></div>`;
+}
+/** Filter the designer list in place as you type (no redraw, so the cursor stays put) */
+function applyDq(){
+  const q=String(ui.dq||''),cards=[...document.querySelectorAll('.flist .fcard')];
+  let n=0;cards.forEach(c=>{const on=designerMatch({name:c.dataset.fname},q);c.hidden=!on;if(on)n++;});
+  document.querySelector('.flist')?.classList.toggle('searching',!!q.trim());
+  const s=$('#dq-n');if(s)s.textContent=q.trim()?(n?`${n} of ${cards.length} forms`:`No forms match “${q.trim()}”`):'';
+}
 function viewDesigner(){
   const fs=[...store.forms].sort(byOrder);
   return `
   <div class="head"><div class="ttl"><div><h1>Form designer</h1><p class="sub">Build forms, choose which ones appear in the sidebar, and connect them as parents and children. Hidden forms are still reachable from their parent records. Who can see and edit each form is set in Security groups.</p></div></div>
     <div class="actions"><button class="btn primary" data-act="new-form">+ New form</button></div></div>
-  ${fs.length?`<div class="panel flist">${fs.map((f,i)=>{
+  ${fs.length?`${designerSearch(fs)}<div class="panel flist${String(ui.dq||'').trim()?' searching':''}">${fs.map((f,i)=>{
     const par=parentsOf(f.id),kids=(f.children||[]).map(c=>formById(c.formId)).filter(Boolean);
-    return `<div class="fcard">${badge(f,1)}<div class="info"><b>${esc(f.name)}</b><div class="tags"><span class="chip">${(f.fields||[]).filter(x=>x.type!=='heading').length} fields</span><span class="chip">${recordsOf(f.id).length} record${recordsOf(f.id).length===1?'':'s'}</span>${par.length?`<span class="chip acc">Child of ${par.map(p=>esc(p.name)).join(', ')}</span>`:''}${kids.length?`<span class="chip acc">Parent of ${kids.map(k=>esc(k.name)).join(', ')}</span>`:''}${f.showInSidebar?'':'<span class="chip warn">Hidden</span>'}</div></div>
+    return `<div class="fcard" data-fname="${esc(f.name||'')}"${designerMatch(f,ui.dq)?'':' hidden'}>${badge(f,1)}<div class="info"><b>${esc(f.name)}</b><div class="tags"><span class="chip">${(f.fields||[]).filter(x=>x.type!=='heading').length} fields</span><span class="chip">${recordsOf(f.id).length} record${recordsOf(f.id).length===1?'':'s'}</span>${par.length?`<span class="chip acc">Child of ${par.map(p=>esc(p.name)).join(', ')}</span>`:''}${kids.length?`<span class="chip acc">Parent of ${kids.map(k=>esc(k.name)).join(', ')}</span>`:''}${f.showInSidebar?'':'<span class="chip warn">Hidden</span>'}</div></div>
       <div class="ctl"><label class="switch vis"><input type="checkbox" data-act-change="toggle-sidebar" data-id="${f.id}"${f.showInSidebar?' checked':''}><span class="tr"></span><span>Sidebar</span></label>
       <button class="ibtn" data-act="form-move" data-id="${f.id}" data-dir="-1" aria-label="Move up"${i===0?' disabled':''}>↑</button><button class="ibtn" data-act="form-move" data-id="${f.id}" data-dir="1" aria-label="Move down"${i===fs.length-1?' disabled':''}>↓</button>
       <button class="btn sm" data-act="new-record" data-id="${f.id}" aria-label="Add ${/^[aeiou]/i.test(itemName(f))?'an':'a'} ${esc(itemName(f).toLowerCase())}" title="New ${esc(itemName(f).toLowerCase())}">+ Add</button><button class="btn sm" data-act="nav-records" data-id="${f.id}">Records</button><button class="btn sm primary" data-act="edit-form" data-id="${f.id}">Edit</button></div></div>`;}).join('')}</div>`
@@ -1055,7 +1124,14 @@ function editForm(id){
 }
 
 /* ---------- Events ---------- */
-document.addEventListener('pointerdown',e=>{if(ui.fq&&!e.target.closest?.('.fsearch')){ui.fq='';ui.fi=0;const q=$('#fs-q');if(q)q.value='';paintFormResults();}},true);
+function closeFormSearch(){ui.fq='';ui.fi=0;ui.fsOpen=false;const q=$('#fs-q');if(q)q.value='';paintFormResults();}
+document.addEventListener('pointerdown',e=>{if(fsShown()&&!e.target.closest?.('.fsearch'))closeFormSearch();},true);
+// clicking or tapping into Search forms lists every form you can open; leaving it closes the list
+document.addEventListener('focusin',e=>{
+  if(e.target?.id==='fs-q'){if(!ui.fsOpen){ui.fsOpen=true;ui.fi=0;paintFormResults();}return;}
+  if(fsShown()&&!e.target.closest?.('.fsearch'))closeFormSearch();
+});
+document.addEventListener('click',e=>{if(e.target?.id==='fs-q'&&!ui.fsOpen){ui.fsOpen=true;paintFormResults();}});
 document.addEventListener('click',async e=>{
   if(e.target.closest('[data-stop]'))return;
   const el=e.target.closest('[data-act]');if(!el)return;
@@ -1064,7 +1140,7 @@ document.addEventListener('click',async e=>{
   switch(a){
     case 'menu':$('#side').classList.add('open');$('#scrim').classList.add('open');break;
     case 'close-menu':closeMenu();break;
-    case 'nav-form':ui.fq='';ui.fi=0;go({name:'records',formId:id});break;
+    case 'nav-form':ui.fq='';ui.fi=0;ui.fsOpen=false;if(document.activeElement?.id==='fs-q')document.activeElement.blur();go({name:'records',formId:id});break;
     case 'nav-records':go({name:'records',formId:id});break;
     case 'nav-designer':go({name:'designer'});break;
     case 'nav-reports':go({name:'reports'});break;
@@ -1179,6 +1255,7 @@ document.addEventListener('input',e=>{
   const t=e.target;
   if(t.dataset.dzq!==undefined){ui.dzq=t.value;applyDzq();return;}
   if(t.id==='fs-q'){ui.fq=t.value;ui.fi=0;paintFormResults();return;}
+  if(t.id==='dq'){ui.dq=t.value;applyDq();return;}
   if(t.dataset.grid&&t.dataset.gf){if(t.type!=='checkbox'&&t.tagName!=='SELECT')setGridVal(t);return;}
   if(t.dataset.ksearch&&rdraft){rdraft.kq={...(rdraft.kq||{}),[t.dataset.ksearch]:t.value};const k=t.dataset.ksearch,pos=t.selectionStart;renderMain();const s=document.querySelector(`[data-ksearch="${CSS.escape(k)}"]`);if(s){s.focus({preventScroll:true});try{s.setSelectionRange(pos,pos)}catch(err){}}return;}
   if(t.id==='search'){ui.search=t.value;const pos=t.selectionStart;renderMain();const s=$('#search');if(s){s.focus();s.setSelectionRange(pos,pos);}return;}
@@ -1224,13 +1301,14 @@ document.addEventListener('keydown',e=>{
     const items=[...document.querySelectorAll('#fs-res .fs-item')];
     if(e.key==='ArrowDown'||e.key==='ArrowUp'){if(!items.length)return;e.preventDefault();ui.fi=((ui.fi||0)+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;paintFormResults();return;}
     if(e.key==='Enter'){e.preventDefault();items[ui.fi||0]?.click();return;}
-    if(e.key==='Escape'&&ui.fq){e.preventDefault();ui.fq='';ui.fi=0;e.target.value='';paintFormResults();return;}
+    if(e.key==='Escape'&&fsShown()){e.preventDefault();closeFormSearch();return;}
     return;
   }
   if(e.target?.dataset?.dzq!==undefined){
     if(e.key==='Enter'){e.preventDefault();const first=[...document.querySelectorAll('.dz-types .dz-chip')].find(c=>!c.hidden&&!c.closest('.pgroup')?.hidden);if(first)first.click();return;}
     if(e.key==='Escape'&&e.target.value){e.preventDefault();ui.dzq='';applyDzq();return;}
   }
+  if(e.target?.id==='dq'&&e.key==='Escape'&&e.target.value){e.preventDefault();e.target.value='';ui.dq='';applyDq();}
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cdraft){e.preventDefault();document.querySelector('[data-act="cell-close"]')?.click();}});
 function closeMenu(){$('#side').classList.remove('open');$('#scrim').classList.remove('open');}

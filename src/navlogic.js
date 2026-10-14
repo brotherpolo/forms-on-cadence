@@ -25,3 +25,17 @@ export function searchForms(forms, q, canView) {
     .sort((a, b) => a.at - b.at || (a.form.order ?? 0) - (b.form.order ?? 0) || a.i - b.i)
     .map(({ form, at, len }) => ({ form, at, len }));
 }
+
+/** Every form the sidebar search offers before anything is typed, in the forms' own order. */
+export function allSearchable(forms, canView) {
+  return searchableForms(forms, canView)
+    .map((form, i) => ({ form, i }))
+    .sort((a, b) => (a.form.order ?? 0) - (b.form.order ?? 0) || a.i - b.i)
+    .map(({ form }) => ({ form, at: 0, len: 0 }));
+}
+
+/** The form designer's search: every form (children too) whose name contains what's typed, any case. */
+export function designerMatch(form, q) {
+  const t = String(q || '').trim().toLowerCase();
+  return !t || String((form && form.name) || '').toLowerCase().includes(t);
+}

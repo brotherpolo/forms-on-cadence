@@ -362,3 +362,10 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .side-foot .who{flex:1}
 .theme-btn{width:36px;height:36px;display:grid;place-items:center;border-radius:9px;color:var(--muted);flex:none}
 .theme-btn:hover,.theme-btn:focus-visible{color:var(--fg);background:var(--sunk)}
+
+/* Form designer: search forms by name */
+.dsearch{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 12px}
+.dsearch .fs-ic{position:absolute;left:12px;top:13px;color:var(--muted);pointer-events:none}
+.dsearch .in{flex:1 1 320px;max-width:520px;min-height:42px;padding-left:34px}
+.flist.searching [data-act="form-move"]{display:none}
+.flist .fcard[hidden]{display:none}
