@@ -172,7 +172,7 @@ function bodyHTML(c, def, extra, key) {
     const total = items.reduce((a, b) => a + b.value, 0) || 1;
     let acc = 0;
     const segs = items.map((x, i) => { const a = acc, b = acc + (x.value / total) * 100; acc = b; const gap = Math.min(0.6, (b - a) / 3); return `var(--dc${(i % COLORS) + 1}) ${a.toFixed(2)}% ${(b - gap).toFixed(2)}%, var(--surface) ${(b - gap).toFixed(2)}% ${b.toFixed(2)}%`; }).join(', ');
-    return { caption, html: `<div class="db-donut"><div class="db-ring db-dr" data-d="drillring" data-k="${esc(key)}" data-cuts="${esc(cutsOf(items))}" style="background:conic-gradient(${segs})" role="img" aria-label="${esc(items.map((x) => x.key + ' ' + Math.round((x.value / total) * 100) + '%').join(', '))}"><div class="db-ringc">${esc(fmtShort(c, def, total))}<small>total</small></div></div>
+    return { caption, html: `<div class="db-donut${items.length > 10 ? ' many' : ''}"><div class="db-ring db-dr" data-d="drillring" data-k="${esc(key)}" data-cuts="${esc(cutsOf(items))}" style="background:conic-gradient(${segs})" role="img" aria-label="${esc(items.map((x) => x.key + ' ' + Math.round((x.value / total) * 100) + '%').join(', '))}"><div class="db-ringc">${esc(fmtShort(c, def, total))}<small>total</small></div></div>
       <div class="db-leg" role="list">${items.map((x, i) => `<button type="button" class="db-li db-dr" role="listitem" data-d="drill" data-k="${esc(key)}" data-i="${i}"><span class="db-sw" style="background:var(--dc${(i % COLORS) + 1})"></span><span class="db-lk">${esc(x.key)}</span><span class="db-lv">${esc(fmtMeasure(c, def, x.value))}</span><span class="db-lp">${Math.round((x.value / total) * 100)}%</span></button>`).join('')}</div></div>` };
   }
   if (time) {
@@ -506,6 +506,10 @@ function settingsHTML(c, d) {
   if (['bar', 'donut', 'grouped', 'pivot'].includes(t)) {
     h += `<div class="db-sec"><label class="db-lab">${t === 'pivot' ? 'Rows' : t === 'donut' ? 'Slices' : 'Group by'}</label>${sel('group', groupable.map((x) => opt(refKey(x.ref), lab(x), refKey(def.group && { form: def.group.form, id: def.group.id }))).join(''), '')}${bySel('groupby', def.group, 'Split by')}</div>`;
   }
+  if (t === 'bar' || t === 'donut') {
+    const cur = String(def.limit ?? 8);
+    h += `<div class="db-sec"><label class="db-lab" for="db-limit">${t === 'donut' ? 'Slices shown' : 'Bars shown'}</label>${sel('limit', [['8', 'Top 8, the rest as Other'], ['12', 'Top 12, the rest as Other'], ['20', 'Top 20, the rest as Other'], ['all', 'All of them']].map(([k, l]) => opt(k, l, cur)).join(''), '', ' id="db-limit"')}${t === 'donut' && cur === 'all' ? '<p class="help">With many slices, colours repeat in order; the list beside the chart matches them up.</p>' : ''}</div>`;
+  }
   if (t === 'pivot') h += `<div class="db-sec"><label class="db-lab">Columns</label>${sel('col', groupable.filter((x) => refKey(x.ref) !== refKey(def.group && { form: def.group.form, id: def.group.id }) || x.kind === 'date').map((x) => opt(refKey(x.ref), lab(x), refKey(def.col && { form: def.col.form, id: def.col.id }))).join(''), '')}${bySel('colby', def.col, 'Split by')}</div>`;
   if (t === 'line' || t === 'area') {
     h += `<div class="db-sec"><label class="db-lab">Over time, by</label>${sel('time', dates.map((x) => opt(refKey(x.ref), lab(x), refKey(def.time))).join(''), '')}
@@ -831,6 +835,7 @@ document.addEventListener('change', (e) => {
     case 'colby': changeDef((def) => { if (def.col) def.col = { ...def.col, by: t.value }; }); break;
     case 'time': changeDef((def) => { def.time = refOf(t.value); }); break;
     case 'span': changeDef((def) => { def.span = t.value; }); break;
+    case 'limit': changeDef((def) => { def.limit = t.value === 'all' ? 'all' : +t.value; }); break;
     case 'tfrom': changeDef((def) => { if (t.value) def.from = t.value; else delete def.from; }); break;
     case 'tto': changeDef((def) => { if (t.value) def.to = t.value; else delete def.to; }); break;
     case 'dateRef': changeDef((def) => { def.dateRef = refOf(t.value); }); break;

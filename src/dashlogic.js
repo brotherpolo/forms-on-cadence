@@ -215,7 +215,9 @@ export function slicesOf(ctx, def, list, max = 8) {
   let items = groupRows(ctx, def, def.group, list).map(({ key, value, rows }) => ({ key, value, rows, keys: [key] }));
   const notOne = (def.conditions || []).filter((c) => c.op === 'not' && sameRef(c.ref, def.group)).map((c) => String(c.value));
   if (notOne.length) items = items.filter((x) => !notOne.includes(x.key));
-  const cap = ordered && def.type === 'bar' ? Math.max(max, 60) : max;
+  // def.limit: how many to show before folding the rest into "Other" (8, 12, 20 or 'all')
+  const lim = def.limit === 'all' ? Infinity : [8, 12, 20].includes(+def.limit) ? +def.limit : max;
+  const cap = ordered && def.type === 'bar' ? Math.max(lim, 60) : lim;
   if (items.length > cap) {
     const rest = items.slice(cap - 1);
     const rows = [...new Set(rest.flatMap((x) => x.rows))];
@@ -318,6 +320,8 @@ export function normalizeDef(ctx, def0) {
     if (x && x.kind === 'date') return { form: ref.form, id: ref.id, by: BY_IDS.includes(ref.by) ? ref.by : 'month' };
     return { form: ref.form, id: ref.id };
   };
+  if (!(def.limit === 'all' || [8, 12, 20].includes(+def.limit))) delete def.limit;
+  else if (def.limit !== 'all') def.limit = +def.limit;
   if (['bar', 'donut', 'grouped', 'pivot'].includes(t)) {
     if (!canSplit(def.group)) def.group = pick(['group', 'key']);
     def.group = withBy(def.group);

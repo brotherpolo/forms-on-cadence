@@ -177,3 +177,5 @@ button.db-li:hover{background:var(--accent-soft)}
 .db-dates label{display:flex;flex-direction:column;gap:4px}
 .db-side .db-seg[aria-label="Interval"]{display:flex;flex-wrap:nowrap;align-self:stretch}
 .db-side .db-seg[aria-label="Interval"] button{flex:1;padding:0 6px}
+.db-tile .db-donut,.db-donut.many{align-items:flex-start}
+.db-tile .db-ring,.db-donut.many .db-ring{position:sticky;top:0}
