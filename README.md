@@ -68,6 +68,7 @@ src/
   lists.js, lists.css      Records list: saved views, columns, filters, select several
   grids.css                Sub-form grids on the record page
   listlogic.js             List columns, views, sorting, filters and CSV (pure, unit-tested)
+  navlogic.js              Which forms the sidebar search finds (pure, unit-tested)
   sectionlogic.js          The order of sub-forms, Tasks and child forms under a record's fields (pure, unit-tested)
   foldlogic.js             Which sections are folded on a record page (pure, unit-tested)
   attach.js, attach.css    Attach existing records to a parent, Attach to…, and Detach
@@ -173,6 +174,8 @@ Records made on their own (imported line items, say) can be put under a parent l
 - You need edit rights on the parent and on the records being attached. Access is per form, so attaching or detaching doesn't change who can see a record.
 
 ## Records lists
+
+The sidebar doesn't list forms; **Search forms** under Forms pops up the matching ones as you type (any part of the name, any case; ↑ ↓ to choose, Enter opens, Esc closes). Child and sub-forms are left out unless they're switched on for the sidebar in the form designer, so that switch now decides what a search can find. For the full list, use the form designer.
 
 Under a record's fields come its sub-form grids, Tasks and child forms. Their order is set per form in the designer: **Fields** tab › **Under the fields**, by dragging a card by its handle or with ↑ ↓ (saved as `sectionOrder` on the form; fields always come first for now). New sub-forms and child forms join next to their kind.
 
