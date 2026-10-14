@@ -3,6 +3,7 @@
 A form builder for phone and desktop, running on Firebase.
 
 - **Form designer** with 26 field types: text, long text, email, phone, website, location, whole number, decimal, currency, percent, rating, slider, calculation, date, time, date and time, yes/no, dropdown, single choice, multiple choice, file upload, photo, signature, color, link to record, and section heading.
+  - Each form's row in the designer has **+ Add**, for adding a record to any form, including hidden ones that have no place in the sidebar. Saving returns to the designer.
 - **Sidebar control**: choose which forms appear in the sidebar. Hidden forms stay reachable from their parent records.
 - **Related forms**: parent/child forms ("Add project" from a client), with optional copying of matching fields, plus "Link to record" lookups.
 - **Calculations**: formulas such as `ROUND({Budget} * 1.13, 2)`, `IF(...)`, `DAYS({Due}, TODAY())`, and `CHILDSUM("Projects", "Budget")`.
@@ -170,6 +171,8 @@ Records made on their own (imported line items, say) can be put under a parent l
 - You need edit rights on the parent and on the records being attached. Access is per form, so attaching or detaching doesn't change who can see a record.
 
 ## Records lists
+
+Every screen uses the width it has, up to 1,600 pixels (dashboards use all of it); phones are unchanged.
 
 Sorting goes by the real value everywhere (lists, grids, report tables, drill-downs): dates and times by calendar, numbers by size, text in natural order (Item 2 before Item 10), blanks last. That includes a record's title column when the title field is a date or a number, the parent column, and "Link to record" columns.
 
