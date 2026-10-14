@@ -1,0 +1,54 @@
+/* Sub-form grids on the record page, the cell pop-up, and the designer's sub-form options. */
+.gsec .section-h .chip{margin-left:2px}
+.gwrap{overflow-x:auto;position:relative} /* keeps hidden screen-reader text inside the scroll box */
+.gtbl{width:100%;border-collapse:collapse;font-size:14px}
+.gtbl th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--sunk)}
+.gtbl th.num{text-align:right}
+.gtbl td{padding:3px 4px;border-bottom:1px solid var(--line);vertical-align:middle;min-width:90px}
+.gtbl td.num{text-align:right}
+.gtbl tbody tr:last-child td{border-bottom:0}
+.gtbl tr.gnew td{background:var(--accent-soft)}
+.gtbl tr.gbad td{background:var(--danger-soft)}
+.gtbl td.bad .gin,.gtbl td.bad .gpopbtn{border-color:var(--danger)}
+.gtbl tfoot td{font-weight:600;background:var(--sunk);border-top:2px solid var(--line);padding:8px 10px;font-family:var(--mono);font-size:13px}
+.gtbl .gact,.gtbl th.gact{width:84px;min-width:84px;text-align:right;white-space:nowrap}
+.gtbl .gempty{color:var(--muted);padding:16px;text-align:center}
+.ghb{display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:0 4px;min-height:36px;font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
+th.num .ghb{justify-content:flex-end;width:100%}
+.ghb:hover,.ghb.on{color:var(--fg)}
+.ghb .arr{font-size:9px;width:10px;display:inline-block}
+.gin{width:100%;min-width:0;min-height:38px;border:1px solid transparent;background:transparent;border-radius:6px;padding:0 8px;font:inherit;color:var(--fg)}
+.gin:hover:not(:disabled){border-color:var(--line)}
+.gin:focus{border-color:var(--accent);background:var(--surface);outline:none}
+.gin.num{text-align:right;font-family:var(--mono);font-size:13px}
+.gin:disabled{color:var(--muted)}
+.gck{width:18px;height:18px;accent-color:var(--accent);display:block;margin:0 auto;cursor:pointer}
+.gcalc{display:block;padding:0 8px;font-family:var(--mono);font-size:13px;color:var(--muted);text-align:right}
+.gpopbtn{min-height:34px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px dashed var(--line-strong);background:none;border-radius:7px;padding:0 10px;font:inherit;font-size:13px;color:var(--muted);cursor:pointer}
+.gpopbtn.has{border-style:solid;color:var(--fg)}
+.gerrs{padding:8px 14px;border-top:1px solid var(--line);background:var(--danger-soft);font-size:13px}
+.gerrs p{margin:2px 0}
+.gfoot{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}
+.gfoot .help{margin:0}
+.gscrim{align-items:center}
+.gpop{width:min(560px,100%);max-height:calc(100dvh - 64px);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 36px rgba(0,0,0,.22)}
+.gpop-h{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 16px;border-bottom:1px solid var(--line)}
+.gpop-h b{flex:1}
+.gpop-b{padding:16px;overflow:auto}
+.gpop-f{display:flex;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--line)}
+
+.relcard{border-bottom:1px solid var(--line)}
+.relcard:last-child{border-bottom:0}
+.relcard .rel{border-bottom:0}
+.relopts,.relcols{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:0 16px 12px}
+.relopts .help,.relcols>.help{margin:0}
+.segs{display:inline-flex;border:1px solid var(--line-strong);border-radius:9px;overflow:hidden;background:var(--surface)}
+.segs button{border:0;background:none;padding:0 12px;min-height:36px;font:inherit;font-size:13px;color:var(--muted);cursor:pointer}
+.segs button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.colchecks{display:flex;flex-wrap:wrap;gap:6px}
+.colcheck{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:0 10px;min-height:36px;font-size:13px;cursor:pointer}
+.colcheck input{width:16px;height:16px;accent-color:var(--accent);margin:0}
+.colcheck small{font-size:11px;color:var(--muted)}
+.relinh{margin:0 16px 4px}
+.relcard>.help{margin:0 16px 12px}
+.gtbl select.gin{min-width:130px}

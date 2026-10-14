@@ -1,0 +1,614 @@
+// Data layer: Firestore subscriptions, writes, and Storage uploads.
+// The UI reads the synchronous arrays on `store` and re-renders when `store.onChange` fires.
+
+import { db, storage } from './firebase.js';
+import {
+  collection,
+  doc,
+  query,
+  where,
+  onSnapshot,
+  setDoc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  writeBatch,
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { isAdmin, formLevel, effectiveAccess, withInherited } from './access.js';
+import { clone } from './util.js';
+
+export const store = {
+  mode: 'cloud',
+  ready: false,
+  user: null, // Firebase Auth user
+  me: null, // users/{uid} document + uid
+  forms: [],
+  records: [],
+  profiles: {},
+  groups: [],
+  users: [],
+  reports: [], // my reports and reports shared with everyone, newest first
+  reportsReady: false,
+  listViews: [], // saved list views: mine and shared ones, all forms
+  reportDefs: [], // saved reports: mine and shared ones
+  dashboards: [], // dashboards: mine and shared ones
+  dashReady: false,
+  listViewsReady: false,
+  imports: [], // admins: past imports, newest first
+  recordsLoading: new Set(),
+  onChange: () => {},
+  onError: () => {},
+  put,
+  del,
+};
+
+let baseUnsubs = [];
+let adminUnsubs = [];
+const recordSubs = new Map(); // formId -> { key, unsub }
+const recordsByForm = new Map(); // formId -> records[]
+const got = { forms: false, me: false };
+
+const fail = (where) => (err) => {
+  console.error(`[formwright] ${where}`, err);
+  store.onError(err, where);
+};
+
+function changed() {
+  if (!store.ready && got.forms && got.me) store.ready = true;
+  if (store.ready) store.onChange();
+}
+
+/** Create users/{uid} and profiles/{uid} on first sign-in. */
+export async function ensureAccount(user) {
+  const userRef = doc(db, 'users', user.uid);
+  const snap = await getDoc(userRef);
+  if (!snap.exists()) {
+    await setDoc(userRef, {
+      email: user.email || '',
+      displayName: user.displayName || '',
+      role: 'member',
+      groups: [],
+      access: {},
+      createdAt: Date.now(),
+    });
+  }
+  const name = user.displayName || (user.email || '').split('@')[0] || 'User';
+  try {
+    await setDoc(doc(db, 'profiles', user.uid), { displayName: name }, { merge: true });
+  } catch (e) {
+    console.warn('[formwright] profile not saved', e);
+  }
+}
+
+/** Admins and people in at least one security group. The rules show a brand-new account nothing else. */
+const isMemberMe = () => isAdmin(store.me) || ((store.me && store.me.groups) || []).length > 0;
+let memberUnsubs = [];
+let memberOn = null;
+let memberParts = []; // { start: () => unsubscribe, empty: () => void }
+
+/** Start or stop the listeners that need membership, so a new account asks only for what it may read. */
+function syncMember() {
+  const m = !!store.me && isMemberMe();
+  if (m === memberOn) return;
+  memberOn = m;
+  memberUnsubs.forEach((u) => u());
+  memberUnsubs = [];
+  if (m) memberUnsubs = memberParts.map((x) => x.start());
+  else memberParts.forEach((x) => x.empty());
+}
+
+export function startData(user) {
+  stopData();
+  store.user = user;
+  store.ready = false;
+  got.forms = got.me = false;
+  memberParts = [];
+
+  baseUnsubs.push(
+    onSnapshot(
+      doc(db, 'users', user.uid),
+      (s) => {
+        store.me = s.exists() ? { uid: user.uid, ...s.data() } : null;
+        got.me = true;
+        syncMember();
+        syncAdminSubs();
+        syncRecordSubs();
+        changed();
+      },
+      fail('your account')
+    )
+  );
+  // Form designs and display names: for members only.
+  const onForms = (docs) => { store.forms = docs.map((d) => ({ ...d.data(), id: d.id })); got.forms = true; syncRecordSubs(); changed(); };
+  memberParts.push({ start: () => onSnapshot(collection(db, 'forms'), (s) => onForms(s.docs), fail('forms')), empty: () => onForms([]) });
+  const onProfiles = (docs) => { store.profiles = Object.fromEntries(docs.map((d) => [d.id, d.data()])); changed(); };
+  memberParts.push({ start: () => onSnapshot(collection(db, 'profiles'), (s) => onProfiles(s.docs), fail('profiles')), empty: () => onProfiles([]) });
+
+  /**
+   * Mine plus shared, as two queries, because the rules only let a list through when it asks
+   * for exactly what you may read. The shared half waits for membership.
+   */
+  const pair = (col, label, merge) => {
+    const parts = { mine: [], shared: [] }, have = { mine: false, shared: false };
+    const done = (part) => (snap) => {
+      parts[part] = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+      have[part] = true;
+      const m = new Map();
+      [...parts.mine, ...parts.shared].forEach((x) => m.set(x.id, x));
+      merge([...m.values()], have.mine && have.shared);
+    };
+    baseUnsubs.push(onSnapshot(query(collection(db, col), where('ownerId', '==', user.uid)), done('mine'), fail('your ' + label)));
+    memberParts.push({
+      start: () => onSnapshot(query(collection(db, col), where('shared', '==', true)), done('shared'), fail('shared ' + label)),
+      empty: () => done('shared')({ docs: [] }),
+    });
+  };
+  pair('reports', 'old reports', (list, ok) => { store.reports = list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)); store.reportsReady = ok; changed(); });
+  const ready = { reportDefs: false, dashboards: false };
+  ['reportDefs', 'dashboards'].forEach((key) => pair(key, key === 'reportDefs' ? 'saved reports' : 'dashboards', (list, ok) => {
+    store[key] = list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    ready[key] = ok;
+    store.dashReady = ready.reportDefs && ready.dashboards;
+    changed();
+  }));
+  pair('listViews', 'list views', (list, ok) => { store.listViews = list; store.listViewsReady = ok; changed(); });
+}
+
+export function stopData() {
+  baseUnsubs.forEach((u) => u());
+  baseUnsubs = [];
+  memberUnsubs.forEach((u) => u());
+  memberUnsubs = [];
+  memberOn = null;
+  adminUnsubs.forEach((u) => u());
+  adminUnsubs = [];
+  recordSubs.forEach((s) => s.unsub());
+  recordSubs.clear();
+  recordsByForm.clear();
+  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, imports: [], reportDefs: [], dashboards: [], dashReady: false });
+  store.recordsLoading.clear();
+}
+
+function syncAdminSubs() {
+  const admin = isAdmin(store.me);
+  if (admin && !adminUnsubs.length) {
+    adminUnsubs.push(
+      onSnapshot(
+        collection(db, 'groups'),
+        (s) => {
+          store.groups = s.docs.map((d) => ({ ...d.data(), id: d.id }));
+          changed();
+        },
+        fail('groups')
+      )
+    );
+    adminUnsubs.push(
+      onSnapshot(
+        collection(db, 'imports'),
+        (s) => {
+          store.imports = s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          changed();
+        },
+        fail('import history')
+      )
+    );
+    adminUnsubs.push(
+      onSnapshot(
+        collection(db, 'users'),
+        (s) => {
+          store.users = s.docs.map((d) => ({ ...d.data(), id: d.id }));
+          changed();
+        },
+        fail('users')
+      )
+    );
+  } else if (!admin && adminUnsubs.length) {
+    adminUnsubs.forEach((u) => u());
+    adminUnsubs = [];
+    store.groups = [];
+    store.users = [];
+    store.imports = [];
+  }
+}
+
+/**
+ * Subscribe to the records the person may see, one query per form.
+ * "all" -> every record of the form; "own" -> only records they own.
+ * Queries must match the security rules exactly or Firestore rejects them.
+ */
+function syncRecordSubs() {
+  if (!store.user || !got.me) return;
+  const uidNow = store.user.uid;
+  const want = new Map();
+  for (const f of store.forms) {
+    const view = formLevel(store.me, f.id).view;
+    if (view !== 'none') want.set(f.id, view);
+  }
+  for (const [formId, sub] of recordSubs) {
+    if (want.get(formId) !== sub.key) {
+      sub.unsub();
+      recordSubs.delete(formId);
+      recordsByForm.delete(formId);
+    }
+  }
+  for (const [formId, view] of want) {
+    if (recordSubs.has(formId)) continue;
+    const base = collection(db, 'records');
+    const q =
+      view === 'all'
+        ? query(base, where('formId', '==', formId))
+        : query(base, where('formId', '==', formId), where('ownerId', '==', uidNow));
+    store.recordsLoading.add(formId);
+    const unsub = onSnapshot(
+      q,
+      (s) => {
+        recordsByForm.set(
+          formId,
+          s.docs.map((d) => ({ ...d.data(), id: d.id }))
+        );
+        store.recordsLoading.delete(formId);
+        flattenRecords();
+        changed();
+      },
+      (err) => {
+        store.recordsLoading.delete(formId);
+        fail(`records for form ${formId}`)(err);
+      }
+    );
+    recordSubs.set(formId, { key: view, unsub });
+  }
+  flattenRecords();
+}
+
+function flattenRecords() {
+  store.records = [...recordsByForm.values()].flat();
+}
+
+/** Update the display name other people see. */
+export async function saveProfileName(userId, displayName) {
+  await setDoc(doc(db, 'profiles', userId), { displayName: String(displayName).slice(0, 120) }, { merge: true });
+}
+
+/** The dashboard that opens when you start Formwright ('' for none). */
+export async function setHomeDashboard(id) {
+  await setDoc(doc(db, 'profiles', store.user.uid), { homeDashboard: String(id || '').slice(0, 100) }, { merge: true });
+}
+
+/* ---------- Cadence tasks linked to a record ---------- */
+
+/**
+ * Live list of the Cadence tasks linked to one record that this person owns or is
+ * assigned. Cadence's rules only allow reading tasks you're a member of, so the
+ * query must filter on members. Returns an unsubscribe function.
+ */
+export function watchTasks(recordId, onNext, onError) {
+  const q = query(
+    collection(db, 'tasks'),
+    where('members', 'array-contains', store.user.uid),
+    where('recordId', '==', recordId)
+  );
+  return onSnapshot(q, (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id }))), onError);
+}
+
+/** Tick a task off or reopen it, writing only the fields Cadence's rules let an owner or assignee change. */
+export async function setTaskDone(taskId, patch) {
+  await updateDoc(doc(db, 'tasks', taskId), patch);
+}
+
+/* ---------- Reports ---------- */
+
+/** Save a report you own. Owner never changes. */
+export async function saveReport(rep) {
+  const now = Date.now();
+  const data = plain({
+    name: String(rep.name || 'Untitled report').slice(0, 120) || 'Untitled report',
+    ownerId: store.user.uid,
+    shared: !!rep.shared,
+    widgets: (rep.widgets || []).slice(0, 60),
+    createdAt: rep.createdAt || now,
+    updatedAt: now,
+  });
+  await setDoc(doc(db, 'reports', rep.id), data);
+}
+
+export async function deleteReport(id) {
+  await deleteDoc(doc(db, 'reports', id));
+}
+
+/* ---------- List views and bulk record changes ---------- */
+
+export async function saveListView(id, data) {
+  await setDoc(doc(db, 'listViews', id), plain(data));
+}
+
+export async function deleteListView(id) {
+  await deleteDoc(doc(db, 'listViews', id));
+}
+
+/** Delete many records. Each one is checked by the rules, so pass only ones you may delete. */
+export async function deleteRecords(ids) {
+  await commitOps(ids.map((id) => (b) => b.delete(doc(db, 'records', id))));
+}
+
+/** Set one field to the same value on many records (owner and creator unchanged). */
+export async function setRecordsValue(recs, fieldId, value) {
+  const me = store.user.uid, now = Date.now();
+  await commitOps(
+    recs.map((r) => (b) =>
+      b.update(doc(db, 'records', r.id), { ['values.' + fieldId]: plain(value), updatedAt: now, updatedBy: me })
+    )
+  );
+}
+
+/**
+ * Attach records to a parent, or detach them (parentId null). changes: [{ id, parentId,
+ * parentFormId, set: { fieldId: value } }]. Only the parent link and the listed fields change.
+ */
+export async function attachRecords(changes) {
+  const me = store.user.uid, now = Date.now();
+  await commitOps(changes.map((c) => (b) => {
+    const data = { parentId: c.parentId || null, parentFormId: c.parentFormId || null, updatedAt: now, updatedBy: me };
+    Object.entries(c.set || {}).forEach(([k, v]) => { data['values.' + k] = plain(v); });
+    b.update(doc(db, 'records', c.id), data);
+  }));
+}
+
+/* ---------- Imports (admins) ---------- */
+
+/**
+ * Save an import. The import's record (imports/{id}) is written first and lists every record
+ * it will add or change, so even an import cut short can be undone. Each update writes the
+ * record as it was (imports/{id}/before/{recordId}) in the same batch as the change.
+ * creates: [{ id, values, parentId, parentFormId }]; updates: [{ id, values, parentId, parentFormId }].
+ * onProgress(done, total) runs after each batch.
+ */
+export async function runImport({ id, formId, formName, fileName, counts, creates, updates }, onProgress = () => {}) {
+  const me = store.user.uid;
+  const stamp = Date.now();
+  const byId = new Map(store.records.map((r) => [r.id, r]));
+  await setDoc(doc(db, 'imports', id), plain({
+    formId, formName: String(formName || '').slice(0, 120), fileName: String(fileName || '').slice(0, 200), ownerId: me,
+    createdAt: stamp, stamp, status: 'running', added: creates.map((c) => c.id), updated: updates.map((u) => u.id), counts,
+  }));
+  const groups = [];
+  creates.forEach((c) => groups.push([(b) => b.set(doc(db, 'records', c.id), plain({
+    formId, values: c.values || {}, parentId: c.parentId || null, parentFormId: c.parentFormId || null,
+    ownerId: me, createdBy: me, createdAt: stamp, updatedAt: stamp, updatedBy: me,
+  }))]));
+  updates.forEach((u) => {
+    const old = byId.get(u.id);
+    if (!old) return;
+    groups.push([
+      (b) => b.set(doc(db, 'imports', id, 'before', u.id), plain({ values: old.values || {}, parentId: old.parentId || null, parentFormId: old.parentFormId || null, updatedAt: old.updatedAt || 0, updatedBy: old.updatedBy || '' })),
+      (b) => b.set(doc(db, 'records', u.id), plain({
+        formId: old.formId, values: u.values || {}, parentId: u.parentId || null, parentFormId: u.parentFormId || null,
+        ownerId: old.ownerId, createdBy: old.createdBy, createdAt: old.createdAt || stamp, updatedAt: stamp, updatedBy: me,
+      })),
+    ]);
+  });
+  const total = groups.length;
+  try {
+    let batch = writeBatch(db), n = 0, done = 0;
+    for (const g of groups) {
+      if (n + g.length > 450) { await batch.commit(); onProgress(done, total); batch = writeBatch(db); n = 0; }
+      g.forEach((op) => op(batch));
+      n += g.length; done++;
+    }
+    if (n) await batch.commit();
+    onProgress(done, total);
+    await updateDoc(doc(db, 'imports', id), { status: 'done', finishedAt: Date.now() });
+  } catch (e) {
+    try { await updateDoc(doc(db, 'imports', id), { status: 'failed', finishedAt: Date.now() }); } catch (e2) { /* offline */ }
+    throw e;
+  }
+  return stamp;
+}
+
+/** The records an import changed, as they were before it: Map(recordId -> before). */
+export async function importBefore(importId) {
+  const s = await getDocs(collection(db, 'imports', importId, 'before'));
+  return new Map(s.docs.map((d) => [d.id, d.data()]));
+}
+
+/** Carry out an undo plan (importlogic.undoPlan) and mark the import undone. */
+export async function undoImport(imp, plan) {
+  const me = store.user.uid, now = Date.now();
+  const byId = new Map(store.records.map((r) => [r.id, r]));
+  const ops = [];
+  [...plan.del, ...plan.under].forEach((rid) => ops.push((b) => b.delete(doc(db, 'records', rid))));
+  plan.restore.forEach((x) => {
+    const old = byId.get(x.id);
+    if (!old) return;
+    ops.push((b) => b.set(doc(db, 'records', x.id), plain({
+      formId: old.formId, values: x.values || {}, parentId: x.parentId || null, parentFormId: x.parentFormId || null,
+      ownerId: old.ownerId, createdBy: old.createdBy, createdAt: old.createdAt || now, updatedAt: now, updatedBy: me,
+    })));
+  });
+  (imp.updated || []).forEach((rid) => ops.push((b) => b.delete(doc(db, 'imports', imp.id, 'before', rid))));
+  await commitOps(ops);
+  await updateDoc(doc(db, 'imports', imp.id), {
+    status: 'undone', undoneAt: now, undoneBy: me,
+    undo: { removed: plan.del.length, under: plan.under.length, restored: plan.restore.length, kept: plan.kept.slice(0, 50), gone: plan.gone },
+  });
+}
+
+/* ---------- Saved reports and dashboards ---------- */
+
+export async function saveReportDef(id, data) { await setDoc(doc(db, 'reportDefs', id), plain(data)); }
+export async function deleteReportDef(id) { await deleteDoc(doc(db, 'reportDefs', id)); }
+export async function saveDashboard(id, data) { await setDoc(doc(db, 'dashboards', id), plain(data)); }
+export async function deleteDashboard(id) { await deleteDoc(doc(db, 'dashboards', id)); }
+
+/** Write a converted old report (its saved reports, then its dashboard), then remove the old one. */
+export async function writeMigration(mig, legacyId) {
+  const ops = mig.reports.map((r) => (b) => b.set(doc(db, 'reportDefs', r.id), plain(r.data)));
+  ops.push((b) => b.set(doc(db, 'dashboards', mig.dashboard.id), plain(mig.dashboard.data)));
+  ops.push((b) => b.delete(doc(db, 'reports', legacyId)));
+  await commitOps(ops);
+}
+
+/* ---------- Writes ---------- */
+
+const plain = (o) => JSON.parse(JSON.stringify(o ?? null));
+
+async function put(col, obj) {
+  if (col === 'records') return putRecord(obj);
+  const data = plain(obj);
+  delete data.id;
+  await setDoc(doc(db, col, obj.id), data);
+}
+
+async function del(col, id) {
+  await deleteDoc(doc(db, col, id));
+}
+
+/** Save a record, stamping ownership. Owner and creator never change after creation. */
+export async function putRecord(rec) {
+  await setDoc(doc(db, 'records', rec.id), recordData(rec));
+}
+
+/**
+ * Save a record together with its sub-form rows: rows to write (new or changed) and row
+ * IDs to delete. Up to 450 writes go in one batch, so a normal save is all-or-nothing.
+ */
+export async function saveRecordBundle(rec, rows, removedIds) {
+  const ops = [(b) => b.set(doc(db, 'records', rec.id), recordData(rec))];
+  rows.forEach((r) => ops.push((b) => b.set(doc(db, 'records', r.id), recordData(r))));
+  removedIds.forEach((id) => ops.push((b) => b.delete(doc(db, 'records', id))));
+  await commitOps(ops);
+}
+
+function recordData(rec) {
+  const me = store.user.uid;
+  const existing = store.records.find((r) => r.id === rec.id);
+  const now = Date.now();
+  return {
+    formId: rec.formId,
+    values: plain(rec.values || {}),
+    parentId: rec.parentId || null,
+    parentFormId: rec.parentFormId || null,
+    ownerId: existing?.ownerId || me,
+    createdBy: existing?.createdBy || me,
+    createdAt: existing?.createdAt || rec.createdAt || now,
+    updatedAt: rec.updatedAt || now,
+    updatedBy: me,
+  };
+}
+
+/** Commit many writes in chunks under Firestore's 500-operation batch limit. */
+async function commitOps(ops) {
+  for (let i = 0; i < ops.length; i += 450) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + 450).forEach((op) => op(batch));
+    await batch.commit();
+  }
+}
+
+/** Admin: delete a form, its records, and references to it from other forms. */
+export async function deleteFormCascade(formId) {
+  const ops = [];
+  store.records
+    .filter((r) => r.formId === formId)
+    .forEach((r) => ops.push((b) => b.delete(doc(db, 'records', r.id))));
+  store.forms
+    .filter((f) => f.id !== formId && (f.children || []).some((c) => c.formId === formId))
+    .forEach((f) =>
+      ops.push((b) => b.update(doc(db, 'forms', f.id), { children: f.children.filter((c) => c.formId !== formId) }))
+    );
+  store.listViews
+    .filter((v) => v.formId === formId)
+    .forEach((v) => ops.push((b) => b.delete(doc(db, 'listViews', v.id))));
+  ops.push((b) => b.delete(doc(db, 'forms', formId)));
+  await commitOps(ops);
+}
+
+/** Admin: load the example forms and records. */
+export async function loadExamples(examples) {
+  const me = store.user.uid;
+  const ops = [];
+  examples.forms.forEach((f) => {
+    const d = clone(f);
+    delete d.id;
+    ops.push((b) => b.set(doc(db, 'forms', f.id), d));
+  });
+  examples.records.forEach((r) => {
+    const d = {
+      formId: r.formId,
+      values: r.values,
+      parentId: r.parentId || null,
+      parentFormId: r.parentFormId || null,
+      ownerId: me,
+      createdBy: me,
+      createdAt: r.createdAt || Date.now(),
+      updatedAt: r.updatedAt || Date.now(),
+      updatedBy: me,
+    };
+    ops.push((b) => b.set(doc(db, 'records', r.id), d));
+  });
+  await commitOps(ops);
+}
+
+/* ---------- Files ---------- */
+
+export async function uploadFile(file, formId) {
+  const me = store.user.uid;
+  const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80);
+  const path = `uploads/${formId}/${me}/${Date.now()}-${safe}`;
+  const r = ref(storage, path);
+  await uploadBytes(r, file, { contentType: file.type || 'application/octet-stream' });
+  const url = await getDownloadURL(r);
+  return { name: file.name, size: file.size, type: file.type, path, url };
+}
+
+/* ---------- Admin: users and groups ---------- */
+
+function accessFor(groupIds, groups, forms = store.forms) {
+  return withInherited(effectiveAccess(groups.filter((g) => groupIds.includes(g.id))), forms);
+}
+
+/**
+ * Save a group and its membership, then recompute effective access for every
+ * person whose membership or permissions changed.
+ */
+export async function saveGroup(group, memberIds) {
+  const data = plain({ name: group.name, description: group.description || '', access: group.access || {}, updatedAt: Date.now() });
+  const groupsAfter = store.groups.filter((g) => g.id !== group.id).concat([{ ...data, id: group.id }]);
+  const ops = [(b) => b.set(doc(db, 'groups', group.id), data)];
+  for (const u of store.users) {
+    const had = (u.groups || []).includes(group.id);
+    const has = memberIds.includes(u.id);
+    if (!had && !has) continue;
+    const groups = (u.groups || []).filter((g) => g !== group.id).concat(has ? [group.id] : []);
+    ops.push((b) => b.update(doc(db, 'users', u.id), { groups, access: accessFor(groups, groupsAfter) }));
+  }
+  await commitOps(ops);
+}
+
+export async function deleteGroup(groupId) {
+  const groupsAfter = store.groups.filter((g) => g.id !== groupId);
+  const ops = [(b) => b.delete(doc(db, 'groups', groupId))];
+  for (const u of store.users) {
+    if (!(u.groups || []).includes(groupId)) continue;
+    const groups = u.groups.filter((g) => g !== groupId);
+    ops.push((b) => b.update(doc(db, 'users', u.id), { groups, access: accessFor(groups, groupsAfter) }));
+  }
+  await commitOps(ops);
+}
+
+export async function setUserGroups(userId, groupIds) {
+  await updateDoc(doc(db, 'users', userId), { groups: groupIds, access: accessFor(groupIds, store.groups) });
+}
+
+export async function setUserRole(userId, role) {
+  await updateDoc(doc(db, 'users', userId), { role });
+}
+
+/** Recompute everyone's access from their groups (repair tool). */
+export async function recomputeAllAccess(forms = store.forms) {
+  const ops = store.users.map((u) => (b) =>
+    b.update(doc(db, 'users', u.id), { access: accessFor(u.groups || [], store.groups, forms) })
+  );
+  await commitOps(ops);
+}
