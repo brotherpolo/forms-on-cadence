@@ -127,6 +127,8 @@ test('"Other" is worked out from its records, and a dated bar chart doesn’t fo
   assert.equal(s[1].key, 'Other (2)');
   assert.equal(s[1].value, (100 + 50) / 2, 'the average of its records, not a sum of averages');
   assert.deepEqual(s[1].keys.slice().sort(), ['Design', 'Survey']);
+  assert.equal(slicesOf(ctx, { ...avg, limit: 'all' }, list, 2).length, 3, 'All: every group, no Other');
+  assert.equal(slicesOf(ctx, normalizeDef(ctx, { ...avg, limit: 'lots' }), list, 2).length, 2, 'an unknown limit falls back');
   const bar = { form: 'lines', type: 'bar', measure: { fn: 'count' }, group: { form: 'lines', id: '_created', by: 'week' } };
   assert.ok(slicesOf(ctx, bar, list, 1).every((x) => !x.other), 'periods stay in order instead of folding');
 });
