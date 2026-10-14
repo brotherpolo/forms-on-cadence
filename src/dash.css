@@ -216,3 +216,31 @@ button.db-li:hover{background:var(--accent-soft)}
 .db-tile.tight .rp-bar{min-height:13px;font-size:11.5px}
 .db-tile.tight .rp-bt,.db-tile.tight .rp-bf{height:10px}
 .rp-bars .db-more{flex:none;margin-top:2px;border-radius:6px}
+
+/* ---------- phones: each report is a small card ----------
+   Tiles stack and take the height they need, so nothing here sizes itself to the tile's
+   height (that made numbers and donuts shrink to nothing). No legends; bars keep short
+   labels; tables show their top rows. Tap to drill, press and hold for details. */
+@media (max-width:760px){
+  .db-tile .rp-wb{container-type:inline-size;overflow:hidden}
+  .db-tile button.rp-kpi{font-size:clamp(1.8rem,11cqw,2.6rem)}
+  .db-tile .db-donut{height:auto;justify-content:center;padding:4px 0}
+  .db-tile .db-leg{display:none}
+  .db-tile .db-ring{width:min(170px,60cqw);height:min(170px,60cqw)}
+  .db-tile .db-ringc{font-size:16px}
+  .db-tile .rp-bars{height:auto;gap:4px}
+  .db-tile .rp-bar{grid-template-columns:minmax(0,34%) 1fr;min-height:30px;max-height:none;gap:8px}
+  .db-tile .rp-bv{display:none}
+  .db-tile .rp-bt,.db-tile .rp-bf{height:14px}
+  .db-tile .rp-ln{height:170px}
+  .db-tile .db-pivot .rp-tr{grid-template-columns:minmax(0,1fr) auto !important}
+  .db-tile .db-pivot .rp-td:not(:first-child):not(:last-child),.db-tile .db-pvc{display:none}
+  .db-tile .db-more{margin-top:6px}
+  .db-cv.can-drill .db-tile[data-k]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;cursor:pointer}
+  .db-cv.can-drill .db-tile[data-k] .rp-wh{cursor:default}
+}
+.db-hint{display:none;margin:0;font-size:13px;color:var(--muted)}
+@media (hover:none) and (pointer:coarse){.db-hint{display:block}}
+.db-hold{position:fixed;z-index:80;max-width:min(280px,calc(100vw - 16px));display:flex;flex-direction:column;gap:2px;padding:9px 12px;border-radius:10px;background:var(--fg);color:var(--surface);font-size:13px;line-height:1.35;box-shadow:0 10px 28px rgba(10,12,20,.3);pointer-events:none}
+.db-hold b{font-weight:600;font-size:14px}
+.db-hold span{opacity:.85;font-variant-numeric:tabular-nums}

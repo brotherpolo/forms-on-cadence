@@ -16,7 +16,7 @@ import {
 import {
   TYPES, PERIODS, chainFields, rowsFor, periodRange, kpiOf, slicesOf, groupRows, pivotOf, sortRecs, normalizeDef,
   newDef, migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, keysOf, groupable as canSplit, groupLabel, BYS,
-  drillRows, drillLabel, bucketOf,
+  drillRows, drillLabel, bucketOf, nounOf, shareOf,
   canvasTiles, gridTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_COLS, GRID, MIN_W, minH,
 } from './dashlogic.js';
 
@@ -31,6 +31,7 @@ const D = {
   returnTo: null,                         // dashboard to add a new report to after its first save
   migrating: false, migrated: new Set(),
   drill: null,                            // the records behind a clicked bar, slice, cell or number
+  hintFor: null, hintOn: false,           // the touch tip under the filters
 };
 const DRAWN = new Map();                  // report body key -> { def, extra } it was last drawn from
 
@@ -142,7 +143,7 @@ const isNumRef = (c, r) => { const f = fieldOf(c, r); return !!f && kindOf(f) ==
 const COLORS = 8;
 function captionOf(c, def, n, extra) {
   const form = c.formById(def.form);
-  const parts = [n + ' ' + (n === 1 ? (form?.itemName || form?.name || 'record').toLowerCase().replace(/s$/, '') : (form?.name || 'records').toLowerCase())];
+  const parts = [n.toLocaleString() + ' ' + nounOf(form, n)];
   const conds = (def.conditions || []).filter((x) => x.ref && fieldOf(c, x.ref) && x.value !== '');
   if (conds.length) parts.push(conds.map((x) => refLabel(c, x.ref, def.form) + (x.op === 'not' ? ' is not ' : ' is ') + x.value).join(def.join === 'or' ? ' or ' : ' and '));
   const blocked = (extra?.fields || []).filter((ff) => ff.values?.length && !filterReaches(c, def, ff.ref));
@@ -209,7 +210,7 @@ function bodyHTML(c, def, extra, key) {
     if (!p) return { caption, html: `<p class="rp-empty">Choose rows and columns in the report’s settings.</p>` };
     const tc = `minmax(70px,1.6fr) ${p.cols.map(() => 'minmax(0,1fr)').join(' ')} minmax(0,1fr)`;
     const rl = groupLabel(c, def.group) || 'Rows', cl = groupLabel(c, def.col) || 'Columns';
-    return { caption, html: `<div class="rp-table db-pivot" role="table" data-fitk="${esc(key)}" data-n="${list.length}"><div class="rp-tr rp-th" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="columnheader">${esc(rl)} ↓ · ${esc(cl)} →</div>${p.cols.map((k, j) => `<div class="rp-td num" role="columnheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${esc(k)}</button></div>`).join('')}<div class="rp-td num" role="columnheader">Total</div></div>
+    return { caption, html: `<div class="rp-table db-pivot" role="table" data-fitk="${esc(key)}" data-n="${list.length}"><div class="rp-tr rp-th" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="columnheader">${esc(rl)}<span class="db-pvc"> ↓ · ${esc(cl)} →</span></div>${p.cols.map((k, j) => `<div class="rp-td num" role="columnheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${esc(k)}</button></div>`).join('')}<div class="rp-td num" role="columnheader">Total</div></div>
       ${p.rows.map((r, i) => `<div class="rp-tr" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}">${esc(r.key)}</button></div>${r.cells.map((v, j) => `<div class="rp-td num" role="cell">${v == null ? '–' : `<button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}" data-c="${j}" aria-label="${esc(r.key + ', ' + p.cols[j] + ': ' + fmtMeasure(c, def, v))}">${both(c, def, v)}</button>`}</div>`).join('')}<div class="rp-td num db-b" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}">${both(c, def, r.total)}</button></div></div>`).join('')}
       <div class="rp-tr db-tot" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader">Total</div>${p.colTotals.map((v, j) => `<div class="rp-td num" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${both(c, def, v)}</button></div>`).join('')}<div class="rp-td num" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}">${both(c, def, p.grand)}</button></div></div></div>
       ${p.moreRows || p.moreCols ? `<p class="rp-more">Showing the first ${p.rows.length} rows and ${p.cols.length} columns.</p>` : ''}` };
@@ -272,7 +273,8 @@ function drillPick(data) {
   const list = () => rowsFor(c, def, ex);
   const has = (k) => data[k] != null && data[k] !== '';
   const filters = [];
-  if (def.type === 'bar' || def.type === 'donut') {
+  if (!has('i') && !has('r') && !has('c')) { /* the whole report */ }
+  else if (def.type === 'bar' || def.type === 'donut') {
     let items = slicesOf(c, def, list());
     if (def.type === 'donut') items = items.filter((x) => x.value > 0);
     const it = items[+data.i];
@@ -422,8 +424,8 @@ export function fitTiles() {
     tile.classList.remove('compact', 'tight');
     tile.querySelectorAll('[data-fit-hid]').forEach((el) => { el.hidden = false; delete el.dataset.fitHid; });
     tile.querySelectorAll('.db-more').forEach((el) => el.remove());
-    if (loose) return;
     const hide = (el) => { if (el && !el.hidden) { el.hidden = true; el.dataset.fitHid = '1'; } };
+    if (loose) { phoneCard(tile, wb, hide); return; }
     // numbers that don't fit their space switch to the short form (CA$91.5k)
     if ([...wb.querySelectorAll('.rp-kpi, .db-pivot .db-cellb')].some((e) => e.scrollWidth > e.clientWidth + 1)) tile.classList.add('compact');
     // a KPI drops its extras, smallest first
@@ -453,6 +455,33 @@ export function fitTiles() {
     // last resort: the caption under the title
     if (over()) hide(tile.querySelector('.rp-wh .rp-cap'));
   });
+}
+
+/**
+ * Phones show each report as a small card: the chart without its legend, the top 5 bars,
+ * the top 3 rows of a table (or groups of a grouped table, or rows of a pivot with just
+ * its totals), and a "See all" that opens the drill-down. CSS does the rest.
+ */
+const PHONE_BARS = 5, PHONE_ROWS = 3;
+function phoneCard(tile, wb, hide) {
+  const bars = wb.querySelector('.rp-bars');
+  if (bars) {
+    const items = [...bars.children];
+    if (items.length > PHONE_BARS) { items.slice(PHONE_BARS).forEach(hide); bars.appendChild(moreButton(tile, items.length)); }
+  }
+  const tbl = wb.querySelector('.rp-table[data-fitk]');
+  if (!tbl) return;
+  wb.querySelectorAll(':scope > .rp-more').forEach(hide);
+  let rows;
+  if (tbl.querySelector(':scope > .db-grp:not(.db-tot)')) {
+    // a grouped table shows its groups, not the records inside them
+    tbl.querySelectorAll(':scope > .rp-tr:not(.db-grp), :scope > .rp-more').forEach(hide);
+    rows = [...tbl.querySelectorAll(':scope > .db-grp:not(.db-tot)')];
+  } else rows = [...tbl.querySelectorAll(':scope > .rp-tr:not(.rp-th):not(.db-tot)')];
+  if (rows.length > PHONE_ROWS) {
+    rows.slice(PHONE_ROWS).forEach(hide);
+    tbl.insertBefore(moreButton(tile, +tbl.dataset.n || 0, tbl.dataset.fitk), tbl.querySelector(':scope > .db-tot'));
+  }
 }
 
 function moreButton(tile, n, key) {
@@ -745,8 +774,21 @@ export function viewDashboard(id) {
     ${edit ? `<span class="help">The period you pick here is saved as the dashboard’s starting period.</span>` : ''}
   </div>
   ${edit ? `<div class="db-cvbar"><label class="switch db-float"><input type="checkbox" data-dv="float"${floatUp ? ' checked' : ''}><span class="tr"></span><span>Float items up</span></label><p class="help db-cvhelp">Drag an item by its handle to move it, or drag its bottom-right corner to resize it. Each dot is one step; 24 across. Items in the way move down. With a handle focused, arrow keys move the item and Shift + arrow keys resize it.</p></div>` : ''}
+  ${!edit && placed.length ? holdHint(x.id) : ''}
   ${placed.length ? `<div class="db-cv${edit ? ' edit' : ''}${edit ? '' : ' can-drill'}" id="db-cv" style="--rows:${cvRows}"><div class="db-ghost" id="db-ghost" hidden></div>${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
   </div>${edit ? '' : drillHTML('d:' + x.id)}`;
+}
+
+/** Touch screens: a one-line tip under the filters, for the first three dashboards opened. */
+function holdHint(id) {
+  if (D.hintFor !== id) {
+    D.hintFor = id;
+    let n = 0;
+    try { n = +localStorage.getItem('fw.holdHint') || 0; } catch (err) { n = 3; }
+    D.hintOn = n < 3;
+    if (D.hintOn) try { localStorage.setItem('fw.holdHint', String(n + 1)); } catch (err) { /* private mode */ }
+  }
+  return D.hintOn ? `<p class="db-hint">Tap a chart to see its records. Press and hold for details.</p>` : '';
 }
 
 function pickerHTML(x) {
@@ -777,7 +819,7 @@ function tileHTML(c, x, t, extra, edit) {
   const def = normalizeDef(c, r.def);
   const { html, caption } = bodyHTML(c, def, extra, 't:' + x.id + ':' + t.id);
   const others = usedOn(dashesVisible(), r.id).filter((d) => d.id !== x.id);
-  return `${open.replace('db-tile', 'db-tile db-t-' + def.type)}
+  return `${open.replace('db-tile', 'db-tile db-t-' + def.type).replace('<article ', `<article data-k="${esc('t:' + x.id + ':' + t.id)}" `)}
     <div class="rp-wh">${grip}<div class="rp-wt"><h3>${esc(r.name)}</h3><div class="rp-cap">${esc(caption)}${others.length ? ' · also on ' + others.map((d) => esc(d.name)).join(', ') : ''}</div></div>${edit ? del : `<button type="button" class="db-link" data-d="openrep" data-v="${esc(r.id)}">Open</button>`}</div>
     <div class="rp-wb">${html}</div>${rz}</article>`;
 }
@@ -979,6 +1021,106 @@ function endDrag(e) {
 }
 window.addEventListener('pointerup', endDrag);
 window.addEventListener('pointercancel', endDrag);
+
+/* ---------- phones and tablets: tap a card to drill, press and hold for details ---------- */
+
+const HOLD_MS = 450, HOLD_SLOP = 10;
+let hold = null;          // { timer, x, y, tile, data, shown }
+let eatClick = false;     // the click that ends a press-and-hold doesn't also drill
+
+function phoneLayout(tile) { return !!tile && getComputedStyle(tile).position !== 'absolute'; }
+
+/** Which part of a card a finger is on, as drill data ({ k } alone means the whole report). */
+function holdTarget(e, tile) {
+  const k = tile.dataset.k;
+  const el = e.target.closest('[data-d="drill"], [data-d="drillring"]');
+  if (el && tile.contains(el)) {
+    if (el.dataset.d === 'drillring') { const i = ringSlice(el, e); return i >= 0 ? { k, i } : { k }; }
+    const { i, r, c } = el.dataset;
+    if (el.classList.contains('db-more')) return { k };
+    return { k: el.dataset.k || k, i, r, c };
+  }
+  // a line or area chart: the point nearest the finger
+  const pts = [...tile.querySelectorAll('.rp-pt[data-d="drill"]')];
+  if (pts.length && e.target.closest('.rp-ln')) {
+    let best = null, bd = Infinity;
+    pts.forEach((p) => { const b = p.getBoundingClientRect(); const dx = Math.abs(b.left + b.width / 2 - e.clientX); if (dx < bd) { bd = dx; best = p; } });
+    if (best) return { k, i: best.dataset.i };
+  }
+  return { k };
+}
+
+/** The bubble's words: what the part is, how many records, the measure and its share. */
+function holdFacts(data) {
+  const dd = drillPick(data);
+  if (!dd) return null;
+  const c = ctx(), def = dd.def, form = c.formById(def.form);
+  const rows = drillRows(c, def, dd.extra, dd.filters);
+  const m = def.measure || { fn: 'count' };
+  const counted = m.fn === 'count' || !m.ref || !fieldOf(c, m.ref);
+  const value = measureOf(c, def, rows);
+  const lines = [rows.length.toLocaleString() + ' ' + nounOf(form, rows.length)];
+  if (!counted) lines.push(measureLabel(c, def) + ' ' + fmtMeasure(c, def, value));
+  if (dd.filters.length && !['line', 'area'].includes(def.type)) {
+    const pct = shareOf(def, value, measureOf(c, def, drillRows(c, def, dd.extra, [])));
+    if (pct != null) lines.push(pct + '% of the total');
+  }
+  return { title: dd.filters.length ? drillTitle(c, dd) : dd.name, lines };
+}
+
+function showHold(facts, x, y) {
+  let b = document.getElementById('db-hold');
+  if (!b) { b = document.createElement('div'); b.id = 'db-hold'; b.className = 'db-hold'; b.setAttribute('role', 'status'); document.body.appendChild(b); }
+  b.innerHTML = `<b>${esc(facts.title)}</b>${facts.lines.map((t) => `<span>${esc(t)}</span>`).join('')}`;
+  b.hidden = false;
+  const r = b.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+  const left = Math.max(8, Math.min(vw - r.width - 8, x - r.width / 2));
+  const top = y - r.height - 28 >= 8 ? y - r.height - 28 : y + 28;
+  b.style.left = left + 'px'; b.style.top = top + 'px';
+}
+function hideHold() { const b = document.getElementById('db-hold'); if (b) b.hidden = true; }
+function endHold() {
+  if (!hold) return;
+  clearTimeout(hold.timer);
+  if (hold.shown) { hideHold(); eatClick = true; setTimeout(() => { eatClick = false; }, 600); }
+  hold = null;
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse' || D.edit) return;
+  const tile = e.target.closest && e.target.closest('#db-cv.can-drill .db-tile[data-k]');
+  if (!tile) return;
+  endHold();
+  const data = holdTarget(e, tile);
+  hold = { x: e.clientX, y: e.clientY, shown: false, pid: e.pointerId };
+  hold.timer = setTimeout(() => {
+    if (!hold) return;
+    const facts = holdFacts(data);
+    if (!facts) { hold = null; return; }
+    hold.shown = true;
+    showHold(facts, hold.x, hold.y);
+    try { localStorage.setItem('fw.holdHint', '99'); } catch (err) { /* private mode */ }
+    D.hintOn = false; document.querySelectorAll('.db-hint').forEach((h) => h.remove());
+  }, HOLD_MS);
+});
+window.addEventListener('pointermove', (e) => {
+  if (!hold || e.pointerId !== hold.pid || hold.shown) return;
+  if (Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > HOLD_SLOP) { clearTimeout(hold.timer); hold = null; } // scrolling, not holding
+});
+window.addEventListener('pointerup', endHold);
+window.addEventListener('pointercancel', endHold);
+window.addEventListener('scroll', () => { if (hold && !hold.shown) { clearTimeout(hold.timer); hold = null; } }, true);
+// no "copy / save image" menu or text selection on a held chart
+document.addEventListener('contextmenu', (e) => { if (e.target.closest && e.target.closest('#db-cv.can-drill .db-tile[data-k]') && (hold || eatClick)) e.preventDefault(); });
+// the click that ends a hold is swallowed; a tap on a card's empty space drills into all its records (phones)
+document.addEventListener('click', (e) => {
+  if (eatClick && e.target.closest && e.target.closest('#db-cv')) { eatClick = false; e.preventDefault(); e.stopImmediatePropagation(); return; }
+  if (D.edit) return;
+  const tile = e.target.closest && e.target.closest('#db-cv.can-drill .db-tile[data-k]');
+  if (!tile || !phoneLayout(tile)) return;
+  if (e.target.closest('button, a, input, select, textarea, [data-d]')) return;
+  openDrill({ k: tile.dataset.k });
+}, true);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && D.drill && document.getElementById('db-dd')) { D.drill = null; repaint(); return; }

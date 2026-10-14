@@ -476,3 +476,27 @@ export function tileSize(type) {
 export function readingOrder(tiles) { return tiles.slice().sort((a, b) => a.y - b.y || a.x - b.x); }
 
 export { titleFieldOf };
+
+/* ---------- words ---------- */
+
+function pluralWord(s) {
+  if (/s$/i.test(s)) return s;
+  if (/[^aeiou]y$/i.test(s)) return s.slice(0, -1) + 'ies';
+  if (/(x|z|ch|sh)$/i.test(s)) return s + 'es';
+  return s + 's';
+}
+
+/** "1 line item", "53 line items": the form's name for one record, or for several. */
+export function nounOf(form, n) {
+  const one = String(form?.itemName || '').trim(), name = String(form?.name || '').trim();
+  if (n === 1) return (one || name.replace(/s$/i, '') || 'record').toLowerCase();
+  if (one && name && name.toLowerCase() !== one.toLowerCase()) return name.toLowerCase(); // "Person" / "People"
+  return pluralWord(one || name || 'record').toLowerCase();
+}
+
+/** What share of the whole a part is, as a whole percent, or null when a share means nothing (averages, smallest, largest). */
+export function shareOf(def, part, whole) {
+  const fn = def?.measure?.fn || 'count';
+  if (!['count', 'sum'].includes(fn) || !whole || part == null) return null;
+  return Math.round((part / whole) * 100);
+}
