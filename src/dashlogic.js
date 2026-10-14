@@ -11,7 +11,7 @@
 
 import {
   fieldOf, valueOf, timeOf, textOf, kindOf, chainOf, measureOf, reportFields, titleFieldOf,
-  defaultColumns, isEmptyVal,
+  defaultColumns, isEmptyVal, layout,
 } from './reportlogic.js';
 
 export const TYPES = [
@@ -264,5 +264,73 @@ export function visibleTo(item, me, uid) {
 export function usedOn(dashboards, reportId) {
   return dashboards.filter((d) => (d.tiles || []).some((t) => t.report === reportId));
 }
+
+/* ---------- the dashboard canvas ----------
+   12 columns wide; rows are CANVAS_ROW px tall. Each tile has x, y (top-left cell) and w, h.
+   Items may leave gaps. Moving or resizing one pushes whatever it overlaps further down; with
+   "float up" on, everything then slides up to close vertical gaps. */
+
+export const CANVAS_COLS = 12;
+export const CANVAS_ROW = 76;
+const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+const clampTile = (t) => {
+  const w = Math.max(2, Math.min(CANVAS_COLS, Math.round(t.w ?? 6)));
+  return { ...t, w, h: Math.max(1, Math.min(40, Math.round(t.h ?? 4))), x: Math.max(0, Math.min(CANVAS_COLS - w, Math.round(t.x || 0))), y: Math.max(0, Math.round(t.y || 0)) };
+};
+
+/** Tiles with positions. Tiles saved by the older row layout (cols, rows) get the spot they had. */
+export function canvasTiles(tiles) {
+  const list = tiles || [];
+  if (list.every((t) => t.x != null && t.y != null)) return list.map(clampTile);
+  const L = layout(list.map((t) => ({ ...t, cols: t.cols || t.w || 6, rows: t.rows || 2 })));
+  return list.map((t) => (t.x != null && t.y != null ? clampTile(t) : clampTile({ ...t, x: L[t.id].c0, y: L[t.id].r0 * 2, w: L[t.id].c, h: L[t.id].h * 2 })))
+    .map(({ cols, rows, ...rest }) => rest);
+}
+
+/** Keep `movedId` where it is; push overlapped tiles down; optionally float everything up. */
+export function resolveCanvas(tiles, movedId, floatUp) {
+  const all = tiles.map(clampTile);
+  const moved = all.find((t) => t.id === movedId);
+  const placed = moved ? [moved] : [];
+  all.filter((t) => t !== moved).sort((a, b) => a.y - b.y || a.x - b.x).forEach((t0) => {
+    const t = { ...t0 };
+    for (let guard = 0; guard < 500; guard++) { const o = placed.find((p) => overlaps(p, t)); if (!o) break; t.y = o.y + o.h; }
+    placed.push(t);
+  });
+  if (!floatUp) return placed;
+  const done = [];
+  placed.sort((a, b) => a.y - b.y || a.x - b.x).forEach((t0) => {
+    const t = { ...t0 };
+    while (t.y > 0 && !done.some((p) => overlaps(p, { ...t, y: t.y - 1 }))) t.y--;
+    done.push(t);
+  });
+  return done;
+}
+
+/** Where a new tile goes: the first spot from the top-left where it fits, else below everything. */
+export function placeTile(tiles, w, h) {
+  const list = tiles.map(clampTile);
+  const bottom = list.reduce((m, t) => Math.max(m, t.y + t.h), 0);
+  for (let y = 0; y <= bottom; y++) {
+    for (let x = 0; x + w <= CANVAS_COLS; x++) {
+      const t = { x, y, w, h };
+      if (!list.some((p) => overlaps(p, t))) return { x, y };
+    }
+  }
+  return { x: 0, y: bottom };
+}
+
+export function canvasHeight(tiles) { return tiles.reduce((m, t) => Math.max(m, (t.y || 0) + (t.h || 0)), 0); }
+
+/** The size a tile starts at, by report type. */
+export function tileSize(type) {
+  if (type === 'kpi') return { w: 3, h: 2 };
+  if (type === 'text') return { w: 4, h: 2 };
+  if (['table', 'grouped', 'pivot'].includes(type)) return { w: 12, h: 5 };
+  return { w: 6, h: 4 };
+}
+
+/** Tiles in reading order (top to bottom, left to right), for phones and screen readers. */
+export function readingOrder(tiles) { return tiles.slice().sort((a, b) => a.y - b.y || a.x - b.x); }
 
 export { titleFieldOf };

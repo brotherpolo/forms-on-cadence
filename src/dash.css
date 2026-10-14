@@ -67,10 +67,30 @@
 .db-pick:disabled{opacity:.55;cursor:default}
 .db-pick small{color:var(--muted);font-size:12px}
 
-.db-grid .rp-w{cursor:default}
-.db-tctl{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:-6px -8px 8px;padding:4px;border-radius:8px;background:var(--sunk)}
-.db-tctl .in{width:auto;min-height:32px;padding:0 6px;font-size:12px}
-.db-tctl .ibtn{width:32px;height:32px}
+/* the canvas: 12 columns, 76 px rows (CANVAS_ROW in dashlogic.js) */
+.db-cv{position:relative;margin:0 -6px}
+.db-cv.edit{background-image:linear-gradient(to right,var(--line) 1px,transparent 1px),linear-gradient(to bottom,var(--line) 1px,transparent 1px);background-size:calc((100% - 12px) / 12) 76px;background-position:6px 0;background-origin:content-box;border-radius:12px;outline:1px dashed var(--line-strong);outline-offset:2px}
+.db-tile{position:absolute;margin:0;cursor:default;transition:left .16s ease,top .16s ease,width .16s ease,height .16s ease,box-shadow .15s}
+.db-tile.dragging{transition:none;z-index:6;box-shadow:0 18px 40px rgba(15,20,40,.28);opacity:.97}
+.db-ghost{position:absolute;z-index:1;border:2px dashed var(--accent);background:var(--accent-soft);border-radius:12px;pointer-events:none;transition:left .08s,top .08s,width .08s,height .08s}
+.db-grip{flex:none;border:0;background:var(--sunk);border-radius:7px;width:34px;height:32px;cursor:grab;touch-action:none;color:var(--muted);display:grid;place-items:center;margin-right:2px}
+.db-grip:active{cursor:grabbing}
+.db-grip:hover{color:var(--fg)}
+.db-rz{position:absolute;right:0;bottom:0;width:30px;height:30px;border:0;padding:0;background:none;cursor:nwse-resize;touch-action:none;z-index:4}
+.db-rz::after{content:"";position:absolute;right:7px;bottom:7px;width:11px;height:11px;border-right:2.5px solid var(--muted);border-bottom:2.5px solid var(--muted);border-bottom-right-radius:3px}
+.db-rz:hover::after,.db-rz:focus-visible::after,.db-tile.dragging .db-rz::after{border-color:var(--accent)}
+.db-badge{position:absolute;right:36px;bottom:8px;background:var(--fg);color:var(--bg);font:12px var(--mono);padding:3px 8px;border-radius:6px;z-index:5;pointer-events:none}
+.db-cvbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px}
+.db-cvhelp{margin:0;flex:1 1 320px}
+.db-float{margin:0 4px}
+.db-tile .rp-wh .ibtn{flex:none}
+@media (max-width:760px){
+  .db-cv{height:auto !important;margin:0;display:flex;flex-direction:column;gap:12px}
+  .db-cv.edit{background:none}
+  .db-tile{position:relative;left:auto !important;top:auto !important;width:auto !important;height:auto !important;min-height:180px;transform:none !important}
+  .db-tile.db-t-kpi,.db-tile.db-text{min-height:0}
+  .db-ghost,.db-rz,.db-grip{display:none}
+}
 .db-text h3{font-size:1.1rem;margin:0 0 6px}
 .db-text p{margin:0 0 8px;color:var(--muted);font-size:14px;white-space:pre-line}
 .db-tt{margin-bottom:6px;font-weight:600}

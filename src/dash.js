@@ -11,12 +11,12 @@ import { store, saveReportDef, deleteReportDef, saveDashboard, deleteDashboard, 
 import { canViewForm, isAdmin } from './access.js';
 import { esc, uid, clone, toast, badge } from './ui.js';
 import {
-  fieldOf, valueOf, textOf, kindOf, chainOf, measureOf, bucketsOf, niceStep, refLabel, autoTitle, layout,
-  settle, resize, WIDTHS, MAX_ROWS, widthName, heightName,
+  fieldOf, valueOf, textOf, kindOf, chainOf, measureOf, bucketsOf, niceStep, refLabel, autoTitle,
 } from './reportlogic.js';
 import {
   TYPES, PERIODS, chainFields, rowsFor, periodRange, kpiOf, slicesOf, groupRows, pivotOf, sortRecs, normalizeDef,
   newDef, migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, keysOf,
+  canvasTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_ROW, CANVAS_COLS,
 } from './dashlogic.js';
 
 let H = { fmt: null, valOf: null, recTitle: null, go: null, openRecord: null, renderMain: null };
@@ -394,17 +394,18 @@ async function saveDraft() {
 async function addTile(did, reportId, text) {
   const editing = D.edit && D.did === did;
   const x = editing ? D.edit : dashById(did); if (!x) return;
-  const tiles = (x.tiles || []).slice();
+  const tiles = canvasTiles(x.tiles || []);
   const r = reportById(reportId) || (D.draft && D.draft.id === reportId ? D.draft : null);
-  const t = r?.def?.type;
-  tiles.push(text ? { id: uid('t'), text: { title: 'Notes', body: '' }, cols: 4, rows: 1 } : { id: uid('t'), report: reportId, cols: t === 'kpi' ? 3 : ['table', 'grouped', 'pivot'].includes(t) ? 12 : 6, rows: t === 'kpi' ? 1 : ['table', 'grouped', 'pivot'].includes(t) ? 3 : 2 });
+  const size = tileSize(text ? 'text' : r?.def?.type);
+  const at = placeTile(tiles, size.w, size.h);
+  tiles.push(text ? { id: uid('t'), text: { title: 'Notes', body: '' }, ...size, ...at } : { id: uid('t'), report: reportId, ...size, ...at });
   if (editing) { D.edit.tiles = tiles; D.edit.dirty = true; repaint(); return; }
   try { await saveDashboard(did, { ...dashData(x), tiles, updatedAt: Date.now() }); toast('Added to ' + x.name); }
   catch (e) { toast('Couldn’t change that dashboard.'); }
 }
 
 function dashData(x) {
-  return { name: x.name, ownerId: x.ownerId, shared: !!x.shared, groups: x.groups || [], tiles: clone(x.tiles || []), filters: clone(x.filters || { period: 'all', fields: [] }), createdAt: x.createdAt || Date.now(), updatedAt: x.updatedAt || Date.now() };
+  return { name: x.name, ownerId: x.ownerId, shared: !!x.shared, groups: x.groups || [], tiles: clone(canvasTiles(x.tiles || [])), filters: clone(x.filters || { period: 'all', fields: [] }), createdAt: x.createdAt || Date.now(), updatedAt: x.updatedAt || Date.now() };
 }
 
 /* ---------- the Dashboards list ---------- */
@@ -452,9 +453,11 @@ export function viewDashboard(id) {
   const may = canChange(src);
   const fv = filterState(x);
   const extra = extraFor(x, fv);
-  const pos = layout(x.tiles || []);
+  const placed = canvasTiles(x.tiles || []);
   const home = homeId() === x.id;
-  const tiles = (x.tiles || []).map((t) => tileHTML(c, x, t, pos[t.id], extra, edit)).join('');
+  const floatUp = !!x.filters?.floatUp;
+  const tiles = readingOrder(placed).map((t) => tileHTML(c, x, t, extra, edit)).join('');
+  const cvH = (canvasHeight(placed) + (edit ? 3 : 0)) * CANVAS_ROW;
   const fieldFilters = (x.filters?.fields || []).map((ref) => {
     const f = fieldOf(c, ref);
     if (!f) return '';
@@ -489,7 +492,8 @@ export function viewDashboard(id) {
     ${fieldFilters}${addFilter}
     ${edit ? `<span class="help">The period you pick here is saved as the dashboard’s starting period.</span>` : ''}
   </div>
-  ${(x.tiles || []).length ? `<div class="rp-grid db-grid">${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
+  ${edit ? `<div class="db-cvbar"><label class="switch db-float"><input type="checkbox" data-dv="float"${floatUp ? ' checked' : ''}><span class="tr"></span><span>Float items up</span></label><p class="help db-cvhelp">Drag an item by its handle to move it, or drag its bottom-right corner to resize it. Items in the way move down. With a handle focused, arrow keys move the item and Shift + arrow keys resize it.</p></div>` : ''}
+  ${placed.length ? `<div class="db-cv${edit ? ' edit' : ''}" id="db-cv" style="height:${cvH}px"><div class="db-ghost" id="db-ghost" hidden></div>${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
   </div>`;
 }
 
@@ -501,42 +505,29 @@ function pickerHTML(x) {
     ${list.length ? `<div class="db-plist">${list.map((r) => `<button type="button" class="db-pick" data-d="pick" data-v="${esc(r.id)}"${have.has(r.id) ? ' disabled' : ''}><b>${esc(r.name)}</b><small>${esc((TYPES.find((t) => t[0] === r.def?.type) || ['', ''])[1])}${c.formById(r.def?.form) ? ' · ' + esc(c.formById(r.def.form).name) : ''}${have.has(r.id) ? ' · already here' : ''}</small></button>`).join('')}</div>` : '<p class="note">No saved reports yet. Make one with <b>New report</b>.</p>'}</div>`;
 }
 
-function tileHTML(c, x, t, pos, extra, edit) {
-  if (!pos) return '';
-  const style = `grid-column:${pos.c0 + 1} / span ${pos.c};grid-row:${pos.r0 + 1} / span ${pos.h}`;
-  const ctl = edit ? `<div class="db-tctl">
-    <select class="in" data-dz="w" data-v="${esc(t.id)}" aria-label="Width">${WIDTHS.map((w) => opt(String(w), widthName(w), String(pos.c))).join('')}</select>
-    <select class="in" data-dz="h" data-v="${esc(t.id)}" aria-label="Height">${Array.from({ length: MAX_ROWS }, (_, i) => opt(String(i + 1), heightName(i + 1), String(pos.h))).join('')}</select>
-    <button type="button" class="ibtn" data-d="tmove" data-v="${esc(t.id)}" data-dir="-1" aria-label="Move earlier">←</button><button type="button" class="ibtn" data-d="tmove" data-v="${esc(t.id)}" data-dir="1" aria-label="Move later">→</button>
-    <button type="button" class="ibtn" data-d="tdel" data-v="${esc(t.id)}" aria-label="Remove from this dashboard">✕</button></div>` : '';
+const pct = (n) => ((n / CANVAS_COLS) * 100).toFixed(4);
+function tileBox(t) { return `left:calc(${pct(t.x)}% + 6px);width:calc(${pct(t.w)}% - 12px);top:${t.y * CANVAS_ROW}px;height:${t.h * CANVAS_ROW - 12}px`; }
+function setBox(el, t) { el.style.left = `calc(${pct(t.x)}% + 6px)`; el.style.width = `calc(${pct(t.w)}% - 12px)`; el.style.top = t.y * CANVAS_ROW + 'px'; el.style.height = t.h * CANVAS_ROW - 12 + 'px'; }
+
+function tileHTML(c, x, t, extra, edit) {
+  const label = t.text ? t.text.title || 'Text block' : reportById(t.report)?.name || 'Report';
+  const grip = edit ? `<button type="button" class="db-grip" data-cv="move" data-v="${esc(t.id)}" aria-label="Move ${esc(label)}. Arrow keys move it; Shift and arrow keys resize it." title="Drag to move"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="6" r="1.8"/><circle cx="16" cy="6" r="1.8"/><circle cx="8" cy="12" r="1.8"/><circle cx="16" cy="12" r="1.8"/><circle cx="8" cy="18" r="1.8"/><circle cx="16" cy="18" r="1.8"/></svg></button>` : '';
+  const del = edit ? `<button type="button" class="ibtn" data-d="tdel" data-v="${esc(t.id)}" aria-label="Remove ${esc(label)} from this dashboard">✕</button>` : '';
+  const rz = edit ? `<button type="button" class="db-rz" data-cv="rz" data-v="${esc(t.id)}" aria-label="Resize ${esc(label)}, now ${t.w} columns by ${t.h} rows" title="Drag to resize"></button><span class="db-badge" hidden></span>` : '';
+  const open = `<article class="rp-w db-tile${t.text ? ' db-text' : ''}" data-tile="${esc(t.id)}" style="${tileBox(t)}" aria-label="${esc(label)}">`;
   if (t.text) {
     const body = edit ? `<input class="in db-tt" data-dt="title" data-v="${esc(t.id)}" value="${esc(t.text.title || '')}" aria-label="Heading"><textarea class="in db-tb" data-dt="body" data-v="${esc(t.id)}" aria-label="Text" rows="3">${esc(t.text.body || '')}</textarea>`
       : `<h3>${esc(t.text.title || '')}</h3>${String(t.text.body || '').split(/\n{2,}/).map((p) => `<p>${esc(p)}</p>`).join('')}`;
-    return `<article class="rp-w h${pos.h} db-text" style="${style}" aria-label="${esc(t.text.title || 'Text')}">${ctl}<div class="rp-wb">${body}</div></article>`;
+    return `${open}${edit ? `<div class="rp-wh">${grip}<div class="rp-wt"><div class="rp-cap">Text block</div></div>${del}</div>` : ''}<div class="rp-wb">${body}</div>${rz}</article>`;
   }
   const r = reportById(t.report);
-  if (!r) return `<article class="rp-w h${pos.h}" style="${style}">${ctl}<p class="rp-empty">This report was deleted or isn’t shared with you.</p></article>`;
+  if (!r) return `${open}<div class="rp-wh">${grip}<div class="rp-wt"><p class="rp-empty">This report was deleted or isn’t shared with you.</p></div>${del}</div>${rz}</article>`;
   const def = normalizeDef(c, r.def);
   const { html, caption } = bodyHTML(c, def, extra, 't:' + x.id + ':' + t.id);
   const others = usedOn(dashesVisible(), r.id).filter((d) => d.id !== x.id);
-  return `<article class="rp-w h${pos.h} db-t-${def.type}" style="${style}" aria-label="${esc(r.name)}">
-    ${ctl}<div class="rp-wh"><div class="rp-wt"><h3>${esc(r.name)}</h3><div class="rp-cap">${esc(caption)}${others.length ? ' · also on ' + others.map((d) => esc(d.name)).join(', ') : ''}</div></div>${edit ? '' : `<button type="button" class="db-link" data-d="openrep" data-v="${esc(r.id)}">Open</button>`}</div>
-    <div class="rp-wb">${html}</div></article>`;
-}
-
-/** After a tile's width changes, shrink or grow the others in its row so the row still fits. */
-function fitRow(tiles, id) {
-  const before = layout(tiles.map((t) => (t.id === id ? { ...t, cols: 3 } : t)), id);
-  const me_ = tiles.find((t) => t.id === id); if (!me_ || !before[id]) return tiles;
-  const mates = tiles.filter((t) => t.id !== id && before[t.id] && before[t.id].row === before[id].row);
-  const room = 12 - me_.cols;
-  if (!mates.length || room < 3 * mates.length) return tiles;
-  const total = mates.reduce((a, t) => a + before[t.id].c, 0) || 1;
-  let left = room;
-  const sizes = mates.map((t, i) => { const c = i === mates.length - 1 ? left : Math.max(3, Math.round((before[t.id].c / total) * room)); left -= c; return [t.id, c]; });
-  if (sizes.some(([, c]) => c < 3)) return tiles;
-  const m = new Map(sizes);
-  return tiles.map((t) => (m.has(t.id) ? { ...t, cols: m.get(t.id) } : t));
+  return `${open.replace('db-tile', 'db-tile db-t-' + def.type)}
+    <div class="rp-wh">${grip}<div class="rp-wt"><h3>${esc(r.name)}</h3><div class="rp-cap">${esc(caption)}${others.length ? ' · also on ' + others.map((d) => esc(d.name)).join(', ') : ''}</div></div>${edit ? del : `<button type="button" class="db-link" data-d="openrep" data-v="${esc(r.id)}">Open</button>`}</div>
+    <div class="rp-wb">${html}</div>${rz}</article>`;
 }
 
 function editTiles(fn) { if (!D.edit) return; const tiles = clone(D.edit.tiles || []); fn(tiles); D.edit.tiles = tiles; D.edit.dirty = true; repaint(); }
@@ -544,7 +535,7 @@ function editTiles(fn) { if (!D.edit) return; const tiles = clone(D.edit.tiles |
 async function saveEdit() {
   const x = D.edit; if (!x) return;
   const fv = filterState(x);
-  const data = { ...dashData(x), name: (x.name || '').trim().slice(0, 120) || 'Dashboard', shared: admin() ? !!x.shared : false, groups: admin() && x.shared ? x.groups || [] : [], filters: { period: fv.period, fields: clone(x.filters?.fields || []) }, updatedAt: Date.now() };
+  const data = { ...dashData(x), name: (x.name || '').trim().slice(0, 120) || 'Dashboard', shared: admin() ? !!x.shared : false, groups: admin() && x.shared ? x.groups || [] : [], filters: { period: fv.period, fields: clone(x.filters?.fields || []), floatUp: !!x.filters?.floatUp }, updatedAt: Date.now() };
   try { await saveDashboard(x.id, data); } catch (e) { console.error(e); toast(e?.code === 'permission-denied' ? 'You can’t change this dashboard.' : 'Saving failed. Check your connection and try again.'); return; }
   D.edit = null; D.picker = false; D.confirm = null; toast('Dashboard saved'); repaint();
 }
@@ -562,7 +553,7 @@ async function newDashboard() {
 /** True while typing in a report or dashboard field, so live data doesn't redraw under the cursor. */
 export function reportBusy() {
   const a = document.activeElement;
-  return !!(a && a.closest && a.closest('#dbx') && /^(INPUT|TEXTAREA)$/.test(a.tagName) && a.type !== 'checkbox');
+  return !!drag || !!(a && a.closest && a.closest('#dbx') && /^(INPUT|TEXTAREA)$/.test(a.tagName) && a.type !== 'checkbox');
 }
 export function leaveReport() { /* reports save explicitly; app.js guards unsaved changes */ }
 export function forgetDrafts() { D.draft = null; D.rid = null; D.edit = null; D.did = null; D.picker = false; D.confirm = null; }
@@ -613,7 +604,7 @@ document.addEventListener('click', async (e) => {
     case 'addtonew': { D.confirm = null; const rid = d.id; const id = await newDashboard(); if (id) { D.edit.tiles = []; await addTile(id, rid); } break; }
     case 'sethome': try { await setHomeDashboard(v); toast(v ? 'This dashboard now opens when you start Formwright' : 'Home dashboard cleared'); } catch (err) { toast('Couldn’t save that. Try again.'); } break;
     case 'newdash': newDashboard(); break;
-    case 'editdash': { const x = dashById(D.did); if (!x) return; D.edit = { id: x.id, ...dashData(x), dirty: false }; D.picker = !(x.tiles || []).length; repaint(); break; }
+    case 'editdash': { const x = dashById(D.did); if (!x) return; D.edit = { id: x.id, ...dashData(x), dirty: false }; D.edit.tiles = resolveCanvas(D.edit.tiles, null, !!D.edit.filters?.floatUp); D.picker = !(x.tiles || []).length; repaint(); break; }
     case 'canceledit': D.edit = null; D.picker = false; D.fv[D.did] = null; repaint(); break;
     case 'savedash': saveEdit(); break;
     case 'deldash': {
@@ -626,8 +617,7 @@ document.addEventListener('click', async (e) => {
     case 'pick': await addTile(D.did, v); break;
     case 'addtext': await addTile(D.did, null, true); break;
     case 'newrepfor': D.returnTo = D.did; if (D.edit?.dirty) await saveEdit(); D.edit = null; startNewReport(); break;
-    case 'tmove': editTiles((tiles) => { const i = tiles.findIndex((t) => t.id === v), j = i + +el.dataset.dir; if (i < 0 || j < 0 || j >= tiles.length) return; [tiles[i], tiles[j]] = [tiles[j], tiles[i]]; }); break;
-    case 'tdel': editTiles((tiles) => { const i = tiles.findIndex((t) => t.id === v); if (i >= 0) tiles.splice(i, 1); }); break;
+    case 'tdel': if (D.edit) { D.edit.tiles = resolveCanvas(canvasTiles(D.edit.tiles).filter((t) => t.id !== v), null, !!D.edit.filters?.floatUp); D.edit.dirty = true; repaint(); } break;
     case 'ffdel': { if (!D.edit) return; D.edit.filters = { ...(D.edit.filters || {}), fields: (D.edit.filters?.fields || []).filter((r) => refKey(r) !== v) }; D.edit.dirty = true; const fv = D.fv[D.did]; if (fv) delete fv.fields[v]; repaint(); break; }
     case 'period': { const x = D.edit && D.did ? D.edit : dashById(D.did); if (!x) return; filterState(x).period = v; if (D.edit) D.edit.dirty = true; repaint(); break; }
   }
@@ -638,14 +628,6 @@ document.addEventListener('change', (e) => {
   if (!t.closest || !t.closest('#dbx')) return;
   const d = D.draft;
   if (t.dataset.df != null) { const x = D.edit || dashById(D.did); if (!x) return; filterState(x).fields[t.dataset.df] = t.value; repaint(); return; }
-  if (t.dataset.dz) {
-    if (!D.edit) return;
-    const tiles = D.edit.tiles || [], id = t.dataset.v, pos = layout(tiles)[id]; if (!pos) return;
-    const cols = t.dataset.dz === 'w' ? +t.value : pos.c, rows = t.dataset.dz === 'h' ? +t.value : pos.h;
-    D.edit.tiles = settle(fitRow(resize(tiles, id, cols, rows), id), id); D.edit.dirty = true;
-    repaint(() => document.querySelector(`[data-dz="${t.dataset.dz}"][data-v="${CSS.escape(id)}"]`)?.focus());
-    return;
-  }
   if (t.dataset.dt) { editTiles((tiles) => { const tile = tiles.find((y) => y.id === t.dataset.v); if (tile && tile.text) tile.text[t.dataset.dt] = t.value.slice(0, t.dataset.dt === 'title' ? 120 : 2000); }); return; }
   const k = t.dataset.dv; if (!k) return;
   switch (k) {
@@ -667,6 +649,7 @@ document.addEventListener('change', (e) => {
     case 'rep-group': if (d) { d.groups = t.checked ? [...new Set([...(d.groups || []), t.value])] : (d.groups || []).filter((g) => g !== t.value); d.dirty = true; repaint(); } break;
     case 'dash-shared': if (D.edit) { D.edit.shared = t.checked; D.edit.dirty = true; repaint(); } break;
     case 'dash-group': if (D.edit) { D.edit.groups = t.checked ? [...new Set([...(D.edit.groups || []), t.value])] : (D.edit.groups || []).filter((g) => g !== t.value); D.edit.dirty = true; repaint(); } break;
+    case 'float': if (D.edit) { D.edit.filters = { ...(D.edit.filters || { period: 'all', fields: [] }), floatUp: t.checked }; D.edit.tiles = resolveCanvas(canvasTiles(D.edit.tiles), null, t.checked); D.edit.dirty = true; repaint(); } break;
     case 'addfilter': if (D.edit && t.value) { D.edit.filters = { ...(D.edit.filters || { period: 'all' }), fields: (D.edit.filters?.fields || []).concat(refOf(t.value)) }; D.edit.dirty = true; repaint(); } break;
   }
 });
@@ -674,4 +657,67 @@ document.addEventListener('change', (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'db-name' && t.dataset.dv === 'name' && D.draft) { D.draft.name = t.value.slice(0, 120); if (!D.draft.dirty) { D.draft.dirty = true; const b = document.querySelector('[data-d="saverep"]'); if (b) { b.disabled = false; b.textContent = 'Save report'; } } }
+});
+
+/* ---------- dragging and resizing on the dashboard canvas ----------
+   While the pointer moves, the page isn't redrawn: the dragged item follows the pointer,
+   a dashed outline shows the cell it will land in, and the other items slide to where
+   they would go. Letting go stores the new layout and redraws once. */
+let drag = null;
+document.addEventListener('pointerdown', (e) => {
+  const h = e.target.closest && e.target.closest('#db-cv [data-cv]');
+  if (!h || !D.edit || (e.button != null && e.button !== 0)) return;
+  const cv = document.getElementById('db-cv'), el = h.closest('[data-tile]');
+  if (!cv || !el) return;
+  e.preventDefault();
+  const tiles = canvasTiles(D.edit.tiles || []);
+  const t0 = tiles.find((t) => t.id === h.dataset.v); if (!t0) return;
+  drag = { id: t0.id, mode: h.dataset.cv === 'rz' ? 'resize' : 'move', sx: e.clientX, sy: e.clientY, colW: cv.getBoundingClientRect().width / CANVAS_COLS, tiles, t0, el, cv, rect: el.getBoundingClientRect(), result: tiles, pid: e.pointerId, moved: false };
+  try { h.setPointerCapture(e.pointerId); } catch (err) { /* older browsers */ }
+  el.classList.add('dragging');
+});
+window.addEventListener('pointermove', (e) => {
+  const d = drag; if (!d || e.pointerId !== d.pid) return;
+  const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+  if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+  const t = { ...d.t0 };
+  if (d.mode === 'move') {
+    t.x = Math.max(0, Math.min(CANVAS_COLS - t.w, Math.round(d.t0.x + dx / d.colW)));
+    t.y = Math.max(0, Math.round(d.t0.y + dy / CANVAS_ROW));
+    d.el.style.transform = `translate(${dx}px,${dy}px)`;
+  } else {
+    t.w = Math.max(2, Math.min(CANVAS_COLS - t.x, Math.round(d.t0.w + dx / d.colW)));
+    t.h = Math.max(1, Math.round(d.t0.h + dy / CANVAS_ROW));
+    d.el.style.width = Math.max(d.colW * 2 - 12, d.rect.width + dx) + 'px';
+    d.el.style.height = Math.max(CANVAS_ROW - 12, d.rect.height + dy) + 'px';
+    const b = d.el.querySelector('.db-badge'); if (b) { b.hidden = false; b.textContent = t.w + ' × ' + t.h; }
+  }
+  d.result = resolveCanvas(d.tiles.map((x) => (x.id === d.id ? t : x)), d.id, !!D.edit?.filters?.floatUp);
+  d.result.forEach((x) => { if (x.id === d.id) return; const el = d.cv.querySelector(`[data-tile="${CSS.escape(x.id)}"]`); if (el) setBox(el, x); });
+  const g = document.getElementById('db-ghost'), mine = d.result.find((x) => x.id === d.id);
+  if (g && mine) { g.hidden = false; setBox(g, mine); }
+  d.cv.style.height = (canvasHeight(d.result) + 3) * CANVAS_ROW + 'px';
+});
+function endDrag(e) {
+  const d = drag; if (!d || (e && e.pointerId !== d.pid)) return;
+  drag = null;
+  if (D.edit && d.moved) { D.edit.tiles = d.result; D.edit.dirty = true; }
+  const id = d.id, mode = d.mode;
+  repaint(() => document.querySelector(`#db-cv [data-cv="${mode === 'move' ? 'move' : 'rz'}"][data-v="${CSS.escape(id)}"]`)?.focus({ preventScroll: true }));
+}
+window.addEventListener('pointerup', endDrag);
+window.addEventListener('pointercancel', endDrag);
+
+document.addEventListener('keydown', (e) => {
+  const h = e.target.closest && e.target.closest('#db-cv [data-cv="move"]');
+  if (!h || !D.edit || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+  e.preventDefault();
+  const tiles = canvasTiles(D.edit.tiles || []);
+  const t = tiles.find((x) => x.id === h.dataset.v); if (!t) return;
+  const dx = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0, dy = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+  const n = e.shiftKey ? { ...t, w: Math.max(2, Math.min(CANVAS_COLS - t.x, t.w + dx)), h: Math.max(1, t.h + dy) } : { ...t, x: Math.max(0, Math.min(CANVAS_COLS - t.w, t.x + dx)), y: Math.max(0, t.y + dy) };
+  D.edit.tiles = resolveCanvas(tiles.map((x) => (x.id === t.id ? n : x)), t.id, !!D.edit.filters?.floatUp);
+  D.edit.dirty = true;
+  const id = t.id;
+  repaint(() => document.querySelector(`#db-cv [data-cv="move"][data-v="${CSS.escape(id)}"]`)?.focus({ preventScroll: true }));
 });
