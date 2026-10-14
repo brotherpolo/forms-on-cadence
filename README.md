@@ -189,6 +189,10 @@ On a record, **Section Heading** fields, sub-form grids, child sections and **Ta
 
 A sub-form grid, child section or Tasks section with more than 5 entries gets a search box. Tasks are found by title, notes, people, due date (or “done”), repeat and subtasks. A grid searches across its columns; a child section searches every field of its records. Words can be in any order. New grid rows, and rows with a problem to fix, always show; the grid's totals still cover every row.
 
+**Theme:** the button beside your name at the bottom of the sidebar steps through **Auto** (follows the device's light or dark setting), **Light** and **Dark**. The choice is kept on each device, so a computer and a phone can differ. It's applied before the page draws, so there's no flash of the wrong colours, and the phone's browser bar follows it.
+
+**Currency:** a Currency field, or a calculation shown as Currency, with no currency code set counts as **CAD**, matching what the form designer shows.
+
 Every screen uses the width it has, up to 1,600 pixels (dashboards use all of it); phones are unchanged.
 
 Sorting goes by the real value everywhere (lists, grids, report tables, drill-downs): dates and times by calendar, numbers by size, text in natural order (Item 2 before Item 10), blanks last. That includes a record's title column when the title field is a date or a number, the parent column, and "Link to record" columns.
