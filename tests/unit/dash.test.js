@@ -131,3 +131,35 @@ test('dashboard addresses', () => {
   assert.equal(routeFor({ name: 'dashboard', dashboardId: 'a b' }), '#/dashboard/a%20b');
   assert.equal(routeFor({ name: 'dashboards' }), '#/dashboards');
 });
+
+import { canvasTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder } from '../../src/dashlogic.js';
+
+test('canvas: old row layouts get positions', () => {
+  const t = canvasTiles([{ id: 'a', report: 'r', cols: 4, rows: 1 }, { id: 'b', report: 'r', cols: 8, rows: 2 }, { id: 'c', text: {}, cols: 6, rows: 2 }]);
+  assert.deepEqual(t.map((x) => [x.x, x.y, x.w, x.h]), [[0, 0, 4, 4], [4, 0, 8, 4], [0, 4, 12, 4]]);
+  assert.ok(!('cols' in t[0]));
+  assert.deepEqual(canvasTiles([{ id: 'a', x: 11, y: -2, w: 4, h: 0 }])[0], { id: 'a', x: 8, y: 0, w: 4, h: 1 });
+});
+
+test('canvas: moving pushes overlaps down; gaps stay unless floating up', () => {
+  const tiles = [{ id: 'a', x: 0, y: 0, w: 6, h: 2 }, { id: 'b', x: 6, y: 0, w: 6, h: 2 }, { id: 'c', x: 0, y: 4, w: 4, h: 2 }];
+  const moved = resolveCanvas(tiles.map((t) => (t.id === 'c' ? { ...t, x: 0, y: 1 } : t)), 'c', false);
+  const pos = Object.fromEntries(moved.map((t) => [t.id, [t.x, t.y]]));
+  assert.deepEqual(pos.c, [0, 1]); assert.deepEqual(pos.a, [0, 3]); assert.deepEqual(pos.b, [6, 0]);
+  const gap = resolveCanvas(tiles, null, false);
+  assert.equal(gap.find((t) => t.id === 'c').y, 4); // gap kept
+  const up = resolveCanvas(tiles, null, true);
+  assert.equal(up.find((t) => t.id === 'c').y, 2); // floated up
+  const wide = resolveCanvas(tiles.map((t) => (t.id === 'a' ? { ...t, w: 9 } : t)), 'a', false);
+  assert.equal(wide.find((t) => t.id === 'b').y, 2); // resized into b: b moves down
+});
+
+test('canvas: new tiles go in the first free spot; sizes; order; height', () => {
+  const tiles = [{ id: 'a', x: 0, y: 0, w: 6, h: 2 }];
+  assert.deepEqual(placeTile(tiles, 6, 2), { x: 6, y: 0 });
+  assert.deepEqual(placeTile(tiles, 8, 2), { x: 0, y: 2 });
+  assert.deepEqual(tileSize('kpi'), { w: 3, h: 2 });
+  assert.deepEqual(tileSize('pivot'), { w: 12, h: 5 });
+  assert.deepEqual(readingOrder([{ id: 'b', x: 6, y: 0 }, { id: 'c', x: 0, y: 3 }, { id: 'a', x: 0, y: 0 }]).map((t) => t.id), ['a', 'b', 'c']);
+  assert.equal(canvasHeight([{ y: 2, h: 3 }, { y: 0, h: 1 }]), 5);
+});
