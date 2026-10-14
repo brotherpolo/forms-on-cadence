@@ -175,7 +175,7 @@ Records made on their own (imported line items, say) can be put under a parent l
 
 On a record, **Section Heading** fields, sub-form grids, child sections and **Tasks** fold and open from their headings (a folded one shows a short summary, such as a grid's totals); **Collapse all / Expand all** is at the top. Everything starts open. What you fold is remembered for each form (folding Notes on one invoice folds it on every invoice), for your account on that device. A section with a problem to fix opens by itself when you save.
 
-A sub-form grid or child section with more than 5 records gets a search box. A grid searches across its columns; a child section searches every field of its records. Words can be in any order. New grid rows, and rows with a problem to fix, always show; the grid's totals still cover every row.
+A sub-form grid, child section or Tasks section with more than 5 entries gets a search box. Tasks are found by title, notes, people, due date (or “done”), repeat and subtasks. A grid searches across its columns; a child section searches every field of its records. Words can be in any order. New grid rows, and rows with a problem to fix, always show; the grid's totals still cover every row.
 
 Every screen uses the width it has, up to 1,600 pixels (dashboards use all of it); phones are unchanged.
 
