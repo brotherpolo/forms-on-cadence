@@ -4,6 +4,7 @@
 //
 // A saved report (reportDefs/{id}): { name, ownerId, shared, groups: [groupId], def, createdAt, updatedAt }
 //   def: { form, type, measure: {fn, ref?}, group?, col?, time?, interval?, columns?: [ref],
+//          (group and col may carry by: 'week'|'month'|'quarter'|'year' when they are dates)
 //          conditions: [{ ref, op: 'is'|'not', value }], join: 'and'|'or', dateRef?, compare?, sort? }
 // A dashboard (dashboards/{id}): { name, ownerId, shared, groups: [groupId], tiles, filters, createdAt, updatedAt }
 //   tiles:   [{ id, report: reportId, cols, rows }] or [{ id, text: { title, body }, cols, rows }]
@@ -133,14 +134,71 @@ function orderKeys(f, keys, totals) {
   return keys.sort((a, b) => (totals.get(b) || 0) - (totals.get(a) || 0) || a.localeCompare(b));
 }
 
-/** Records split by a field: [{ key, rows, value }], in the field's option order, else largest first. */
+/* ---------- grouping by numbers and dates ---------- */
+
+export const BYS = [['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
+const BY_IDS = BYS.map((b) => b[0]);
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Fields a report can split by: choices, text, links, Created by, numbers, and dates (by a period). */
+export const groupable = (x) => ['group', 'key', 'num', 'date'].includes(x.kind) && x.f.type !== 'color';
+const isDateField = (f) => kindOf(f) === 'date';
+
+/** The period a date falls in: { k: label, s: start time } ('Oct 2026', 'Week of Oct 5, 2026', 'Q4 2026', '2026'). */
+export function bucketOf(t, by) {
+  const d = new Date(t);
+  const y = d.getFullYear(), m = d.getMonth();
+  if (by === 'year') return { k: String(y), s: new Date(y, 0, 1).getTime() };
+  if (by === 'quarter') { const q = Math.floor(m / 3); return { k: `Q${q + 1} ${y}`, s: new Date(y, q * 3, 1).getTime() }; }
+  if (by === 'week') {
+    const st = new Date(y, m, d.getDate() - ((d.getDay() + 6) % 7)); // Monday
+    return { k: `Week of ${MON[st.getMonth()]} ${st.getDate()}, ${st.getFullYear()}`, s: st.getTime() };
+  }
+  return { k: `${MON[m]} ${y}`, s: new Date(y, m, 1).getTime() };
+}
+
+/** The group keys for one value, each with a sort value for numbers and periods. */
+function groupKeys(ctx, f, v, ref) {
+  if (isDateField(f)) {
+    const t = timeOf(v);
+    if (t == null) return [{ k: '(blank)' }];
+    if (BY_IDS.includes(ref && ref.by)) return [bucketOf(t, ref.by)];
+    return [{ k: textOf(ctx, f, v) || '(blank)', s: t }];
+  }
+  if (kindOf(f) === 'num') {
+    const n = typeof v === 'number' ? v : v == null || v === '' ? null : Number(v);
+    if (n == null || Number.isNaN(n)) return [{ k: '(blank)' }];
+    return [{ k: textOf(ctx, f, n) || String(n), s: n }];
+  }
+  return keysOf(ctx, f, v).map((k) => ({ k }));
+}
+
+/** "Date by month", "Invoice #", "Stage" */
+export function groupLabel(ctx, ref) {
+  const f = fieldOf(ctx, ref);
+  if (!f) return '';
+  const by = isDateField(f) && BYS.find((b) => b[0] === ref.by);
+  return f.label + (by ? ' by ' + by[1].toLowerCase() : '');
+}
+
+/** Records split by a field: [{ key, rows, value }]. Choices keep their option order; numbers
+ *  and dates go low to high (a date split by week, month, quarter or year); anything else
+ *  largest first. */
 export function groupRows(ctx, def, ref, list) {
   const f = fieldOf(ctx, ref);
   if (!f) return [];
-  const m = new Map();
-  list.forEach((r) => keysOf(ctx, f, valueOf(ctx, r, ref)).forEach((k) => { if (!m.has(k)) m.set(k, []); m.get(k).push(r); }));
+  const m = new Map(), sorts = new Map();
+  list.forEach((r) => groupKeys(ctx, f, valueOf(ctx, r, ref), ref).forEach(({ k, s }) => {
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(r);
+    if (s != null && !sorts.has(k)) sorts.set(k, s);
+  }));
   const totals = new Map([...m.entries()].map(([k, rs]) => [k, measureOf(ctx, def, rs) || 0]));
-  return orderKeys(f, [...m.keys()], totals).map((k) => ({ key: k, rows: m.get(k), value: totals.get(k) }));
+  const keys = [...m.keys()];
+  const ordered = isDateField(f) || kindOf(f) === 'num'
+    ? keys.sort((a, b) => (sorts.has(a) ? 0 : 1) - (sorts.has(b) ? 0 : 1) || (sorts.get(a) ?? 0) - (sorts.get(b) ?? 0) || a.localeCompare(b))
+    : orderKeys(f, keys, totals);
+  return ordered.map((k) => ({ key: k, rows: m.get(k), value: totals.get(k) }));
 }
 
 /** Bar and donut: at most `max` groups, the rest folded into "Other". */
@@ -164,7 +222,7 @@ export function pivotOf(ctx, def, list) {
   const colKeys = cols.slice(0, MAX_PIVOT_COLS).map((c) => c.key);
   const out = rows.slice(0, MAX_PIVOT_ROWS).map((r) => {
     const byCol = new Map(colKeys.map((k) => [k, []]));
-    r.rows.forEach((rec) => keysOf(ctx, cf, valueOf(ctx, rec, def.col)).forEach((k) => { if (byCol.has(k)) byCol.get(k).push(rec); }));
+    r.rows.forEach((rec) => groupKeys(ctx, cf, valueOf(ctx, rec, def.col), def.col).forEach(({ k }) => { if (byCol.has(k)) byCol.get(k).push(rec); }));
     return { key: r.key, cells: colKeys.map((k) => (byCol.get(k).length ? measureOf(ctx, def, byCol.get(k)) : null)), total: r.value };
   });
   return {
@@ -206,8 +264,22 @@ export function normalizeDef(ctx, def0) {
   def.conditions = Array.isArray(def.conditions) ? def.conditions : [];
   def.join = def.join === 'or' ? 'or' : 'and';
   const t = def.type || 'table';
-  if (['bar', 'donut', 'grouped', 'pivot'].includes(t) && !fieldOf(ctx, def.group)) def.group = pick(['group', 'key']);
-  if (t === 'pivot' && (!fieldOf(ctx, def.col) || sameRef(def.col, def.group))) def.col = pick(['group'], def.group);
+  // a split must be by a field that can split (not long text, say), and a date needs its period
+  const canSplit = (ref) => { const x = fields.find((y) => sameRef(y.ref, ref)); return !!x && groupable(x); };
+  const withBy = (ref) => {
+    if (!ref) return ref;
+    const x = fields.find((y) => sameRef(y.ref, ref));
+    if (x && x.kind === 'date') return { form: ref.form, id: ref.id, by: BY_IDS.includes(ref.by) ? ref.by : 'month' };
+    return { form: ref.form, id: ref.id };
+  };
+  if (['bar', 'donut', 'grouped', 'pivot'].includes(t)) {
+    if (!canSplit(def.group)) def.group = pick(['group', 'key']);
+    def.group = withBy(def.group);
+  }
+  if (t === 'pivot') {
+    if (!canSplit(def.col) || (sameRef(def.col, def.group) && (def.col.by || '') === (def.group?.by || ''))) def.col = pick(['group'], def.group);
+    def.col = withBy(def.col);
+  }
   if (['line', 'area'].includes(t)) {
     if (!fieldOf(ctx, def.time)) { const own = fields.find((x) => x.kind === 'date' && !x.f.system && x.ref.form === def.form); def.time = own ? own.ref : { form: def.form, id: '_created' }; }
     def.interval = def.interval === 'week' ? 'week' : 'month';

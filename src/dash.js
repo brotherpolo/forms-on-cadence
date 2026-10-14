@@ -15,7 +15,7 @@ import {
 } from './reportlogic.js';
 import {
   TYPES, PERIODS, chainFields, rowsFor, periodRange, kpiOf, slicesOf, groupRows, pivotOf, sortRecs, normalizeDef,
-  newDef, migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, keysOf,
+  newDef, migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, keysOf, groupable as canSplit, groupLabel, BYS,
   canvasTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_ROW, CANVAS_COLS,
 } from './dashlogic.js';
 
@@ -194,7 +194,7 @@ function bodyHTML(c, def, extra, key) {
     const p = pivotOf(c, def, list);
     if (!p) return { caption, html: `<p class="rp-empty">Choose rows and columns in the report’s settings.</p>` };
     const tc = `minmax(140px,1.6fr) ${p.cols.map(() => 'minmax(84px,1fr)').join(' ')} minmax(96px,1fr)`;
-    const rl = fieldOf(c, def.group)?.label || 'Rows', cl = fieldOf(c, def.col)?.label || 'Columns';
+    const rl = groupLabel(c, def.group) || 'Rows', cl = groupLabel(c, def.col) || 'Columns';
     return { caption, html: `<div class="rp-table db-pivot" role="table"><div class="rp-tr rp-th" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="columnheader">${esc(rl)} ↓ · ${esc(cl)} →</div>${p.cols.map((k) => `<div class="rp-td num" role="columnheader">${esc(k)}</div>`).join('')}<div class="rp-td num" role="columnheader">Total</div></div>
       ${p.rows.map((r) => `<div class="rp-tr" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader">${esc(r.key)}</div>${r.cells.map((v) => `<div class="rp-td num" role="cell">${v == null ? '–' : esc(fmtMeasure(c, def, v))}</div>`).join('')}<div class="rp-td num db-b" role="cell">${esc(fmtMeasure(c, def, r.total))}</div></div>`).join('')}
       <div class="rp-tr db-tot" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader">Total</div>${p.colTotals.map((v) => `<div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, v))}</div>`).join('')}<div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, p.grand))}</div></div></div>
@@ -211,7 +211,7 @@ function bodyHTML(c, def, extra, key) {
   if (def.type === 'grouped') {
     const groups = groupRows(c, def, def.group, list);
     if (!groups.length) return { caption, html: `<p class="rp-empty">Choose what to group by in the report’s settings.</p>` };
-    const gl = fieldOf(c, def.group)?.label || 'Group';
+    const gl = groupLabel(c, def.group) || 'Group';
     return { caption, html: `<div class="rp-table" role="table">${head}${groups.map((g) => {
       const rs = sortRecs(c, g.rows, sref, sort.dir).slice(0, 10);
       return `<div class="rp-tr db-grp" role="row"><div class="rp-td" role="rowheader"><b>${esc(g.key)}</b> <span class="db-gn">${esc(gl)} · ${g.rows.length}</span></div><div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, g.value))}</div></div>${rs.map(row).join('')}${g.rows.length > rs.length ? `<p class="rp-more db-gm">and ${g.rows.length - rs.length} more</p>` : ''}`;
@@ -313,7 +313,8 @@ function settingsHTML(c, d) {
   const fields = chainFields(c, def.form);
   const lab = (x) => (x.ref.form === def.form ? x.f.label : x.form.name + ' › ' + x.f.label);
   const sel = (dv, list, cur, extra = '') => `<select class="in" data-dv="${dv}"${extra}>${list}</select>`;
-  const groupable = fields.filter((x) => (x.kind === 'group' || x.kind === 'key') && x.f.type !== 'color');
+  const groupable = fields.filter(canSplit);
+  const bySel = (dv, ref, label) => (ref && ref.by ? `<div class="db-by"><label class="db-lab" for="db-${dv}">${label}</label><select class="in" id="db-${dv}" data-dv="${dv}">${BYS.map(([k, l]) => opt(k, l, ref.by)).join('')}</select></div>` : '');
   const nums = fields.filter((x) => x.kind === 'num');
   const dates = fields.filter((x) => x.kind === 'date');
   const t = def.type;
@@ -325,9 +326,9 @@ function settingsHTML(c, d) {
     h += `<div class="db-sec"><label class="db-lab">Value</label>${sel('measure', opt('count', 'Count of records', cur) + nums.map((x) => opt('sum|' + refKey(x.ref), 'Total ' + lab(x), cur) + opt('avg|' + refKey(x.ref), 'Average ' + lab(x), cur)).join(''), '')}</div>`;
   }
   if (['bar', 'donut', 'grouped', 'pivot'].includes(t)) {
-    h += `<div class="db-sec"><label class="db-lab">${t === 'pivot' ? 'Rows' : t === 'donut' ? 'Slices' : 'Group by'}</label>${sel('group', groupable.map((x) => opt(refKey(x.ref), lab(x), refKey(def.group))).join(''), '')}</div>`;
+    h += `<div class="db-sec"><label class="db-lab">${t === 'pivot' ? 'Rows' : t === 'donut' ? 'Slices' : 'Group by'}</label>${sel('group', groupable.map((x) => opt(refKey(x.ref), lab(x), refKey(def.group && { form: def.group.form, id: def.group.id }))).join(''), '')}${bySel('groupby', def.group, 'Split by')}</div>`;
   }
-  if (t === 'pivot') h += `<div class="db-sec"><label class="db-lab">Columns</label>${sel('col', groupable.filter((x) => refKey(x.ref) !== refKey(def.group)).map((x) => opt(refKey(x.ref), lab(x), refKey(def.col))).join(''), '')}</div>`;
+  if (t === 'pivot') h += `<div class="db-sec"><label class="db-lab">Columns</label>${sel('col', groupable.filter((x) => refKey(x.ref) !== refKey(def.group && { form: def.group.form, id: def.group.id }) || x.kind === 'date').map((x) => opt(refKey(x.ref), lab(x), refKey(def.col && { form: def.col.form, id: def.col.id }))).join(''), '')}${bySel('colby', def.col, 'Split by')}</div>`;
   if (t === 'line' || t === 'area') {
     h += `<div class="db-sec"><label class="db-lab">Over time, by</label>${sel('time', dates.map((x) => opt(refKey(x.ref), lab(x), refKey(def.time))).join(''), '')}
       <div class="db-seg" role="group" aria-label="Interval">${[['week', 'Weeks'], ['month', 'Months']].map(([k, l]) => `<button type="button" class="${(def.interval || 'month') === k ? 'on' : ''}" aria-pressed="${(def.interval || 'month') === k}" data-d="interval" data-v="${k}">${l}</button>`).join('')}</div></div>`;
@@ -637,6 +638,8 @@ document.addEventListener('change', (e) => {
     case 'measure': changeDef((def) => { if (t.value === 'count') def.measure = { fn: 'count' }; else { const [fn, ...rest] = t.value.split('|'); def.measure = { fn, ref: refOf(rest.join('|')) }; } }); break;
     case 'group': changeDef((def) => { def.group = refOf(t.value); }); break;
     case 'col': changeDef((def) => { def.col = refOf(t.value); }); break;
+    case 'groupby': changeDef((def) => { if (def.group) def.group = { ...def.group, by: t.value }; }); break;
+    case 'colby': changeDef((def) => { if (def.col) def.col = { ...def.col, by: t.value }; }); break;
     case 'time': changeDef((def) => { def.time = refOf(t.value); }); break;
     case 'dateRef': changeDef((def) => { def.dateRef = refOf(t.value); }); break;
     case 'addcol': if (t.value) changeDef((def) => { def.columns = (def.columns || []).concat(refOf(t.value)); }); break;

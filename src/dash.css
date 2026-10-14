@@ -30,6 +30,9 @@
 .db-side .fset{display:flex;flex-direction:column;gap:12px}
 .db-sec{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
 .db-sec .help{margin:0}
+.db-by{display:flex;align-items:center;gap:10px;margin-top:4px}
+.db-by .db-lab{white-space:nowrap}
+.db-by .in{flex:1}
 .db-lab{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
 .db-seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line-strong);border-radius:9px;overflow:hidden;background:var(--surface);align-self:flex-start}
 .db-seg button{border:0;background:none;padding:0 12px;min-height:38px;font:inherit;font-size:13px;color:var(--muted);cursor:pointer}
