@@ -61,7 +61,16 @@
 .lv-hb{display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:0;font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;font-weight:600;cursor:pointer;min-height:32px;white-space:nowrap}
 .lv-hb:hover,.lv-hb.on{color:var(--fg)}
 .lv-arr{font-size:9px;width:10px;display:inline-block}
-.lv-tbl td.lv-long{max-width:340px;min-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lv-tbl th,.lv-tbl td{padding-left:12px;padding-right:12px}
+/* The table fills the width it has: every value stays on one line (cut off with … past 260px,
+   full text on hover), and long text takes whatever room is left, so the list only scrolls
+   sideways when the columns really don't fit. */
+.lv-tbl td.title{white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}
+.lv-tbl td{white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.lv-tbl th{white-space:normal;vertical-align:bottom}
+.lv-tbl .lv-hb{white-space:normal;text-align:left;line-height:1.25;padding:4px 0}
+.lv-tbl th.num .lv-hb{text-align:right}
+.lv-tbl td.lv-long{width:100%;max-width:0;min-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lv-card .lv-long{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .lv-tbl td.num{text-align:right;font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
 .lv-tbl .lv-ck{width:44px;padding-right:0}

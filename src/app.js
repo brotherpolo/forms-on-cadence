@@ -264,7 +264,7 @@ function renderMain(){
   else if(view.name==='report'){title=reportName(view.reportId);h=viewReport(view.reportId);wide=true;}
   else if(view.name==='dashboards'){title='Dashboards';h=viewDashboards();}
   else if(view.name==='dashboard'){title=dashName(view.dashboardId);h=viewDashboard(view.dashboardId);wide=true;}
-  else if(view.name==='records'){const f=formById(view.formId);title=f?.name;h=viewRecords(f);}
+  else if(view.name==='records'){const f=formById(view.formId);title=f?.name;h=viewRecords(f);wide=true;}
   else if(view.name==='record'){const f=formById(view.formId);title=f?.name;h=viewRecord(f);}
   else if(view.name==='import'){title=importTitle();h=viewImport(formById(view.formId));}
   else if(view.name==='imports'){title='Import history';h=viewImports();}

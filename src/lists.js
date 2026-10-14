@@ -256,7 +256,7 @@ function table(form, c, shown, rows, allOn, someOn, cfg) {
     <thead><tr><th class="lv-ck"><label class="lv-cklab"><input type="checkbox" data-lvc="all" aria-label="Select all shown"${allOn ? ' checked' : ''}${someOn ? ' data-mixed="1"' : ''}></label></th>${headCell({ key: 'title' }, titleLabel, cfg)}${shown.map((col) => headCell(col, col.label, cfg)).join('')}</tr></thead>
     <tbody>${rows.map((r) => {
       const sel = LV.sel.has(r.rec.id);
-      return `<tr data-act="open-record" data-id="${r.rec.id}"${sel ? ' class="sel"' : ''}><td class="lv-ck" data-stop><label class="lv-cklab"><input type="checkbox" data-lvc="sel" data-v="${r.rec.id}" aria-label="Select ${esc(r.title)}"${sel ? ' checked' : ''}></label></td><td class="title">${esc(r.title)}</td>${r.cells.map((cell) => `<td${cell.num ? ' class="num"' : cell.long ? ` class="lv-long" title="${esc(cell.text)}"` : ''}>${cellHtml(cell)}</td>`).join('')}</tr>`;
+      return `<tr data-act="open-record" data-id="${r.rec.id}"${sel ? ' class="sel"' : ''}><td class="lv-ck" data-stop><label class="lv-cklab"><input type="checkbox" data-lvc="sel" data-v="${r.rec.id}" aria-label="Select ${esc(r.title)}"${sel ? ' checked' : ''}></label></td><td class="title" title="${esc(r.title)}">${esc(r.title)}</td>${r.cells.map((cell) => `<td${cell.num ? ' class="num"' : cell.long ? ` class="lv-long" title="${esc(cell.text)}"` : cell.text && cell.text.length > 30 ? ` title="${esc(cell.text)}"` : ''}>${cellHtml(cell)}</td>`).join('')}</tr>`;
     }).join('')}</tbody>
     ${showTotals ? `<tfoot><tr><td></td><td>Total</td>${shown.map((col, i) => `<td class="num">${esc(fmtTotal(col, totals[i]))}</td>`).join('')}</tr></tfoot>` : ''}
   </table></div></div>`;
