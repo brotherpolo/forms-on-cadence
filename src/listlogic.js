@@ -12,7 +12,7 @@
 //   filters  { <fieldId>: [option, …] }    choice fields only; a record matches any ticked option
 //   density  'cozy' | 'compact'
 
-export const NOCOL = new Set(['heading', 'signature', 'textarea']);
+export const NOCOL = new Set(['heading', 'signature']);
 export const NUMERIC = new Set(['number', 'decimal', 'currency', 'percent', 'range', 'rating']);
 export const FILTERABLE = new Set(['select', 'radio', 'multiselect', 'checkbox']);
 export const SETTABLE = new Set(['select', 'radio', 'checkbox']);
@@ -117,6 +117,9 @@ function sortValueOf(f, v, text) {
  * One cell: { text, sort, num, field }.
  * h: { form, recById, valOf(f, rec, form), fmt(f, v), recTitle(rec, form), kids(recId, formId), nameOf(uid) }
  */
+/** Long text shows on one line in a list (the full text is on the record). */
+const oneLine = (f, t) => (f.type === 'textarea' ? String(t ?? '').replace(/\s*\n\s*/g, ' ').trim() : t);
+
 export function cellOf(key, rec, h) {
   if (key === 'title') {
     const t = h.recTitle(rec, h.form);
@@ -131,8 +134,8 @@ export function cellOf(key, rec, h) {
     const f = fieldIn(h.form, key.slice(2));
     if (!f) return { text: '', sort: null, num: false };
     const v = h.valOf(f, rec, h.form);
-    const text = h.fmt(f, v);
-    return { text, sort: sortValueOf(f, v, text), num: isNumField(f), field: f, value: v };
+    const text = oneLine(f, h.fmt(f, v));
+    return { text, sort: sortValueOf(f, v, text), num: isNumField(f), field: f, value: v, long: f.type === 'textarea' };
   }
   if (key.startsWith('p:')) {
     const [, pfId, fid] = key.split(':');
@@ -142,8 +145,8 @@ export function cellOf(key, rec, h) {
     const f = fieldIn(pf, fid);
     if (!f) return { text: '', sort: null, num: false };
     const v = h.valOf(f, p, pf);
-    const text = h.fmt(f, v);
-    return { text, sort: sortValueOf(f, v, text), num: isNumField(f), field: f, value: v };
+    const text = oneLine(f, h.fmt(f, v));
+    return { text, sort: sortValueOf(f, v, text), num: isNumField(f), field: f, value: v, long: f.type === 'textarea' };
   }
   if (key.startsWith('kids:')) {
     const n = h.kids(rec.id, key.slice(5));

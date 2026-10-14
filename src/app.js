@@ -31,7 +31,8 @@ const T=Object.fromEntries(TYPES.map(t=>[t[0],{label:t[1],glyph:t[2],group:t[3]}
 const CHOICE=new Set(['select','radio','multiselect']);
 const NUMERIC=new Set(['number','decimal','currency','percent','range','rating']);
 const PLACEHOLDER=new Set(['text','textarea','email','phone','url','number','decimal','currency','percent']);
-const NOCOL=new Set(['heading','signature','textarea']);
+const NOCOL=new Set(['heading','signature','textarea']); // not on the record page's child cards
+const NOLIST=new Set(['heading','signature']); // can't be a records-list column
 
 /* ---------- Lookups ---------- */
 const formById=id=>store.forms.find(f=>f.id===id);
@@ -815,7 +816,7 @@ function fieldEditor(x){
   if(x.type==='range')h+=P('Step',num('step',x.step))+P('Unit after value',inp('suffix',x.suffix,'placeholder="e.g. %"'));
   if(x.type==='rating')h+=P('Number of stars',num('max',x.max));
   if(x.type==='relation')h+=P('Links to form',`<select class="in" data-prop="relForm"><option value="">Choose a form…</option>${[...store.forms].sort(byOrder).map(o=>`<option value="${o.id}"${o.id===x.relForm?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`);
-  if(x.type!=='heading')h+=`<div class="props-sw">${x.type==='formula'?'':sw('required','Required')}${NOCOL.has(x.type)?'':sw('inList','Column in the starting list')}<label class="switch"><input type="checkbox" data-prop="width" data-kind="half"${x.width==='half'?' checked':''}><span class="tr"></span><span>Half width on wide screens</span></label></div>`;
+  if(x.type!=='heading')h+=`<div class="props-sw">${x.type==='formula'?'':sw('required','Required')}${NOLIST.has(x.type)?'':sw('inList','Column in the starting list')}<label class="switch"><input type="checkbox" data-prop="width" data-kind="half"${x.width==='half'?' checked':''}><span class="tr"></span><span>Half width on wide screens</span></label></div>`;
   h+=`<div class="prop full"><span class="keyline">Field ID ${esc(x.id)}</span></div>`;
   return `<div class="fedit">${h}</div>`;
 }
@@ -995,7 +996,7 @@ document.addEventListener('change',async e=>{
   if(t.dataset.prop){
     const f=fdraft.fields.find(x=>x.id===t.closest('[data-feid]').dataset.feid);const p=t.dataset.prop,k=t.dataset.kind;
     if(k==='bool')f[p]=t.checked;else if(k==='half')f.width=t.checked?'half':'full';
-    else if(p==='type'){const nf=newField(t.value);Object.assign(f,{type:t.value},Object.fromEntries(Object.entries(nf).filter(([key])=>!['id','label','required','inList','help','width'].includes(key)&&f[key]==null)));if(NOCOL.has(f.type))f.inList=false;}
+    else if(p==='type'){const nf=newField(t.value);Object.assign(f,{type:t.value},Object.fromEntries(Object.entries(nf).filter(([key])=>!['id','label','required','inList','help','width'].includes(key)&&f[key]==null)));if(NOLIST.has(f.type))f.inList=false;}
     else if(t.tagName==='SELECT')f[p]=t.value;
     setFdirty();
     if(['type','relForm','required','inList','format'].includes(p)||k==='bool')renderMain();
