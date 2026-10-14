@@ -342,6 +342,19 @@ export async function setRecordsValue(recs, fieldId, value) {
   );
 }
 
+/**
+ * Attach records to a parent, or detach them (parentId null). changes: [{ id, parentId,
+ * parentFormId, set: { fieldId: value } }]. Only the parent link and the listed fields change.
+ */
+export async function attachRecords(changes) {
+  const me = store.user.uid, now = Date.now();
+  await commitOps(changes.map((c) => (b) => {
+    const data = { parentId: c.parentId || null, parentFormId: c.parentFormId || null, updatedAt: now, updatedBy: me };
+    Object.entries(c.set || {}).forEach(([k, v]) => { data['values.' + k] = plain(v); });
+    b.update(doc(db, 'records', c.id), data);
+  }));
+}
+
 /* ---------- Imports (admins) ---------- */
 
 /**

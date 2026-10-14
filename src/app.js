@@ -3,11 +3,13 @@ import './designer.css';
 import './grids.css';
 // Admin screens (users and groups) live in admin.js; data access in store.js.
 
-import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess } from './store.js';
+import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
 import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts, drillNav, fitTiles } from './dash.js';
 import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
+import { initAttach, openPickChildren, closeAttach } from './attach.js';
+import { copyPatch, linkPatch, attachChange, detachChange } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
 import { FX } from './formulas.js';
@@ -368,8 +370,10 @@ function viewRecord(form){
   const childHTML=rec?children.map(({cf})=>{
     const rs=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
     const cols=(cf.fields||[]).filter(f=>f.inList&&!NOCOL.has(f.type)&&f.id!==titleFieldOf(cf)?.id).slice(0,3);
-    return `<section class="section"><div class="section-h"><h2>${badge(cf)}${esc(cf.name)} <span class="count">${rs.length}</span></h2>${canCreate(store.me,cf.id)?`<button class="btn sm" data-act="add-child" data-id="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}</div>
-      <div class="panel">${rs.length?`<div class="cards" style="display:flex">${rs.map(r=>`<button class="card" data-act="open-record" data-id="${r.id}"><b>${esc(recTitle(r,cf))}</b><div class="meta">${cols.map(c=>{const t=fmt(c,valOf(c,r));return t?`<span>${esc(c.label)}: ${esc(t)}</span>`:''}).join('')}</div></button>`).join('')}</div>`:`<p class="note">No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.</p>`}</div></section>`;
+    const card=r=>`<button class="card" data-act="open-record" data-id="${r.id}"><b>${esc(recTitle(r,cf))}</b><div class="meta">${cols.map(c=>{const t=fmt(c,valOf(c,r));return t?`<span>${esc(c.label)}: ${esc(t)}</span>`:''}).join('')}</div></button>`;
+    const detachable=r=>!ro&&canEditRecord(store.me,r);
+    return `<section class="section"><div class="section-h"><h2>${badge(cf)}${esc(cf.name)} <span class="count">${rs.length}</span></h2>${ro?'':`<button class="btn sm" data-act="child-attach" data-id="${cf.id}">Attach existing</button>`}${canCreate(store.me,cf.id)?`<button class="btn sm" data-act="add-child" data-id="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}</div>
+      <div class="panel">${rs.length?`<div class="cards" style="display:flex">${rs.map(r=>detachable(r)?`<div class="at-card">${card(r)}<button type="button" class="ibtn at-det" data-act="child-detach" data-id="${r.id}" aria-label="Detach ${esc(recTitle(r,cf))} (keeps it)" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button></div>`:card(r)).join('')}</div>`:`<p class="note">No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.</p>`}</div></section>`;
   }).join(''):'';
   let backHTML='';
   if(rec){
@@ -413,6 +417,7 @@ function recordMeta(rec){
    Rows live in rdraft.grids[childFormId] = {rows:[{id, values, ownerId, createdAt, isNew, dirty, errors}], removed:[ids], sort}
    and are saved with the parent in one batch (saveRecordBundle). Long text, files, photos,
    signatures, locations and multiple choice open in a pop-up (cdraft) from their cell. */
+const DETACH_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 4 8"/><path d="M8 12h3"/><path d="M3 3l18 18"/></svg>';
 const POPUP_TYPES=new Set(['textarea','file','image','signature','location','multiselect']);
 const GRID_SUM=new Set(['number','decimal','currency']);
 let cdraft=null;
@@ -422,15 +427,17 @@ function gridCols(rel,cf){
   const picked=Array.isArray(rel.cols)&&rel.cols.length?rel.cols.map(id=>usable.find(f=>f.id===id)).filter(Boolean):usable.filter(f=>!POPUP_TYPES.has(f.type)).slice(0,8);
   return picked.length?picked:usable.slice(0,1);
 }
+/** Add a moved record's recalculated values (PARENT() and friends) to its attach/detach change. */
+function withFormulas(cf,rec,ch){const values={...(rec.values||{}),...ch.set};const r={...rec,values,parentId:ch.parentId};(cf.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const c=calc(cf,f,r);const v=c.e?null:c.v;if((rec.values||{})[f.id]!==v)ch.set[f.id]=v;});return ch;}
 function rowRec(row,cf,d){return {id:row.id,formId:cf.id,values:row.values,parentId:d.recordId||null,ownerId:row.ownerId,_parentDraft:d};}
 function syncGrids(d,rec,rels){
   d.grids=d.grids||{};
   rels.forEach(({cf})=>{
     let g=d.grids[cf.id];
-    if(!g)g=d.grids[cf.id]={rows:[],removed:[],sort:null};
+    if(!g)g=d.grids[cf.id]={rows:[],removed:[],detached:[],sort:null};
     if(!d.dirty){
       g.rows=rec?store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)).map(r=>({id:r.id,values:clone(r.values||{}),ownerId:r.ownerId,createdAt:r.createdAt,isNew:false,dirty:false,errors:{}})):[];
-      g.removed=[];
+      g.removed=[];g.detached=[];
     }
   });
 }
@@ -489,7 +496,7 @@ function gridSection(form,rel,cf,d,parentRo){
     const bad=row.errors&&Object.keys(row.errors).length;
     if(bad)Object.entries(row.errors).forEach(([fid,m])=>{const f=cf.fields.find(x=>x.id===fid);errs.push(`Row ${i+1}: ${f?f.label+' – ':''}${m}`);});
     return `<tr class="${row.isNew?'gnew':''}${bad?' gbad':''}" data-growid="${row.id}">${cols.map(f=>`<td class="${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?'num':''}${row.errors?.[f.id]?' bad':''}">${gridCell(cf,row,f,d,ro)}</td>`).join('')}
-      <td class="gact">${row.isNew?'':`<button type="button" class="ibtn" data-act="open-record" data-id="${row.id}" aria-label="Open this row on its own" title="Open on its own">↗</button>`}${ro?'':`<button type="button" class="ibtn" data-act="grid-del" data-grid="${cf.id}" data-row="${row.id}" aria-label="Delete row ${i+1}" title="Delete row">✕</button>`}</td></tr>`;
+      <td class="gact">${row.isNew?'':`<button type="button" class="ibtn" data-act="open-record" data-id="${row.id}" aria-label="Open this row on its own" title="Open on its own">↗</button>`}${ro||row.isNew?'':`<button type="button" class="ibtn at-det" data-act="grid-detach" data-grid="${cf.id}" data-row="${row.id}" aria-label="Detach row ${i+1} (keeps the ${esc(itemName(cf).toLowerCase())})" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button>`}${ro?'':`<button type="button" class="ibtn" data-act="grid-del" data-grid="${cf.id}" data-row="${row.id}" aria-label="Delete row ${i+1}" title="Delete row">✕</button>`}</td></tr>`;
   }).join('');
   const totals=cols.map(f=>gridTotal(cf,f,d,rows));
   const showTot=rows.length>1&&totals.some(t=>t!=null);
@@ -500,7 +507,7 @@ function gridSection(form,rel,cf,d,parentRo){
       ${showTot?`<tfoot><tr>${cols.map((f,i)=>`<td class="num" id="gt-${cf.id}-${f.id}">${totals[i]==null?(i===0?'Total':''):esc(f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i]))}</td>`).join('')}<td></td></tr></tfoot>`:''}
     </table></div>
     ${errs.length?`<div class="gerrs" role="alert">${errs.slice(0,6).map(e=>`<p>${esc(e)}</p>`).join('')}</div>`:''}
-    <div class="gfoot">${mayAdd?`<button type="button" class="btn sm" data-act="grid-add" data-grid="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}<span class="help">${g.sort?'Click a heading again to reverse. ':'Click a heading to sort. '}${mayAdd?'New rows stay at the bottom until you save.':''}</span></div></div></section>`;
+    <div class="gfoot">${mayAdd?`<button type="button" class="btn sm" data-act="grid-add" data-grid="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${parentRo?'':`<button type="button" class="btn sm" data-act="grid-attach" data-grid="${cf.id}">Attach existing</button>`}<span class="help">${g.sort?'Click a heading again to reverse. ':'Click a heading to sort. '}${mayAdd?'New rows stay at the bottom until you save.':''}</span></div></div></section>`;
 }
 function refreshGrids(d){
   if(!d?.grids)return;
@@ -655,11 +662,18 @@ async function saveRecord(){
   const now=Date.now(),old=d.recordId?recById(d.recordId):null,id=d.recordId||uid('r');
   if(!d.recordId)d.recordId=id; // rows' PARENT() and the parent's CHILD…() see the final ID
   const rowsOut=[],removed=[];
-  grels.forEach(({cf})=>{const g=d.grids?.[cf.id];if(!g)return;
+  grels.forEach(({rel,cf})=>{const g=d.grids?.[cf.id];if(!g)return;
     g.rows.forEach(row=>{
+      if(row.attached){if(rel?.copy)Object.assign(row.values,copyPatch(form,cf,d.values,row.values));Object.assign(row.values,linkPatch(cf,form.id,id,row.fromParent,row.values));}
       const r=rowRec(row,cf,d);let changed=row.isNew||row.dirty;
       (cf.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const c=calc(cf,f,r);const v=c.e?null:c.v;if(row.values[f.id]!==v){row.values[f.id]=v;changed=true;}});
       if(changed&&rowEditable(row,cf))rowsOut.push({id:row.id,formId:cf.id,values:row.values,parentId:id,parentFormId:form.id,createdAt:row.createdAt||now,updatedAt:now});
+    });
+    (g.detached||[]).forEach(row=>{
+      if(!rowEditable(row,cf))return;
+      const values={...row.values,...linkPatch(cf,form.id,null,id,row.values)};
+      (cf.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const c=calc(cf,f,{id:row.id,formId:cf.id,values,parentId:null,ownerId:row.ownerId});values[f.id]=c.e?null:c.v;});
+      rowsOut.push({id:row.id,formId:cf.id,values,parentId:null,parentFormId:null,createdAt:row.createdAt||now,updatedAt:now});
     });
     removed.push(...g.removed);});
   (form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,draftRec(d));d.values[f.id]=r.e?null:r.v;});
@@ -920,6 +934,45 @@ document.addEventListener('click',async e=>{
     case 'save-record':saveRecord();break;
     case 'grid-add':{const cf=formById(el.dataset.grid);const g=rdraft?.grids?.[el.dataset.grid];if(!cf||!g)return;const row={id:uid('r'),values:newRowValues(cf,rdraft,formById(rdraft.formId)),ownerId:store.user.uid,isNew:true,dirty:true,errors:{}};g.rows.push(row);markDirty(rdraft);renderMain();document.querySelector(`tr[data-growid="${row.id}"] .gin, tr[data-growid="${row.id}"] .gck, tr[data-growid="${row.id}"] .gpopbtn`)?.focus();break;}
     case 'grid-del':{const g=rdraft?.grids?.[el.dataset.grid];if(!g)return;const row=g.rows.find(r=>r.id===el.dataset.row);if(!row)return;g.rows=g.rows.filter(r=>r!==row);if(!row.isNew)g.removed.push(row.id);markDirty(rdraft);renderMain();toast('Row removed. It’s deleted when you save; Discard brings it back.');break;}
+    case 'grid-attach':{
+      const d=rdraft,cf=formById(el.dataset.grid),form=formById(d?.formId),g=d?.grids?.[el.dataset.grid];if(!cf||!g||!form)return;
+      const rel=(form.children||[]).find(c=>c.formId===cf.id);
+      openPickChildren({parentForm:form,parentId:d.recordId||null,parentTitle:d.recordId?recTitle({formId:form.id,values:d.values},form):'this new '+itemName(form).toLowerCase(),childForm:cf,exclude:new Set(g.rows.map(r=>r.id)),
+        onPick:recs=>{
+          if(rdraft!==d)return;
+          recs.forEach(r=>{const values=clone(r.values||{});if(rel?.copy)Object.assign(values,copyPatch(form,cf,d.values,values));
+            g.detached=(g.detached||[]).filter(x=>x.id!==r.id);
+            g.rows.push({id:r.id,values,ownerId:r.ownerId,createdAt:r.createdAt,isNew:false,dirty:true,errors:{},attached:true,fromParent:r.parentId||null});});
+          markDirty(d);renderMain();
+          toast(`Attached ${recs.length} ${recs.length===1?itemName(cf).toLowerCase():cf.name.toLowerCase()}. They’re saved with this ${itemName(form).toLowerCase()}.`);
+        }});
+      break;}
+    case 'grid-detach':{
+      const d=rdraft,g=d?.grids?.[el.dataset.grid],cf=formById(el.dataset.grid);if(!g||!cf)return;
+      const row=g.rows.find(r=>r.id===el.dataset.row);if(!row)return;
+      g.rows=g.rows.filter(r=>r!==row);
+      const stored=recById(row.id);
+      if(d.recordId&&stored&&stored.parentId===d.recordId){g.detached=g.detached||[];g.detached.push(row);} // on this record now: saved as unattached
+      markDirty(d);renderMain();
+      toast(`Detached. The ${itemName(cf).toLowerCase()} is kept${d.recordId&&stored?.parentId===d.recordId?' and saved as unattached when you save; Discard brings it back':''}.`);
+      break;}
+    case 'child-attach':{
+      const parent=recById(view.recordId),cf=formById(id),pf=parent&&formById(parent.formId);if(!parent||!cf||!pf)return;
+      if(rdraft?.dirty){toast('Save this record first.');return;}
+      const rel=(pf.children||[]).find(c=>c.formId===cf.id);
+      openPickChildren({parentForm:pf,parentId:parent.id,parentTitle:recTitle(parent,pf),childForm:cf,exclude:new Set(store.records.filter(r=>r.parentId===parent.id&&r.formId===cf.id).map(r=>r.id)),
+        onPick:async recs=>{
+          try{await attachRecords(recs.map(r=>withFormulas(cf,r,attachChange(r,parent,pf,cf,!!rel?.copy))));}
+          catch(err){console.error('[formwright] attach',err);toast(err?.code==='permission-denied'?'You don’t have permission to change one of those. Nothing was attached.':'Attaching failed. Check your connection and try again.');return false;}
+          toast(`Attached ${recs.length} ${recs.length===1?itemName(cf).toLowerCase():cf.name.toLowerCase()}`);renderMain();
+        }});
+      break;}
+    case 'child-detach':{
+      const r=recById(id),cf=r&&formById(r.formId);if(!r||!cf)return;
+      try{await attachRecords([withFormulas(cf,r,detachChange(r,cf,r.parentFormId||recById(r.parentId)?.formId))]);}
+      catch(err){console.error('[formwright] detach',err);toast(err?.code==='permission-denied'?'You don’t have permission to change that record.':'Detaching failed. Check your connection and try again.');return;}
+      toast(`Detached ${recTitle(r,cf)}. It’s kept; Attach existing brings it back.`);renderMain();
+      break;}
     case 'grid-sort':{const g=rdraft?.grids?.[el.dataset.grid];if(!g)return;const k=el.dataset.key;g.sort=g.sort?.key===k?{key:k,dir:g.sort.dir==='asc'?'desc':'asc'}:{key:k,dir:'asc'};renderMain();document.querySelector(`[data-act="grid-sort"][data-grid="${el.dataset.grid}"][data-key="${k}"]`)?.focus();break;}
     case 'grid-cell':{const g=rdraft?.grids?.[el.dataset.grid];const cf=formById(el.dataset.grid);const row=g?.rows.find(r=>r.id===el.dataset.row);if(!row||!cf)return;cdraft={formId:cf.id,values:row.values,errors:{},_row:row,_fid:el.dataset.fid,readOnly:rdraft.readOnly||!rowEditable(row,cf)};renderMain();document.querySelector('.gpop [data-scope="cell"] input, .gpop [data-scope="cell"] textarea, .gpop [data-scope="cell"] canvas')?.focus();break;}
     case 'cell-close':{const back=cdraft&&`[data-act="grid-cell"][data-row="${cdraft._row.id}"][data-fid="${cdraft._fid}"]`;cdraft=null;renderMain();if(back)document.querySelector(back)?.focus();break;}
@@ -1126,7 +1179,8 @@ document.addEventListener('pointercancel',endFmDrag);
 export function startApp(){
   booted=false;pendingRoute=null;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
   initReports({fmt,valOf,recTitle,go,renderMain,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
-  initLists({fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,search:()=>ui.search});
+  initLists({fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,withFormulas,search:()=>ui.search});
+  initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
   initImports({fmt,recTitle,formById,go,renderMain,computeFormulas:(form,rec)=>{const out={};(form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,rec);out[f.id]=r.e?null:r.v;});return out;}});
   Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false});
   store.onChange=onData;

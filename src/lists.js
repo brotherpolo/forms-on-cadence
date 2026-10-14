@@ -2,7 +2,10 @@
 // height, and selecting several records to change, export or delete together.
 // Column and view logic lives in listlogic.js; app.js passes in its formatting helpers.
 import './lists.css';
-import { store, saveListView, deleteListView, deleteRecords, setRecordsValue } from './store.js';
+import { store, saveListView, deleteListView, deleteRecords, setRecordsValue, attachRecords } from './store.js';
+import { openPickParent } from './attach.js';
+import { attachChange } from './attachlogic.js';
+import { nounOf } from './dashlogic.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
 import { $, esc, uid, toast, badge, itemName } from './ui.js';
 import { importButton } from './imports.js';
@@ -12,7 +15,7 @@ import {
   FILTERABLE, SETTABLE, MAX_COLS,
 } from './listlogic.js';
 
-let H = { fmt: null, valOf: null, recTitle: null, titleFieldOf: null, parentsOf: null, formById: null, recById: null, recordsOf: null, renderMain: null, search: () => '' };
+let H = { fmt: null, valOf: null, recTitle: null, titleFieldOf: null, parentsOf: null, formById: null, recById: null, recordsOf: null, renderMain: null, withFormulas: (f, r, ch) => ch, search: () => '' };
 export function initLists(helpers) { H = { ...H, ...helpers }; }
 
 const UNDO_MS = 6000;
@@ -25,7 +28,7 @@ let pending = null; // { ids:Set, timer, formId, label } — deletes waiting out
 const me = () => store.user?.uid;
 const remembered = (formId) => { try { return localStorage.getItem('fw.listView.' + formId); } catch (e) { return null; } };
 const remember = (formId, id) => { try { localStorage.setItem('fw.listView.' + formId, id); } catch (e) { /* private mode */ } };
-const plural = (n, form) => n + ' ' + (n === 1 ? itemName(form).toLowerCase() : String(form.name || 'records').toLowerCase());
+const plural = (n, form) => n.toLocaleString() + ' ' + nounOf(form, n);
 
 /* ---------- context for one form ---------- */
 
@@ -228,6 +231,7 @@ function bulkBar(form, selRecs, editable, selHidden, settable) {
     <b>${selRecs.length} selected</b>${selHidden ? `<span class="lv-note">${selHidden} hidden by filters</span>` : ''}${none ? '<span class="lv-note">You can’t change these</span>' : ''}
     <span class="lv-grow"></span>
     ${settable.length ? `<div class="lv-anchor"><button type="button" class="btn" data-lv="pop" data-v="set"${none || LV.busy ? ' disabled' : ''}>Set field</button>${setPop}</div>` : ''}
+    ${H.parentsOf(form.id).some((pf) => canViewForm(store.me, pf.id)) ? `<button type="button" class="btn" data-lv="attach-to"${none || LV.busy ? ' disabled' : ''}>Attach to…</button>` : ''}
     <button type="button" class="btn" data-lv="export">Export CSV</button>
     <button type="button" class="btn lv-del" data-lv="del-ask"${none || LV.busy ? ' disabled' : ''}>${ICON.trash}Delete</button>
     <button type="button" class="btn" data-lv="sel-clear">Clear</button>
@@ -404,6 +408,28 @@ async function setField(fid, opt) {
   LV.busy = false; repaint();
 }
 
+/** Attach the ticked records to one parent record (moving any that are on another). */
+function attachTo() {
+  const { form, all, recs } = selectedEditable(); if (!form || !recs.length) return;
+  const parentForms = H.parentsOf(form.id).filter((pf) => canViewForm(store.me, pf.id));
+  if (!parentForms.length) return;
+  LV.pop = null;
+  openPickParent({
+    childForm: form, recs, skipped: all.length - recs.length, parentForms,
+    onPick: async (parent, pf) => {
+      const rel = (pf.children || []).find((c) => c.formId === form.id);
+      const changes = recs.filter((r) => r.parentId !== parent.id).map((r) => H.withFormulas(form, r, attachChange(r, parent, pf, form, !!rel?.copy)));
+      LV.busy = true;
+      try { await attachRecords(changes); }
+      catch (e) { console.error('[formwright] attach', e); LV.busy = false; toast(e?.code === 'permission-denied' ? 'You don’t have permission to change one of those. Nothing was attached.' : 'Attaching failed. Nothing was changed.'); return false; }
+      LV.busy = false;
+      changes.forEach((c) => LV.sel.delete(c.id));
+      toast(`Attached ${plural(changes.length, form)} to ${H.recTitle(parent, pf)}`);
+      repaint();
+    },
+  });
+}
+
 function exportCsv() {
   const form = formNow(); if (!form) return;
   const c = ctxFor(form);
@@ -510,6 +536,7 @@ document.addEventListener('click', (e) => {
     case 'name-cancel': LV.naming = null; repaint(); break;
     case 'name-save': saveNamed(); break;
     case 'set': setField(el.dataset.f, v); break;
+    case 'attach-to': attachTo(); break;
     case 'export': exportCsv(); break;
     case 'sel-clear': LV.sel.clear(); LV.pop = null; repaint(); break;
     case 'del-ask': LV.confirm = true; LV.focusDel = true; LV.pop = null; repaint(); break;
