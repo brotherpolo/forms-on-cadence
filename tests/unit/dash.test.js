@@ -194,7 +194,8 @@ test('canvas: old row layouts get positions', () => {
   const t = canvasTiles([{ id: 'a', report: 'r', cols: 4, rows: 1 }, { id: 'b', report: 'r', cols: 8, rows: 2 }, { id: 'c', text: {}, cols: 6, rows: 2 }]);
   assert.deepEqual(t.map((x) => [x.x, x.y, x.w, x.h]), [[0, 0, 4, 4], [4, 0, 8, 4], [0, 4, 12, 4]]);
   assert.ok(!('cols' in t[0]));
-  assert.deepEqual(canvasTiles([{ id: 'a', x: 11, y: -2, w: 4, h: 0 }])[0], { id: 'a', x: 8, y: 0, w: 4, h: 1 });
+  assert.deepEqual(canvasTiles([{ id: 'a', x: 11, y: -2, w: 4, h: 0 }])[0], { id: 'a', x: 8, y: 0, w: 4, h: 2 }, 'a report is at least two rows');
+  assert.equal(canvasTiles([{ id: 't', text: {}, x: 0, y: 0, w: 4, h: 1 }])[0].h, 1, 'a text block can be one row');
 });
 
 test('canvas: moving pushes overlaps down; gaps stay unless floating up', () => {
