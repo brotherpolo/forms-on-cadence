@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   rowsFor, condHit, periodRange, kpiOf, slicesOf, groupRows, pivotOf, normalizeDef, newDef, defFromWidget,
-  migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, sortRecs, chainFields, bucketOf, groupLabel, drillRows, drillLabel, baseRows,
+  migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, sortRecs, chainFields, bucketOf, groupLabel, drillRows, drillLabel, baseRows, nounOf, shareOf,
 } from '../../src/dashlogic.js';
 import { parseRoute, routeFor } from '../../src/route.js';
 
@@ -227,4 +227,22 @@ test('canvas: new tiles go in the first free spot; sizes; order; height', () => 
   assert.deepEqual(tileSize('pivot'), { w: 24, h: 10 });
   assert.deepEqual(readingOrder([{ id: 'b', x: 6, y: 0 }, { id: 'c', x: 0, y: 3 }, { id: 'a', x: 0, y: 0 }]).map((t) => t.id), ['a', 'b', 'c']);
   assert.equal(canvasHeight([{ y: 2, h: 3 }, { y: 0, h: 1 }]), 5);
+});
+
+test('cards count records in the form’s own words; shares only where a share means something', () => {
+  assert.equal(nounOf({ name: 'Line item', itemName: 'Line item' }, 53), 'line items');
+  assert.equal(nounOf({ name: 'Line item', itemName: 'Line item' }, 1), 'line item');
+  assert.equal(nounOf({ name: 'Line items', itemName: 'Line item' }, 2), 'line items');
+  assert.equal(nounOf({ name: 'Invoices' }, 1), 'invoice');
+  assert.equal(nounOf({ name: 'Invoices' }, 0), 'invoices');
+  assert.equal(nounOf({ name: 'Company' }, 3), 'companies');
+  assert.equal(nounOf({ name: 'Box' }, 3), 'boxes');
+  assert.equal(nounOf({ name: 'People', itemName: 'Person' }, 3), 'people');
+  assert.equal(nounOf({ name: 'People', itemName: 'Person' }, 1), 'person');
+  assert.equal(nounOf(null, 2), 'records');
+  assert.equal(shareOf({ measure: { fn: 'count' } }, 4, 53), 8);
+  assert.equal(shareOf({}, 19, 53), 36);
+  assert.equal(shareOf({ measure: { fn: 'sum', ref: {} } }, 250, 1000), 25);
+  assert.equal(shareOf({ measure: { fn: 'avg', ref: {} } }, 10, 40), null);
+  assert.equal(shareOf({}, 3, 0), null);
 });
