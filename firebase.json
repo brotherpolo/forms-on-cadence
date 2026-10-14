@@ -60,6 +60,15 @@
         ]
       },
       {
+        "source": "/boot.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
         "source": "**",
         "headers": [
           {
@@ -76,7 +85,7 @@
           },
           {
             "key": "Content-Security-Policy",
-            "value": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+            "value": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; script-src 'self' https://apis.google.com https://www.google.com https://www.gstatic.com; worker-src 'self'"
           },
           {
             "key": "Permissions-Policy",

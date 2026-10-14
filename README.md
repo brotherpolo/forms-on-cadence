@@ -121,6 +121,8 @@ Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Si
 - **Date for periods:** which date a dashboard's period (This month, This year…) looks at. Charts over time ignore the period; they always show the last 12 months or 26 weeks.
 - **Add to dashboard** puts it on an existing dashboard or a new one. The top of the editor lists the dashboards it's on.
 
+**The Reports and Dashboards lists** are tables. **Name** is always the first column; **Columns** adds, removes and reorders the rest (reports: Type, Data from, On dashboards, Last updated, Value, Grouped by, Split by, Over time, Conditions, Owner, Sharing, Created; dashboards: Reports, Home, Sharing, Last updated, Reports on it, Starting period, Owner, Created). The choice is kept for you on each device. One search box looks through the name and every column shown, words in any order. Click a heading to sort (again to reverse); click a row to open it. On phones each row is a card.
+
 **A dashboard** lays out saved reports and text blocks on a grid with no gaps.
 
 - A dashboard uses the full width beside the sidebar. Its grid is 24 squares across, and rows are as tall as a square is wide, so items keep their shape on any screen (bigger screen, bigger items). Dashboards made on the earlier 12-column grid double onto the new one when opened.
@@ -369,7 +371,11 @@ Manual deploy: `FIREBASE_HOSTING_SITE=cadence-forms npm run deploy` (with your s
 
 ## Security
 
-- **New accounts see nothing** until an admin adds them to a security group: no forms, names, shared dashboards, reports or list views. The rules enforce it; the app also waits, so a new account gets no permission errors.
+- **Locked libraries.** With a `package-lock.json` in the repository, every deploy installs exactly the library versions recorded there (`npm ci`), so a hijacked new release of a library can't slip into a deploy. Without one, the workflow falls back to the newest allowed versions and shows a warning. To create or refresh it (Cloud Shell or any computer with Node 22): put `package.json` in an empty folder, run `npm install --package-lock-only --no-audit --no-fund`, and upload the `package-lock.json` it makes to the top of the repository. Update libraries on purpose, then run the tests.
+- **Scripts only from this site.** The Content Security Policy in `firebase.json` lets pages run scripts only from this site and Google's sign-in and App Check services (`apis.google.com`, `www.google.com`, `www.gstatic.com`). There are no inline scripts: what used to be inline in `index.html` (the theme and the install helper) is `public/boot.js`. Text that slips into a page can't run as code, and neither can an `onerror=` style attribute.
+- **No access, no app.** Anyone signed in who isn't an administrator or in at least one security group sees only a blocking screen: "You don't have access yet. Please contact an administrator.", the email they're signed in with, and **Sign out**. Nothing of the app is drawn behind it. It lifts by itself when an admin adds them to a group, and comes back at once if their access is removed.
+- **Cadence is by approval.** A Formwright admin switches on **Can use Cadence** on the Users screen (`users/{uid}.cadence`); admins always can. Without it the rules refuse every Cadence task, directory, push-setting and private-item read or write, and Formwright's Tasks panel explains that Cadence isn't on for you. Cadence's sign-in creates the same starting account record Formwright does, so new Cadence people show up on the Users screen to approve.
+- **New accounts see nothing** until an admin adds them to a security group: only the no-access screen, and no forms, names, shared dashboards, reports or list views. The rules enforce it; the app also waits, so a new account gets no permission errors.
 - **Records** are only ever readable as the person's access allows (see How permissions work). Shared dashboards, reports and list views hold settings only, never record data.
 - **Uploads:** up to 25 MB each. Web pages, SVG images, scripts and XML are refused, so a file link can't run code.
 - **The site** sends security headers: no framing by other sites (stops click-jacking), no MIME sniffing, a strict referrer policy, and camera/location limited to this site.
