@@ -117,9 +117,10 @@ Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Si
 
 **A dashboard** lays out saved reports and text blocks on a grid with no gaps.
 
-- **Edit dashboard** turns the dashboard into a canvas with a 12-column grid:
+- A dashboard uses the full width beside the sidebar. Its grid is 24 squares across, and rows are as tall as a square is wide, so items keep their shape on any screen (bigger screen, bigger items). Dashboards made on the earlier 12-column grid double onto the new one when opened.
+- **Edit dashboard** shows the grid as dots, one per corner:
   - **Move:** drag an item by its handle (top-left). A dashed outline shows where it will land; items in the way slide down.
-  - **Resize:** drag an item's bottom-right corner. A badge shows its size in columns × rows.
+  - **Resize:** drag an item's bottom-right corner. A badge shows its size in squares (columns × rows). A report is at least 3 × 3, a text block 3 × 2.
   - **Keyboard:** focus a handle; arrow keys move the item, Shift + arrow keys resize it.
   - Gaps are allowed. **Float items up** slides everything up to close vertical gaps (saved with the dashboard).
   - Add saved reports (or make a new one from there) and text blocks; new items go in the first free spot. ✕ removes an item. Press **Save dashboard** when done.
