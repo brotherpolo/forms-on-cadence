@@ -390,26 +390,37 @@ export function usedOn(dashboards, reportId) {
 }
 
 /* ---------- the dashboard canvas ----------
-   12 columns wide; rows are CANVAS_ROW px tall. Each tile has x, y (top-left cell) and w, h.
+   24 columns as wide as the screen allows, and square cells: a row is as tall as a column is
+   wide, so a tile keeps its shape on any screen. Each tile has x, y (top-left cell) and w, h.
    Items may leave gaps. Moving or resizing one pushes whatever it overlaps further down; with
-   "float up" on, everything then slides up to close vertical gaps. */
+   "float up" on, everything then slides up to close vertical gaps.
+   Dashboards saved before this (12 columns, 76 px rows) have no filters.grid; their tiles
+   double in every direction when they're opened (gridTiles), and are saved with grid: 24. */
 
-export const CANVAS_COLS = 12;
-export const CANVAS_ROW = 76;
+export const CANVAS_COLS = 24;
+export const GRID = 24;
+export const MIN_W = 3;
+export const minH = (t) => (t && t.text ? 2 : 3);
 const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 const clampTile = (t) => {
-  const w = Math.max(2, Math.min(CANVAS_COLS, Math.round(t.w ?? 6)));
-  // a report needs two rows (heading and number); a text block can be one
-  return { ...t, w, h: Math.max(t.text ? 1 : 2, Math.min(40, Math.round(t.h ?? 4))), x: Math.max(0, Math.min(CANVAS_COLS - w, Math.round(t.x || 0))), y: Math.max(0, Math.round(t.y || 0)) };
+  const w = Math.max(MIN_W, Math.min(CANVAS_COLS, Math.round(t.w ?? 12)));
+  // a report needs room for its heading and a number; a text block can be shorter
+  return { ...t, w, h: Math.max(minH(t), Math.min(80, Math.round(t.h ?? 8))), x: Math.max(0, Math.min(CANVAS_COLS - w, Math.round(t.x || 0))), y: Math.max(0, Math.round(t.y || 0)) };
 };
 
 /** Tiles with positions. Tiles saved by the older row layout (cols, rows) get the spot they had. */
-export function canvasTiles(tiles) {
+/** Positions without the size rules: tiles saved by the oldest row layout (cols, rows) get the spot they had. */
+function placedRaw(tiles) {
   const list = tiles || [];
-  if (list.every((t) => t.x != null && t.y != null)) return list.map(clampTile);
+  if (list.every((t) => t.x != null && t.y != null)) return list.map((t) => ({ ...t }));
   const L = layout(list.map((t) => ({ ...t, cols: t.cols || t.w || 6, rows: t.rows || 2 })));
-  return list.map((t) => (t.x != null && t.y != null ? clampTile(t) : clampTile({ ...t, x: L[t.id].c0, y: L[t.id].r0 * 2, w: L[t.id].c, h: L[t.id].h * 2 })))
-    .map(({ cols, rows, ...rest }) => rest);
+  return list.map((t) => (t.x != null && t.y != null ? { ...t } : { ...t, x: L[t.id].c0, y: L[t.id].r0 * 2, w: L[t.id].c, h: L[t.id].h * 2 }));
+}
+const strip = ({ cols, rows, ...rest }) => rest;
+
+/** Tiles with positions, kept to the grid's size rules. */
+export function canvasTiles(tiles) {
+  return placedRaw(tiles).map(clampTile).map(strip);
 }
 
 /** Keep `movedId` where it is; push overlapped tiles down; optionally float everything up. */
@@ -445,14 +456,20 @@ export function placeTile(tiles, w, h) {
   return { x: 0, y: bottom };
 }
 
+/** Tiles on the 24-column square grid, doubling a dashboard saved on the old 12-column one. */
+export function gridTiles(tiles, filters) {
+  if (filters && filters.grid === GRID) return canvasTiles(tiles);
+  return placedRaw(tiles).map((x) => clampTile({ ...x, x: (x.x || 0) * 2, y: (x.y || 0) * 2, w: (x.w ?? 6) * 2, h: (x.h ?? 4) * 2 })).map(strip);
+}
+
 export function canvasHeight(tiles) { return tiles.reduce((m, t) => Math.max(m, (t.y || 0) + (t.h || 0)), 0); }
 
 /** The size a tile starts at, by report type. */
 export function tileSize(type) {
-  if (type === 'kpi') return { w: 3, h: 2 };
-  if (type === 'text') return { w: 4, h: 2 };
-  if (['table', 'grouped', 'pivot'].includes(type)) return { w: 12, h: 5 };
-  return { w: 6, h: 4 };
+  if (type === 'kpi') return { w: 6, h: 4 };
+  if (type === 'text') return { w: 8, h: 4 };
+  if (['table', 'grouped', 'pivot'].includes(type)) return { w: 24, h: 10 };
+  return { w: 12, h: 8 };
 }
 
 /** Tiles in reading order (top to bottom, left to right), for phones and screen readers. */

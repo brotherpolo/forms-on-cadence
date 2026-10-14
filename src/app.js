@@ -264,7 +264,7 @@ function renderMain(){
   if(view.name==='reports'){title='Reports';h=viewReportsList();}
   else if(view.name==='report'){title=reportName(view.reportId);h=viewReport(view.reportId);wide=true;}
   else if(view.name==='dashboards'){title='Dashboards';h=viewDashboards();}
-  else if(view.name==='dashboard'){title=dashName(view.dashboardId);h=viewDashboard(view.dashboardId);wide=true;}
+  else if(view.name==='dashboard'){title=dashName(view.dashboardId);h=viewDashboard(view.dashboardId);wide='full';}
   else if(view.name==='records'){const f=formById(view.formId);title=f?.name;h=viewRecords(f);wide=true;}
   else if(view.name==='record'){const f=formById(view.formId);title=f?.name;h=viewRecord(f);}
   else if(view.name==='import'){title=importTitle();h=viewImport(formById(view.formId));}
@@ -274,7 +274,7 @@ function renderMain(){
   else if(admin.handles(view)){const r=admin.renderView(view);title=r.title;h=r.html;}
   else if(view.name==='welcome'){title='Formwright';h=viewWelcome();}
   $('#topttl').textContent=title||'Formwright';
-  m.innerHTML=`<div class="wrap${wide?' wide':''}">${h}</div>`;
+  m.innerHTML=`<div class="wrap${wide?' wide':''}${wide==='full'?' full':''}">${h}</div>`;
   document.querySelectorAll('canvas[data-sig]').forEach(initSig);
   if(view.name==='records')afterRecords();
   if(view.name==='dashboard')fitTiles();

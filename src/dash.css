@@ -71,8 +71,11 @@
 .db-pick small{color:var(--muted);font-size:12px}
 
 /* the canvas: 12 columns, 76 px rows (CANVAS_ROW in dashlogic.js) */
-.db-cv{position:relative;margin:0 -6px}
-.db-cv.edit{background-image:linear-gradient(to right,var(--line) 1px,transparent 1px),linear-gradient(to bottom,var(--line) 1px,transparent 1px);background-size:calc((100% - 12px) / 12) 76px;background-position:6px 0;background-origin:content-box;border-radius:12px;outline:1px dashed var(--line-strong);outline-offset:2px}
+.db-cv{position:relative;margin:0 -4px;container-type:inline-size;aspect-ratio:24 / var(--rows,8)}
+/* one cell: the canvas is 24 cells wide and the cells are square */
+.db-cv > *{--cell:calc(100cqw / 24)}
+.db-cv.edit{--dot:var(--line-strong);background-image:radial-gradient(circle at 0 0,var(--dot) 1.4px,transparent 1.8px),radial-gradient(circle at 100% 0,var(--dot) 1.4px,transparent 1.8px),radial-gradient(circle at 0 100%,var(--dot) 1.4px,transparent 1.8px),radial-gradient(circle at 100% 100%,var(--dot) 1.4px,transparent 1.8px);background-size:calc(100% / 24) calc(100% / var(--rows,8));border-radius:4px}
+.db-tile,.db-ghost{left:calc(var(--x,0) * var(--cell) + 4px);top:calc(var(--y,0) * var(--cell) + 4px);width:calc(var(--w,6) * var(--cell) - 8px);height:calc(var(--h,4) * var(--cell) - 8px)}
 .db-tile{position:absolute;margin:0;cursor:default;transition:left .16s ease,top .16s ease,width .16s ease,height .16s ease,box-shadow .15s}
 .db-tile.dragging{transition:none;z-index:6;box-shadow:0 18px 40px rgba(15,20,40,.28);opacity:.97}
 .db-ghost{position:absolute;z-index:1;border:2px dashed var(--accent);background:var(--accent-soft);border-radius:12px;pointer-events:none;transition:left .08s,top .08s,width .08s,height .08s}
@@ -88,7 +91,7 @@
 .db-float{margin:0 4px}
 .db-tile .rp-wh .ibtn{flex:none}
 @media (max-width:760px){
-  .db-cv{height:auto !important;margin:0;display:flex;flex-direction:column;gap:12px}
+  .db-cv{height:auto !important;aspect-ratio:auto;margin:0;display:flex;flex-direction:column;gap:12px}
   .db-cv.edit{background:none}
   .db-tile{position:relative;left:auto !important;top:auto !important;width:auto !important;height:auto !important;min-height:180px;transform:none !important}
   .db-tile.db-t-kpi,.db-tile.db-text{min-height:0}
@@ -182,7 +185,8 @@ button.db-li:hover{background:var(--accent-soft)}
 
 /* Dashboard tiles fit their content to the tile instead of scrolling: the number and the donut
    scale to the space, bars share the height, and tables show what fits with a "See all". */
-.db-tile .rp-wb{overflow-x:hidden;container-type:size}
+/* never a scroll bar: fitTiles() makes the content fit, and anything left over is clipped */
+.db-tile .rp-wb{overflow:hidden;container-type:size}
 .db-tile button.rp-kpi{font-size:clamp(1.05rem,min(15cqw,40cqh),2.4rem);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .db-tile .rp-kpisub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @container (max-height:96px){.db-tile .db-kd{display:none}}
@@ -205,3 +209,10 @@ button.db-li:hover{background:var(--accent-soft)}
 .db-tile.compact .v-full{display:none}
 .db-tile.compact .v-short{display:inline}
 .db-tile .db-pivot .rp-td.num .db-cellb{text-align:right}
+/* a dashboard uses the whole width beside the sidebar */
+.wrap.wide.full{max-width:none}
+/* bars squeezed to fit a short tile */
+.db-tile.tight .rp-bars{gap:1px}
+.db-tile.tight .rp-bar{min-height:13px;font-size:11.5px}
+.db-tile.tight .rp-bt,.db-tile.tight .rp-bf{height:10px}
+.rp-bars .db-more{flex:none;margin-top:2px;border-radius:6px}

@@ -17,7 +17,7 @@ import {
   TYPES, PERIODS, chainFields, rowsFor, periodRange, kpiOf, slicesOf, groupRows, pivotOf, sortRecs, normalizeDef,
   newDef, migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, keysOf, groupable as canSplit, groupLabel, BYS,
   drillRows, drillLabel, bucketOf,
-  canvasTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_ROW, CANVAS_COLS,
+  canvasTiles, gridTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_COLS, GRID, MIN_W, minH,
 } from './dashlogic.js';
 
 let H = { fmt: null, valOf: null, recTitle: null, go: null, openRecord: null, renderMain: null };
@@ -415,27 +415,52 @@ function ringSlice(el, e) {
 export function fitTiles() {
   document.querySelectorAll('#db-cv .db-tile').forEach((tile) => {
     const wb = tile.querySelector('.rp-wb');
-    const tbl = wb && wb.querySelector('.rp-table[data-fitk]');
+    if (!wb) return;
+    const over = () => wb.scrollHeight > wb.clientHeight + 1;
+    const loose = getComputedStyle(tile).position !== 'absolute'; // phones: tiles take the height they need
+    // undo the last fitting, then fit again
+    tile.classList.remove('compact', 'tight');
+    tile.querySelectorAll('[data-fit-hid]').forEach((el) => { el.hidden = false; delete el.dataset.fitHid; });
+    tile.querySelectorAll('.db-more').forEach((el) => el.remove());
+    if (loose) return;
+    const hide = (el) => { if (el && !el.hidden) { el.hidden = true; el.dataset.fitHid = '1'; } };
     // numbers that don't fit their space switch to the short form (CA$91.5k)
-    tile.classList.remove('compact');
-    if (getComputedStyle(tile).position === 'absolute' && [...wb.querySelectorAll('.rp-kpi, .db-pivot .db-cellb')].some((e) => e.scrollWidth > e.clientWidth + 1)) tile.classList.add('compact');
-    if (!tbl) return;
-    tbl.querySelector('.db-more')?.remove();
-    const rows = [...tbl.querySelectorAll(':scope > .rp-tr:not(.rp-th):not(.db-tot), :scope > .rp-more')];
-    const notes = [...wb.querySelectorAll(':scope > .rp-more')];
-    rows.concat(notes).forEach((r) => { r.hidden = false; });
-    if (getComputedStyle(tile).position !== 'absolute' || wb.scrollHeight <= wb.clientHeight + 1) return;
-    notes.forEach((r) => { r.hidden = true; });
-    const more = document.createElement('button');
-    more.type = 'button'; more.className = 'db-more'; more.dataset.d = 'drill'; more.dataset.k = tbl.dataset.fitk;
-    const n = +tbl.dataset.n || 0;
-    more.textContent = `See all ${n.toLocaleString()}`;
-    tbl.insertBefore(more, tbl.querySelector(':scope > .db-tot'));
-    while (wb.scrollHeight > wb.clientHeight + 1 && rows.length) rows.pop().hidden = true;
-    // a group heading left with no rows under it goes too
-    const last = rows[rows.length - 1];
-    if (last && last.classList.contains('db-grp')) last.hidden = true;
+    if ([...wb.querySelectorAll('.rp-kpi, .db-pivot .db-cellb')].some((e) => e.scrollWidth > e.clientWidth + 1)) tile.classList.add('compact');
+    // a KPI drops its extras, smallest first
+    for (const sel of ['.db-kd', '.rp-kpisub']) if (over()) hide(wb.querySelector(sel));
+    // bars squeeze together, then the ones that still don't fit go behind "See all"
+    const bars = wb.querySelector('.rp-bars');
+    if (bars && over()) {
+      tile.classList.add('tight');
+      const items = [...bars.children];
+      if (over()) {
+        const more = moreButton(tile, items.length);
+        bars.appendChild(more);
+        while (over() && items.length > 1) hide(items.pop());
+      }
+    }
+    // tables, grouped tables and pivots show the rows that fit
+    const tbl = wb.querySelector('.rp-table[data-fitk]');
+    if (tbl && over()) {
+      const rows = [...tbl.querySelectorAll(':scope > .rp-tr:not(.rp-th):not(.db-tot), :scope > .rp-more')];
+      wb.querySelectorAll(':scope > .rp-more').forEach(hide);
+      tbl.insertBefore(moreButton(tile, +tbl.dataset.n || 0, tbl.dataset.fitk), tbl.querySelector(':scope > .db-tot'));
+      while (over() && rows.length) hide(rows.pop());
+      const last = rows[rows.length - 1];
+      if (last && last.classList.contains('db-grp')) hide(last); // a group heading with no rows under it
+      if (over()) hide(tbl.querySelector(':scope > .db-tot'));
+    }
+    // last resort: the caption under the title
+    if (over()) hide(tile.querySelector('.rp-wh .rp-cap'));
   });
+}
+
+function moreButton(tile, n, key) {
+  const k = key || tile.querySelector('[data-d="drill"][data-k]')?.dataset.k || '';
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'db-more'; b.dataset.d = 'drill'; b.dataset.k = k;
+  b.textContent = n ? `See all ${n.toLocaleString()}` : 'See all';
+  return b;
 }
 let fitTimer = null;
 window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitTiles, 120); });
@@ -621,7 +646,7 @@ async function saveDraft() {
 async function addTile(did, reportId, text) {
   const editing = D.edit && D.did === did;
   const x = editing ? D.edit : dashById(did); if (!x) return;
-  const tiles = canvasTiles(x.tiles || []);
+  const tiles = editing ? canvasTiles(x.tiles || []) : gridTiles(x.tiles || [], x.filters);
   const r = reportById(reportId) || (D.draft && D.draft.id === reportId ? D.draft : null);
   const size = tileSize(text ? 'text' : r?.def?.type);
   const at = placeTile(tiles, size.w, size.h);
@@ -632,7 +657,7 @@ async function addTile(did, reportId, text) {
 }
 
 function dashData(x) {
-  return { name: x.name, ownerId: x.ownerId, shared: !!x.shared, groups: x.groups || [], tiles: clone(canvasTiles(x.tiles || [])), filters: clone(x.filters || { period: 'all', fields: [] }), createdAt: x.createdAt || Date.now(), updatedAt: x.updatedAt || Date.now() };
+  return { name: x.name, ownerId: x.ownerId, shared: !!x.shared, groups: x.groups || [], tiles: clone(gridTiles(x.tiles || [], x.filters)), filters: { ...clone(x.filters || { period: 'all', fields: [] }), grid: GRID }, createdAt: x.createdAt || Date.now(), updatedAt: x.updatedAt || Date.now() };
 }
 
 /* ---------- the Dashboards list ---------- */
@@ -680,11 +705,11 @@ export function viewDashboard(id) {
   const may = canChange(src);
   const fv = filterState(x);
   const extra = extraFor(x, fv);
-  const placed = canvasTiles(x.tiles || []);
+  const placed = edit ? canvasTiles(x.tiles || []) : gridTiles(x.tiles || [], x.filters);
   const home = homeId() === x.id;
   const floatUp = !!x.filters?.floatUp;
   const tiles = readingOrder(placed).map((t) => tileHTML(c, x, t, extra, edit)).join('');
-  const cvH = (canvasHeight(placed) + (edit ? 3 : 0)) * CANVAS_ROW;
+  const cvRows = Math.max(1, canvasHeight(placed) + (edit ? 6 : 0));
   const fieldFilters = (x.filters?.fields || []).map((ref) => {
     const f = fieldOf(c, ref);
     if (!f) return '';
@@ -719,8 +744,8 @@ export function viewDashboard(id) {
     ${fieldFilters}${addFilter}
     ${edit ? `<span class="help">The period you pick here is saved as the dashboard’s starting period.</span>` : ''}
   </div>
-  ${edit ? `<div class="db-cvbar"><label class="switch db-float"><input type="checkbox" data-dv="float"${floatUp ? ' checked' : ''}><span class="tr"></span><span>Float items up</span></label><p class="help db-cvhelp">Drag an item by its handle to move it, or drag its bottom-right corner to resize it. Items in the way move down. With a handle focused, arrow keys move the item and Shift + arrow keys resize it.</p></div>` : ''}
-  ${placed.length ? `<div class="db-cv${edit ? ' edit' : ''}${edit ? '' : ' can-drill'}" id="db-cv" style="height:${cvH}px"><div class="db-ghost" id="db-ghost" hidden></div>${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
+  ${edit ? `<div class="db-cvbar"><label class="switch db-float"><input type="checkbox" data-dv="float"${floatUp ? ' checked' : ''}><span class="tr"></span><span>Float items up</span></label><p class="help db-cvhelp">Drag an item by its handle to move it, or drag its bottom-right corner to resize it. Each dot is one step; 24 across. Items in the way move down. With a handle focused, arrow keys move the item and Shift + arrow keys resize it.</p></div>` : ''}
+  ${placed.length ? `<div class="db-cv${edit ? ' edit' : ''}${edit ? '' : ' can-drill'}" id="db-cv" style="--rows:${cvRows}"><div class="db-ghost" id="db-ghost" hidden></div>${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
   </div>${edit ? '' : drillHTML('d:' + x.id)}`;
 }
 
@@ -732,9 +757,9 @@ function pickerHTML(x) {
     ${list.length ? `<div class="db-plist">${list.map((r) => `<button type="button" class="db-pick" data-d="pick" data-v="${esc(r.id)}"${have.has(r.id) ? ' disabled' : ''}><b>${esc(r.name)}</b><small>${esc((TYPES.find((t) => t[0] === r.def?.type) || ['', ''])[1])}${c.formById(r.def?.form) ? ' · ' + esc(c.formById(r.def.form).name) : ''}${have.has(r.id) ? ' · already here' : ''}</small></button>`).join('')}</div>` : '<p class="note">No saved reports yet. Make one with <b>New report</b>.</p>'}</div>`;
 }
 
-const pct = (n) => ((n / CANVAS_COLS) * 100).toFixed(4);
-function tileBox(t) { return `left:calc(${pct(t.x)}% + 6px);width:calc(${pct(t.w)}% - 12px);top:${t.y * CANVAS_ROW}px;height:${t.h * CANVAS_ROW - 12}px`; }
-function setBox(el, t) { el.style.left = `calc(${pct(t.x)}% + 6px)`; el.style.width = `calc(${pct(t.w)}% - 12px)`; el.style.top = t.y * CANVAS_ROW + 'px'; el.style.height = t.h * CANVAS_ROW - 12 + 'px'; }
+// Positions are in cells; CSS turns them into sizes from the canvas's width (dash.css).
+function tileBox(t) { return `--x:${t.x};--y:${t.y};--w:${t.w};--h:${t.h}`; }
+function setBox(el, t) { el.style.setProperty('--x', t.x); el.style.setProperty('--y', t.y); el.style.setProperty('--w', t.w); el.style.setProperty('--h', t.h); }
 
 function tileHTML(c, x, t, extra, edit) {
   const label = t.text ? t.text.title || 'Text block' : reportById(t.report)?.name || 'Report';
@@ -762,7 +787,7 @@ function editTiles(fn) { if (!D.edit) return; const tiles = clone(D.edit.tiles |
 async function saveEdit() {
   const x = D.edit; if (!x) return;
   const fv = filterState(x);
-  const data = { ...dashData(x), name: (x.name || '').trim().slice(0, 120) || 'Dashboard', shared: admin() ? !!x.shared : false, groups: admin() && x.shared ? x.groups || [] : [], filters: { period: fv.period, fields: clone(x.filters?.fields || []), floatUp: !!x.filters?.floatUp }, updatedAt: Date.now() };
+  const data = { ...dashData(x), name: (x.name || '').trim().slice(0, 120) || 'Dashboard', shared: admin() ? !!x.shared : false, groups: admin() && x.shared ? x.groups || [] : [], filters: { period: fv.period, fields: clone(x.filters?.fields || []), floatUp: !!x.filters?.floatUp, grid: GRID }, updatedAt: Date.now() };
   try { await saveDashboard(x.id, data); } catch (e) { console.error(e); toast(e?.code === 'permission-denied' ? 'You can’t change this dashboard.' : 'Saving failed. Check your connection and try again.'); return; }
   D.edit = null; D.picker = false; D.confirm = null; toast('Dashboard saved'); repaint();
 }
@@ -930,20 +955,20 @@ window.addEventListener('pointermove', (e) => {
   const t = { ...d.t0 };
   if (d.mode === 'move') {
     t.x = Math.max(0, Math.min(CANVAS_COLS - t.w, Math.round(d.t0.x + dx / d.colW)));
-    t.y = Math.max(0, Math.round(d.t0.y + dy / CANVAS_ROW));
+    t.y = Math.max(0, Math.round(d.t0.y + dy / d.colW));
     d.el.style.transform = `translate(${dx}px,${dy}px)`;
   } else {
-    t.w = Math.max(2, Math.min(CANVAS_COLS - t.x, Math.round(d.t0.w + dx / d.colW)));
-    t.h = Math.max(t.text ? 1 : 2, Math.round(d.t0.h + dy / CANVAS_ROW));
-    d.el.style.width = Math.max(d.colW * 2 - 12, d.rect.width + dx) + 'px';
-    d.el.style.height = Math.max(CANVAS_ROW - 12, d.rect.height + dy) + 'px';
+    t.w = Math.max(MIN_W, Math.min(CANVAS_COLS - t.x, Math.round(d.t0.w + dx / d.colW)));
+    t.h = Math.max(minH(t), Math.round(d.t0.h + dy / d.colW));
+    d.el.style.width = Math.max(d.colW * MIN_W - 8, d.rect.width + dx) + 'px';
+    d.el.style.height = Math.max(d.colW * minH(t) - 8, d.rect.height + dy) + 'px';
     const b = d.el.querySelector('.db-badge'); if (b) { b.hidden = false; b.textContent = t.w + ' × ' + t.h; }
   }
   d.result = resolveCanvas(d.tiles.map((x) => (x.id === d.id ? t : x)), d.id, !!D.edit?.filters?.floatUp);
   d.result.forEach((x) => { if (x.id === d.id) return; const el = d.cv.querySelector(`[data-tile="${CSS.escape(x.id)}"]`); if (el) setBox(el, x); });
   const g = document.getElementById('db-ghost'), mine = d.result.find((x) => x.id === d.id);
   if (g && mine) { g.hidden = false; setBox(g, mine); }
-  d.cv.style.height = (canvasHeight(d.result) + 3) * CANVAS_ROW + 'px';
+  d.cv.style.setProperty('--rows', canvasHeight(d.result) + 6);
 });
 function endDrag(e) {
   const d = drag; if (!d || (e && e.pointerId !== d.pid)) return;
@@ -963,7 +988,7 @@ document.addEventListener('keydown', (e) => {
   const tiles = canvasTiles(D.edit.tiles || []);
   const t = tiles.find((x) => x.id === h.dataset.v); if (!t) return;
   const dx = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0, dy = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
-  const n = e.shiftKey ? { ...t, w: Math.max(2, Math.min(CANVAS_COLS - t.x, t.w + dx)), h: Math.max(t.text ? 1 : 2, t.h + dy) } : { ...t, x: Math.max(0, Math.min(CANVAS_COLS - t.w, t.x + dx)), y: Math.max(0, t.y + dy) };
+  const n = e.shiftKey ? { ...t, w: Math.max(MIN_W, Math.min(CANVAS_COLS - t.x, t.w + dx)), h: Math.max(minH(t), t.h + dy) } : { ...t, x: Math.max(0, Math.min(CANVAS_COLS - t.w, t.x + dx)), y: Math.max(0, t.y + dy) };
   D.edit.tiles = resolveCanvas(tiles.map((x) => (x.id === t.id ? n : x)), t.id, !!D.edit.filters?.floatUp);
   D.edit.dirty = true;
   const id = t.id;
