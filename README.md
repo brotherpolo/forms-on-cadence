@@ -175,19 +175,23 @@ Records made on their own (imported line items, say) can be put under a parent l
 
 ## Records lists
 
-The sidebar doesn't list forms; **Search forms** under Forms pops up the matching ones as you type (any part of the name, any case; ↑ ↓ to choose, Enter opens, Esc closes). Child and sub-forms are left out unless they're switched on for the sidebar in the form designer, so that switch now decides what a search can find. For the full list, use the form designer.
+The sidebar doesn't list forms. Click or tap **Search forms** under Forms and a pop-up lists every form you can open there, in sidebar order; typing narrows it (any part of the name, any case; ↑ ↓ to choose, Enter opens, Esc or clicking elsewhere closes). Child and sub-forms are left out unless they're switched on for the sidebar in the form designer, so that switch now decides what a search can find. For the full list, use the form designer.
 
 Under a record's fields come its sub-form grids, Tasks and child forms. Their order is set per form in the designer: **Fields** tab › **Under the fields**, by dragging a card by its handle or with ↑ ↓ (saved as `sectionOrder` on the form; fields always come first for now). New sub-forms and child forms join next to their kind.
 
 In the designer, fields and section cards move by dragging their handle (⠿), with a mouse or a finger; only the handle starts a drag, so scrolling never moves anything. With a handle focused, the up and down arrow keys move it one place. Field types are added by tapping them, or by dragging them onto the form with a mouse.
 
-In the designer, **Search field types** at the top of the field types filters as you type (other words work too: "money" finds Currency, "lookup" finds Link to record); **Enter** adds the first match.
+In the Form designer, **Search forms by name** above the list narrows it as you type (names only, any case, child and sub-forms included); the reorder arrows hide while it's in use, and Esc clears it.
+
+In the form editor, **Search field types** at the top of the field types filters as you type (other words work too: "money" finds Currency, "lookup" finds Link to record); **Enter** adds the first match.
 
 On a record, **Delete**, **Back** and **Save** sit in a bar at the top that stays in view as you scroll; who created and last edited the record is under its title.
 
 On a record, **Section Heading** fields, sub-form grids, child sections and **Tasks** fold and open from their headings (a folded one shows a short summary, such as a grid's totals); **Collapse all / Expand all** is at the top. Everything starts open. What you fold is remembered for each form (folding Notes on one invoice folds it on every invoice), for your account on that device. A section with a problem to fix opens by itself when you save.
 
 A sub-form grid, child section or Tasks section with more than 5 entries gets a search box. Tasks are found by title, notes, people, due date (or “done”), repeat and subtasks. A grid searches across its columns; a child section searches every field of its records. Words can be in any order. New grid rows, and rows with a problem to fix, always show; the grid's totals still cover every row.
+
+**Back button:** every screen you open is a step in the browser's history, so the phone's back button or gesture and the browser's Back go one screen back, the same as the in-app Back button (Forward works too). Back closes an open pop-up or the phone menu first, and with unsaved changes it asks first ("Tap again to leave without saving"). On the first screen, Back shows **Press back again to exit**; a second Back within a few seconds leaves.
 
 **Theme:** the button beside your name at the bottom of the sidebar steps through **Auto** (follows the device's light or dark setting), **Light** and **Dark**. The choice is kept on each device, so a computer and a phone can differ. It's applied before the page draws, so there's no flash of the wrong colours, and the phone's browser bar follows it.
 
