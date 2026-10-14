@@ -416,17 +416,17 @@ function viewRecord(form){
   const delKey='rec-'+(rec?.id||'');
   const kids=rec?store.records.filter(r=>r.parentId===rec.id).length:0;
   return `
+  <div class="recbar" role="toolbar" aria-label="${esc(itemName(form))} actions">
+    ${rec&&!ro?`<button class="btn danger${ui.confirm===delKey?' armed':''}" data-act="del-record">${ui.confirm===delKey?(kids?`Tap again to delete (${kids} child record${kids>1?'s':''} stay)`:'Tap again to delete'):'Delete'}</button>`:''}
+    <span class="grow" id="dirtynote" role="status">${rdraft.dirty?'Unsaved changes':ro?'Read only':''}</span>
+    <button class="btn ghost" data-act="back">${rdraft.dirty?'Discard':'Back'}</button>
+    ${ro?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
+  </div>
   <div class="crumbs">${crumbs}</div>
-  <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}</h1>${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
+  <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}</h1>${rec?`<p class="sub">${recordMeta(rec)}</p>`:''}${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
   ${parentPick}
   <div class="panel">
     <fieldset class="fset"${ro?' disabled':''}>${formFieldsHTML(form,rdraft,'record')}</fieldset>
-    <div class="savebar">
-      ${rec&&!ro?`<button class="btn danger${ui.confirm===delKey?' armed':''}" data-act="del-record">${ui.confirm===delKey?(kids?`Tap again to delete (${kids} child record${kids>1?'s':''} stay)`:'Tap again to delete'):'Delete'}</button>`:''}
-      <span class="grow" id="dirtynote">${rdraft.dirty?'Unsaved changes':rec?recordMeta(rec)+(ro?' · Read only':''):''}</span>
-      <button class="btn ghost" data-act="back">${rdraft.dirty?'Discard':'Back'}</button>
-      ${ro?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
-    </div>
   </div>
   ${gridHTML}
   ${rec?`<section class="section" id="rec-tasks">${tasksInner()}</section>`:''}
