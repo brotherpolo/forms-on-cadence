@@ -329,3 +329,14 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .tdue.late{color:var(--danger);font-weight:600}
 .tdue.ok{color:var(--ok)}
 .trow.done b{text-decoration:line-through;color:var(--muted);font-weight:500}
+
+/* folding sections on a record page */
+.fold-t{display:inline-flex;align-items:center;gap:10px;min-height:40px;max-width:100%;padding:4px 8px;margin:-4px -8px;border:0;border-radius:8px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.fold-t:hover{background:var(--sunk)}
+.fold-c{flex:none;color:var(--muted);transition:transform .15s}
+.fold-t[aria-expanded="true"] > .fold-c{transform:rotate(90deg)}
+.fold-sum{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font:400 14px var(--body)}
+.fsec h3{margin:0}
+.fsec h3 .fold-t{width:calc(100% + 16px)}
+.section-h h2 > .fold-t{flex:1;min-width:0;font:inherit}
+@media (prefers-reduced-motion:reduce){.fold-c{transition:none}}

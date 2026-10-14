@@ -10,6 +10,7 @@ import { initReports, viewReportsList, viewReport, reportName, leaveReport, repo
 import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { initAttach, openPickChildren, closeAttach } from './attach.js';
 import { titleSortOf } from './listlogic.js';
+import { headingOf, readFolds, isFolded, setFold, setFolds, foldKeys } from './foldlogic.js';
 import { copyPatch, linkPatch, attachChange, detachChange } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
@@ -373,8 +374,12 @@ function viewRecord(form){
     const cols=(cf.fields||[]).filter(f=>f.inList&&!NOCOL.has(f.type)&&f.id!==titleFieldOf(cf)?.id).slice(0,3);
     const card=r=>`<button class="card" data-act="open-record" data-id="${r.id}"><b>${esc(recTitle(r,cf))}</b><div class="meta">${cols.map(c=>{const t=fmt(c,valOf(c,r));return t?`<span>${esc(c.label)}: ${esc(t)}</span>`:''}).join('')}</div></button>`;
     const detachable=r=>!ro&&canEditRecord(store.me,r);
-    return `<section class="section"><div class="section-h"><h2>${badge(cf)}${esc(cf.name)} <span class="count">${rs.length}</span></h2>${ro?'':`<button class="btn sm" data-act="child-attach" data-id="${cf.id}">Attach existing</button>`}${canCreate(store.me,cf.id)?`<button class="btn sm" data-act="add-child" data-id="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}</div>
-      <div class="panel">${rs.length?`<div class="cards" style="display:flex">${rs.map(r=>detachable(r)?`<div class="at-card">${card(r)}<button type="button" class="ibtn at-det" data-act="child-detach" data-id="${r.id}" aria-label="Detach ${esc(recTitle(r,cf))} (keeps it)" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button></div>`:card(r)).join('')}</div>`:`<p class="note">No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.</p>`}</div></section>`;
+    const cOpen=!folded(form.id,'c:'+cf.id);
+    const cHead=`<div class="section-h"><h2>${foldBtn('c:'+cf.id,cOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${rs.length}</span>`,rs.length?'latest: '+recTitle(rs[0],cf):'')}</h2></div>`;
+    if(!cOpen)return `<section class="section" id="kids-${cf.id}">${cHead}</section>`;
+    const cBtns=`${canCreate(store.me,cf.id)?`<button class="btn sm" data-act="add-child" data-id="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${ro?'':`<button class="btn sm" data-act="child-attach" data-id="${cf.id}">Attach existing</button>`}`;
+    return `<section class="section" id="kids-${cf.id}">${cHead}
+      <div class="panel">${rs.length?`<div class="cards" style="display:flex">${rs.map(r=>detachable(r)?`<div class="at-card">${card(r)}<button type="button" class="ibtn at-det" data-act="child-detach" data-id="${r.id}" aria-label="Detach ${esc(recTitle(r,cf))} (keeps it)" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button></div>`:card(r)).join('')}</div>`:`<p class="note">No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.</p>`}${cBtns?`<div class="gfoot">${cBtns}</div>`:''}</div></section>`;
   }).join(''):'';
   let backHTML='';
   if(rec){
@@ -382,11 +387,13 @@ function viewRecord(form){
     store.forms.forEach(f=>(f.fields||[]).filter(x=>x.type==='relation'&&x.relForm===form.id).forEach(x=>recordsOf(f.id).filter(r=>r.values?.[x.id]===rec.id).forEach(r=>links.push({r,f,x}))));
     if(links.length)backHTML=`<section class="section"><div class="section-h"><h2>Linked from <span class="count">${links.length}</span></h2></div><div class="panel"><div class="cards" style="display:flex">${links.map(({r,f,x})=>`<button class="card" data-act="open-record" data-id="${r.id}"><b>${esc(recTitle(r,f))}</b><div class="meta"><span>${esc(f.name)} · ${esc(x.label)}</span></div></button>`).join('')}</div></div></section>`;
   }
+  const fk=recordFoldKeys(form,rec),anyOpen=fk.some(k=>!folded(form.id,k));
+  const foldAllBtn=fk.length>1||(fk.length===1&&fk[0].startsWith('h:'))?`<div class="actions"><button type="button" class="btn" data-act="fold-all" aria-label="${anyOpen?'Collapse all sections':'Expand all sections'}">${anyOpen?'Collapse all':'Expand all'}</button></div>`:'';
   const delKey='rec-'+(rec?.id||'');
   const kids=rec?store.records.filter(r=>r.parentId===rec.id).length:0;
   return `
   <div class="crumbs">${crumbs}</div>
-  <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}</h1>${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div></div>
+  <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}</h1>${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
   ${parentPick}
   <div class="panel">
     <fieldset class="fset"${ro?' disabled':''}>${formFieldsHTML(form,rdraft,'record')}</fieldset>
@@ -418,6 +425,24 @@ function recordMeta(rec){
    Rows live in rdraft.grids[childFormId] = {rows:[{id, values, ownerId, createdAt, isNew, dirty, errors}], removed:[ids], sort}
    and are saved with the parent in one batch (saveRecordBundle). Long text, files, photos,
    signatures, locations and multiple choice open in a pop-up (cdraft) from their cell. */
+/* ---------- folding sections (per user, per form; remembered on this device) ---------- */
+let foldState=null,foldUid=null;
+const foldStoreKey=()=>'fw.folds.'+(store.user?.uid||'anon');
+function folds(){
+  if(foldState&&foldUid===store.user?.uid)return foldState;
+  let raw=null;try{raw=localStorage.getItem(foldStoreKey());}catch(e){/* private mode */}
+  foldUid=store.user?.uid;foldState=readFolds(raw);return foldState;
+}
+function saveFolds(f){foldState=f;try{localStorage.setItem(foldStoreKey(),JSON.stringify(f));}catch(e){/* private mode: kept for this visit */}}
+const folded=(formId,key)=>isFolded(folds(),formId,key);
+const CHEV='<svg class="fold-c" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+/** The heading of a foldable section: a button that says whether it's open, plus a summary when folded. */
+function foldBtn(key,open,inner,summary){return `<button type="button" class="fold-t" data-act="fold" data-k="${esc(key)}" aria-expanded="${open}">${CHEV}${inner}${!open&&summary?`<span class="fold-sum">${esc(summary)}</span>`:''}</button>`;}
+function recordFoldKeys(form,rec){
+  const grids=gridRels(form).map(x=>x.cf.id);
+  const kids=rec?(form.children||[]).filter(c=>c.display!=='grid').map(c=>formById(c.formId)).filter(cf=>cf&&canViewForm(store.me,cf.id)).map(cf=>cf.id):[];
+  return foldKeys(form,grids,kids);
+}
 const SORT_H={valOf:(f,r,fm)=>valOf(f,r,fm),fmt:(f,v)=>fmt(f,v),recTitle:(r,fm)=>recTitle(r,fm),recById:id=>recById(id),formById:id=>formById(id)};
 const DETACH_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 4 8"/><path d="M8 12h3"/><path d="M3 3l18 18"/></svg>';
 const POPUP_TYPES=new Set(['textarea','file','image','signature','location','multiselect']);
@@ -503,7 +528,11 @@ function gridSection(form,rel,cf,d,parentRo){
   const totals=cols.map(f=>gridTotal(cf,f,d,rows));
   const showTot=rows.length>1&&totals.some(t=>t!=null);
   const head=cols.map(f=>{const on=g.sort?.key===f.id;return `<th${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?' class="num"':''} aria-sort="${on?(g.sort.dir==='asc'?'ascending':'descending'):'none'}"><button type="button" class="ghb${on?' on':''}" data-act="grid-sort" data-grid="${cf.id}" data-key="${f.id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}<span class="arr" aria-hidden="true">${on?(g.sort.dir==='asc'?'▲':'▼'):''}</span></button></th>`;}).join('');
-  return `<section class="section gsec" id="grid-${cf.id}"><div class="section-h"><h2>${badge(cf)}${esc(cf.name)} <span class="count">${rows.length}</span></h2><span class="chip acc">Grid</span></div>
+  const gOpen=!folded(form.id,'g:'+cf.id)||errs.length>0;
+  const gSum=cols.map((f,i)=>totals[i]==null?'':`${f.label} ${f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i])}`).filter(Boolean).slice(0,3).join(' · ');
+  const gHead=`<div class="section-h"><h2>${foldBtn('g:'+cf.id,gOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${rows.length}</span>`,gSum)}</h2><span class="chip acc">Grid</span></div>`;
+  if(!gOpen)return `<section class="section gsec" id="grid-${cf.id}">${gHead}</section>`;
+  return `<section class="section gsec" id="grid-${cf.id}">${gHead}
     <div class="panel"><div class="gwrap"><table class="gtbl"><thead><tr>${head}<th class="gact"><span class="sr">Row actions</span></th></tr></thead>
       <tbody>${body||`<tr><td class="gempty" colspan="${cols.length+1}">No ${esc(cf.name.toLowerCase())} yet.</td></tr>`}</tbody>
       ${showTot?`<tfoot><tr>${cols.map((f,i)=>`<td class="num" id="gt-${cf.id}-${f.id}">${totals[i]==null?(i===0?'Total':''):esc(f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i]))}</td>`).join('')}<td></td></tr></tfoot>`:''}
@@ -545,7 +574,20 @@ function cellPopup(){
 function formFieldsHTML(form,d,scope){
   const fs=form.fields||[];
   if(!fs.length)return `<p class="note">This form has no fields yet. Add some in the designer.</p>`;
-  return `<div class="fgrid" data-scope="${scope}">${fs.map(f=>fieldBlock(f,d.values[f.id],d.errors?.[f.id],scope)).join('')}</div>`;
+  if(scope!=='record')return `<div class="fgrid" data-scope="${scope}">${fs.map(f=>fieldBlock(f,d.values[f.id],d.errors?.[f.id],scope)).join('')}</div>`;
+  // record page: a Section Heading folds the fields under it (a section with a problem stays open)
+  const under=headingOf(fs),shut=new Set();
+  fs.filter(f=>f.type==='heading').forEach(h=>{if(folded(form.id,'h:'+h.id)&&!fs.some(f=>under[f.id]===h.id&&d.errors?.[f.id]))shut.add(h.id);});
+  return `<div class="fgrid" data-scope="${scope}">${fs.map(f=>{
+    if(f.type==='heading'){
+      const open=!shut.has(f.id),kids=fs.filter(x=>under[x.id]===f.id);
+      const vals=kids.filter(x=>!['file','image','signature','textarea','formula','location'].includes(x.type)).map(x=>{let t='';try{t=fmt(x,d.values[x.id])}catch(e){}return t?x.label+': '+t:''}).filter(Boolean).slice(0,2);
+      const sum=kids.length+' field'+(kids.length===1?'':'s')+(vals.length?' · '+vals.join(' · '):'');
+      return `<div class="fsec" id="fb-${scope}-${f.id}"><h3>${foldBtn('h:'+f.id,open,`<span>${esc(f.label)}</span>`,sum)}</h3>${open&&f.help?`<p class="help">${esc(f.help)}</p>`:''}</div>`;
+    }
+    const html=fieldBlock(f,d.values[f.id],d.errors?.[f.id],scope);
+    return under[f.id]&&shut.has(under[f.id])?html.replace(/^<div /,'<div hidden '):html;
+  }).join('')}</div>`;
 }
 function fieldBlock(f,v,err,scope){
   if(f.type==='heading')return `<div class="fsec" id="fb-${scope}-${f.id}"><h3>${esc(f.label)}</h3>${f.help?`<p class="help">${esc(f.help)}</p>`:''}</div>`;
@@ -936,6 +978,8 @@ document.addEventListener('click',async e=>{
     case 'save-record':saveRecord();break;
     case 'grid-add':{const cf=formById(el.dataset.grid);const g=rdraft?.grids?.[el.dataset.grid];if(!cf||!g)return;const row={id:uid('r'),values:newRowValues(cf,rdraft,formById(rdraft.formId)),ownerId:store.user.uid,isNew:true,dirty:true,errors:{}};g.rows.push(row);markDirty(rdraft);renderMain();document.querySelector(`tr[data-growid="${row.id}"] .gin, tr[data-growid="${row.id}"] .gck, tr[data-growid="${row.id}"] .gpopbtn`)?.focus();break;}
     case 'grid-del':{const g=rdraft?.grids?.[el.dataset.grid];if(!g)return;const row=g.rows.find(r=>r.id===el.dataset.row);if(!row)return;g.rows=g.rows.filter(r=>r!==row);if(!row.isNew)g.removed.push(row.id);markDirty(rdraft);renderMain();toast('Row removed. It’s deleted when you save; Discard brings it back.');break;}
+    case 'fold':{const fid=rdraft?.formId;if(!fid)return;const k=el.dataset.k;saveFolds(setFold(folds(),fid,k,!folded(fid,k)));renderMain();document.querySelector(`[data-act="fold"][data-k="${CSS.escape(k)}"]`)?.focus({preventScroll:true});break;}
+    case 'fold-all':{const form=formById(rdraft?.formId);if(!form)return;const keys=recordFoldKeys(form,rdraft.recordId?recById(rdraft.recordId):null);const shut=keys.some(k=>!folded(form.id,k));saveFolds(setFolds(folds(),form.id,keys,shut));renderMain();document.querySelector('[data-act="fold-all"]')?.focus({preventScroll:true});break;}
     case 'grid-attach':{
       const d=rdraft,cf=formById(el.dataset.grid),form=formById(d?.formId),g=d?.grids?.[el.dataset.grid];if(!cf||!g||!form)return;
       const rel=(form.children||[]).find(c=>c.formId===cf.id);
