@@ -116,6 +116,12 @@ function fmtShort(c, def, v) {
   if (a >= 1e3) return cur + (v / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'k';
   return cur + (Math.round(v * 10) / 10).toLocaleString();
 }
+/** A number written out in full, plus a short form (CA$91.5k) a cramped dashboard tile switches to. */
+function both(c, def, v) {
+  const full = fmtMeasure(c, def, v);
+  if (v == null || typeof v !== 'number' || Math.abs(v) < 1000) return esc(full);
+  return `<span class="v-full">${esc(full)}</span><span class="v-short">${esc(fmtShort(c, def, v))}</span>`;
+}
 function measureLabel(c, def) {
   const m = def.measure || { fn: 'count' };
   const form = c.formById(def.form);
@@ -157,7 +163,7 @@ function bodyHTML(c, def, extra, key) {
       if (k.delta == null) cmp = `<div class="db-kd">Nothing in ${esc(k.prevLabel)} to compare with</div>`;
       else { const up = k.delta >= 0; cmp = `<div class="db-kd"><span aria-hidden="true">${up ? '▲' : '▼'}</span> ${up ? '+' : ''}${Math.round(k.delta)}% vs ${esc(k.prevLabel)} <span class="db-kp">(${esc(fmtMeasure(c, def, k.prev))})</span></div>`; }
     }
-    return { html: `<button type="button" class="rp-kpi db-dr" data-d="drill" data-k="${esc(key)}" title="See the records behind this number">${esc(fmtMeasure(c, def, k.value))}</button><div class="rp-kpisub">${esc(measureLabel(c, def))}${def.compare && !extra?.range ? ' · ' + esc(k.label) : ''}</div>${cmp}`, caption: captionOf(c, def, k.n, extra) };
+    return { html: `<button type="button" class="rp-kpi db-dr" data-d="drill" data-k="${esc(key)}" title="See the records behind this number">${both(c, def, k.value)}</button><div class="rp-kpisub">${esc(measureLabel(c, def))}${def.compare && !extra?.range ? ' · ' + esc(k.label) : ''}</div>${cmp}`, caption: captionOf(c, def, k.n, extra) };
   }
   const list = rowsFor(c, def, ex);
   const caption = captionOf(c, def, list.length, extra);
@@ -195,17 +201,17 @@ function bodyHTML(c, def, extra, key) {
     return { caption, html: `<div class="rp-ln"><div class="rp-plot">
       ${[0, 1, 2, 3, 4].map((k) => `<div class="rp-gl" style="bottom:${k * 25}%"><span>${esc(fmtShort(c, def, step * k))}</span></div>`).join('')}
       <svg class="rp-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${def.type === 'area' ? `<path class="rp-area" d="${path} L100 100 L0 100 Z"></path>` : ''}<path class="rp-path" d="${path}"></path></svg>
-      ${b.map((x, i) => { const tip = bucketOf(x.start, iv).k + ' · ' + fmtMeasure(c, def, x.value); return `<button type="button" class="rp-pt" data-d="drill" data-k="${esc(key)}" data-i="${i}" style="left:${X(i).toFixed(2)}%;bottom:${Y(x.value).toFixed(2)}%" aria-label="${esc(tip)}"><i></i><span class="rp-tip">${esc(tip)}</span></button>`; }).join('')}
-    </div><div class="rp-xax">${b.map((x, i) => ((n - 1 - i) % every === 0 ? `<span style="left:${X(i).toFixed(2)}%">${esc(label(x))}</span>` : '')).join('')}</div></div>` };
+      ${b.map((x, i) => { const tip = bucketOf(x.start, iv).k + ' · ' + fmtMeasure(c, def, x.value); return `<button type="button" class="rp-pt${X(i) > 85 ? ' end' : X(i) < 15 ? ' start' : ''}" data-d="drill" data-k="${esc(key)}" data-i="${i}" style="left:${X(i).toFixed(2)}%;bottom:${Y(x.value).toFixed(2)}%" aria-label="${esc(tip)}"><i></i><span class="rp-tip">${esc(tip)}</span></button>`; }).join('')}
+    </div><div class="rp-xax">${b.map((x, i) => ((n - 1 - i) % every === 0 ? `<span style="left:${X(i).toFixed(2)}%${X(i) > 92 ? ';transform:translateX(-100%)' : X(i) < 8 ? ';transform:none' : ''}">${esc(label(x))}</span>` : '')).join('')}</div></div>` };
   }
   if (def.type === 'pivot') {
     const p = pivotOf(c, def, list);
     if (!p) return { caption, html: `<p class="rp-empty">Choose rows and columns in the report’s settings.</p>` };
-    const tc = `minmax(140px,1.6fr) ${p.cols.map(() => 'minmax(84px,1fr)').join(' ')} minmax(96px,1fr)`;
+    const tc = `minmax(70px,1.6fr) ${p.cols.map(() => 'minmax(0,1fr)').join(' ')} minmax(0,1fr)`;
     const rl = groupLabel(c, def.group) || 'Rows', cl = groupLabel(c, def.col) || 'Columns';
-    return { caption, html: `<div class="rp-table db-pivot" role="table"><div class="rp-tr rp-th" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="columnheader">${esc(rl)} ↓ · ${esc(cl)} →</div>${p.cols.map((k, j) => `<div class="rp-td num" role="columnheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${esc(k)}</button></div>`).join('')}<div class="rp-td num" role="columnheader">Total</div></div>
-      ${p.rows.map((r, i) => `<div class="rp-tr" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}">${esc(r.key)}</button></div>${r.cells.map((v, j) => `<div class="rp-td num" role="cell">${v == null ? '–' : `<button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}" data-c="${j}" aria-label="${esc(r.key + ', ' + p.cols[j] + ': ' + fmtMeasure(c, def, v))}">${esc(fmtMeasure(c, def, v))}</button>`}</div>`).join('')}<div class="rp-td num db-b" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}">${esc(fmtMeasure(c, def, r.total))}</button></div></div>`).join('')}
-      <div class="rp-tr db-tot" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader">Total</div>${p.colTotals.map((v, j) => `<div class="rp-td num" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${esc(fmtMeasure(c, def, v))}</button></div>`).join('')}<div class="rp-td num" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}">${esc(fmtMeasure(c, def, p.grand))}</button></div></div></div>
+    return { caption, html: `<div class="rp-table db-pivot" role="table" data-fitk="${esc(key)}" data-n="${list.length}"><div class="rp-tr rp-th" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="columnheader">${esc(rl)} ↓ · ${esc(cl)} →</div>${p.cols.map((k, j) => `<div class="rp-td num" role="columnheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${esc(k)}</button></div>`).join('')}<div class="rp-td num" role="columnheader">Total</div></div>
+      ${p.rows.map((r, i) => `<div class="rp-tr" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}">${esc(r.key)}</button></div>${r.cells.map((v, j) => `<div class="rp-td num" role="cell">${v == null ? '–' : `<button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}" data-c="${j}" aria-label="${esc(r.key + ', ' + p.cols[j] + ': ' + fmtMeasure(c, def, v))}">${both(c, def, v)}</button>`}</div>`).join('')}<div class="rp-td num db-b" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}">${both(c, def, r.total)}</button></div></div>`).join('')}
+      <div class="rp-tr db-tot" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader">Total</div>${p.colTotals.map((v, j) => `<div class="rp-td num" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${both(c, def, v)}</button></div>`).join('')}<div class="rp-td num" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}">${both(c, def, p.grand)}</button></div></div></div>
       ${p.moreRows || p.moreCols ? `<p class="rp-more">Showing the first ${p.rows.length} rows and ${p.cols.length} columns.</p>` : ''}` };
   }
   // table and grouped table
@@ -213,21 +219,21 @@ function bodyHTML(c, def, extra, key) {
   if (!cols.length) return { caption, html: `<p class="rp-empty">Add columns in the report’s settings.</p>` };
   const sort = D.sorts[key] || def.sort && cols[def.sort.i] && def.sort || { i: 0, dir: 1 };
   const sref = cols[sort.i] || cols[0];
-  const tc = cols.map((_, i) => (i === 0 ? 'minmax(140px,1.6fr)' : 'minmax(100px,1fr)')).join(' ');
+  const tc = cols.map((_, i) => (i === 0 ? 'minmax(80px,1.6fr)' : 'minmax(56px,1fr)')).join(' ');
   const head = `<div class="rp-tr rp-th" role="row" style="grid-template-columns:${tc}">${cols.map((r, i) => `<div class="rp-td${isNumRef(c, r) ? ' num' : ''}" role="columnheader" aria-sort="${sort.i === i ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}"><button type="button" data-d="tsort" data-k="${esc(key)}" data-v="${i}">${esc(refLabel(c, r, def.form))}${sort.i === i ? (sort.dir > 0 ? ' ↑' : ' ↓') : ''}</button></div>`).join('')}</div>`;
   const row = (rec) => `<div class="rp-tr" role="row" style="grid-template-columns:${tc}" data-d="openrec" data-v="${esc(rec.id)}">${cols.map((r) => { const t = cellText(c, r, rec); return `<div class="rp-td${isNumRef(c, r) ? ' num' : ''}" role="cell" title="${esc(t)}">${esc(t || '–')}</div>`; }).join('')}</div>`;
   if (def.type === 'grouped') {
     const groups = groupRows(c, def, def.group, list);
     if (!groups.length) return { caption, html: `<p class="rp-empty">Choose what to group by in the report’s settings.</p>` };
     const gl = groupLabel(c, def.group) || 'Group';
-    return { caption, html: `<div class="rp-table" role="table">${head}${groups.map((g, gi) => {
+    return { caption, html: `<div class="rp-table" role="table" data-fitk="${esc(key)}" data-n="${list.length}">${head}${groups.map((g, gi) => {
       const rs = sortRecs(c, g.rows, sref, sort.dir).slice(0, 10);
       return `<div class="rp-tr db-grp" role="row"><div class="rp-td" role="rowheader"><button type="button" class="db-cellb db-grpb" data-d="drill" data-k="${esc(key)}" data-i="${gi}"><b>${esc(g.key)}</b> <span class="db-gn">${esc(gl)} · ${g.rows.length}</span></button></div><div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, g.value))}</div></div>${rs.map(row).join('')}${g.rows.length > rs.length ? `<p class="rp-more db-gm"><button type="button" class="db-link" data-d="drill" data-k="${esc(key)}" data-i="${gi}">and ${g.rows.length - rs.length} more</button></p>` : ''}`;
     }).join('')}<div class="rp-tr db-grp db-tot" role="row"><div class="rp-td" role="rowheader">Total · ${list.length}</div><div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, measureOf(c, def, list)))}</div></div></div>` };
   }
   const sorted = sortRecs(c, list, sref, sort.dir);
   const shown = sorted.slice(0, 50);
-  return { caption, html: `<div class="rp-table" role="table">${head}${shown.map(row).join('')}</div>${sorted.length > shown.length ? `<p class="rp-more">Showing the first ${shown.length} of ${sorted.length}.</p>` : ''}` };
+  return { caption, html: `<div class="rp-table" role="table" data-fitk="${esc(key)}" data-n="${list.length}">${head}${shown.map(row).join('')}</div>${sorted.length > shown.length ? `<p class="rp-more">Showing the first ${shown.length} of ${sorted.length}.</p>` : ''}` };
 }
 
 /* ---------- drilling down: the records behind a number ---------- */
@@ -398,6 +404,41 @@ function ringSlice(el, e) {
   const turn = ((Math.atan2(x, -y) + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI);
   return String(el.dataset.cuts || '').split(',').map(Number).findIndex((cut) => turn <= cut);
 }
+
+/* ---------- fitting tables into dashboard tiles ---------- */
+
+/**
+ * A table, grouped table or pivot on a dashboard shows the rows that fit its tile, and a
+ * "See all" button (which opens the drill-down list) instead of a scroll bar. Runs after
+ * each redraw and when the window changes size; phones (tiles stacked, any height) skip it.
+ */
+export function fitTiles() {
+  document.querySelectorAll('#db-cv .db-tile').forEach((tile) => {
+    const wb = tile.querySelector('.rp-wb');
+    const tbl = wb && wb.querySelector('.rp-table[data-fitk]');
+    // numbers that don't fit their space switch to the short form (CA$91.5k)
+    tile.classList.remove('compact');
+    if (getComputedStyle(tile).position === 'absolute' && [...wb.querySelectorAll('.rp-kpi, .db-pivot .db-cellb')].some((e) => e.scrollWidth > e.clientWidth + 1)) tile.classList.add('compact');
+    if (!tbl) return;
+    tbl.querySelector('.db-more')?.remove();
+    const rows = [...tbl.querySelectorAll(':scope > .rp-tr:not(.rp-th):not(.db-tot), :scope > .rp-more')];
+    const notes = [...wb.querySelectorAll(':scope > .rp-more')];
+    rows.concat(notes).forEach((r) => { r.hidden = false; });
+    if (getComputedStyle(tile).position !== 'absolute' || wb.scrollHeight <= wb.clientHeight + 1) return;
+    notes.forEach((r) => { r.hidden = true; });
+    const more = document.createElement('button');
+    more.type = 'button'; more.className = 'db-more'; more.dataset.d = 'drill'; more.dataset.k = tbl.dataset.fitk;
+    const n = +tbl.dataset.n || 0;
+    more.textContent = `See all ${n.toLocaleString()}`;
+    tbl.insertBefore(more, tbl.querySelector(':scope > .db-tot'));
+    while (wb.scrollHeight > wb.clientHeight + 1 && rows.length) rows.pop().hidden = true;
+    // a group heading left with no rows under it goes too
+    const last = rows[rows.length - 1];
+    if (last && last.classList.contains('db-grp')) last.hidden = true;
+  });
+}
+let fitTimer = null;
+window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitTiles, 120); });
 
 /* ---------- the Reports list ---------- */
 
@@ -893,7 +934,7 @@ window.addEventListener('pointermove', (e) => {
     d.el.style.transform = `translate(${dx}px,${dy}px)`;
   } else {
     t.w = Math.max(2, Math.min(CANVAS_COLS - t.x, Math.round(d.t0.w + dx / d.colW)));
-    t.h = Math.max(1, Math.round(d.t0.h + dy / CANVAS_ROW));
+    t.h = Math.max(t.text ? 1 : 2, Math.round(d.t0.h + dy / CANVAS_ROW));
     d.el.style.width = Math.max(d.colW * 2 - 12, d.rect.width + dx) + 'px';
     d.el.style.height = Math.max(CANVAS_ROW - 12, d.rect.height + dy) + 'px';
     const b = d.el.querySelector('.db-badge'); if (b) { b.hidden = false; b.textContent = t.w + ' × ' + t.h; }
@@ -922,7 +963,7 @@ document.addEventListener('keydown', (e) => {
   const tiles = canvasTiles(D.edit.tiles || []);
   const t = tiles.find((x) => x.id === h.dataset.v); if (!t) return;
   const dx = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0, dy = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
-  const n = e.shiftKey ? { ...t, w: Math.max(2, Math.min(CANVAS_COLS - t.x, t.w + dx)), h: Math.max(1, t.h + dy) } : { ...t, x: Math.max(0, Math.min(CANVAS_COLS - t.w, t.x + dx)), y: Math.max(0, t.y + dy) };
+  const n = e.shiftKey ? { ...t, w: Math.max(2, Math.min(CANVAS_COLS - t.x, t.w + dx)), h: Math.max(t.text ? 1 : 2, t.h + dy) } : { ...t, x: Math.max(0, Math.min(CANVAS_COLS - t.w, t.x + dx)), y: Math.max(0, t.y + dy) };
   D.edit.tiles = resolveCanvas(tiles.map((x) => (x.id === t.id ? n : x)), t.id, !!D.edit.filters?.floatUp);
   D.edit.dirty = true;
   const id = t.id;

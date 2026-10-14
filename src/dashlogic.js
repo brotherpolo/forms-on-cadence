@@ -399,7 +399,8 @@ export const CANVAS_ROW = 76;
 const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 const clampTile = (t) => {
   const w = Math.max(2, Math.min(CANVAS_COLS, Math.round(t.w ?? 6)));
-  return { ...t, w, h: Math.max(1, Math.min(40, Math.round(t.h ?? 4))), x: Math.max(0, Math.min(CANVAS_COLS - w, Math.round(t.x || 0))), y: Math.max(0, Math.round(t.y || 0)) };
+  // a report needs two rows (heading and number); a text block can be one
+  return { ...t, w, h: Math.max(t.text ? 1 : 2, Math.min(40, Math.round(t.h ?? 4))), x: Math.max(0, Math.min(CANVAS_COLS - w, Math.round(t.x || 0))), y: Math.max(0, Math.round(t.y || 0)) };
 };
 
 /** Tiles with positions. Tiles saved by the older row layout (cols, rows) get the spot they had. */

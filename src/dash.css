@@ -103,7 +103,7 @@
 .db-kp{font-weight:400;color:var(--muted)}
 .db-donut{display:flex;flex-wrap:wrap;align-items:center;gap:18px}
 .db-ring{width:150px;height:150px;border-radius:50%;position:relative;flex:none}
-.db-ring::after{content:"";position:absolute;inset:30px;border-radius:50%;background:var(--surface)}
+.db-ring::after{content:"";position:absolute;inset:20%;border-radius:50%;background:var(--surface)}
 .db-ringc{position:absolute;inset:0;display:grid;place-items:center;align-content:center;z-index:1;font:600 16px/1.2 var(--display);text-align:center}
 .db-ringc small{display:block;font:12px var(--body);color:var(--muted)}
 .db-leg{display:flex;flex-direction:column;gap:6px;flex:1;min-width:180px}
@@ -129,7 +129,7 @@ button.rp-kpi{border:0;background:none;padding:0;color:inherit;text-align:left;c
 button.rp-kpi:hover{color:var(--accent)}
 button.rp-bar{border:0;background:none;width:100%;text-align:left;font:inherit;font-size:13px;color:inherit;cursor:pointer}
 button.rp-bar:hover{background:var(--accent-soft)}
-button.db-li{border:0;background:none;padding:4px 6px;margin:0 -6px;border-radius:7px;font:inherit;font-size:13px;color:inherit;text-align:left;cursor:pointer}
+button.db-li{border:0;background:none;padding:4px 6px;margin:0;border-radius:7px;font:inherit;font-size:13px;color:inherit;text-align:left;cursor:pointer}
 button.db-li:hover{background:var(--accent-soft)}
 .db-ring.db-dr{cursor:pointer}
 .rp-pt[data-d="drill"]{cursor:pointer}
@@ -177,5 +177,31 @@ button.db-li:hover{background:var(--accent-soft)}
 .db-dates label{display:flex;flex-direction:column;gap:4px}
 .db-side .db-seg[aria-label="Interval"]{display:flex;flex-wrap:nowrap;align-self:stretch}
 .db-side .db-seg[aria-label="Interval"] button{flex:1;padding:0 6px}
-.db-tile .db-donut,.db-donut.many{align-items:flex-start}
-.db-tile .db-ring,.db-donut.many .db-ring{position:sticky;top:0}
+.db-donut.many{align-items:flex-start}
+.db-donut.many .db-ring{position:sticky;top:0}
+
+/* Dashboard tiles fit their content to the tile instead of scrolling: the number and the donut
+   scale to the space, bars share the height, and tables show what fits with a "See all". */
+.db-tile .rp-wb{overflow-x:hidden;container-type:size}
+.db-tile button.rp-kpi{font-size:clamp(1.05rem,min(15cqw,40cqh),2.4rem);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.db-tile .rp-kpisub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@container (max-height:96px){.db-tile .db-kd{display:none}}
+@container (max-height:56px){.db-tile .rp-kpisub{display:none}}
+.db-tile .db-donut{height:100%;flex-wrap:nowrap;gap:14px;align-items:flex-start}
+.db-tile .db-ring{width:min(150px,100cqh,42cqw);height:min(150px,100cqh,42cqw);position:relative;top:auto}
+.db-tile .db-ringc{font-size:clamp(11px,9cqh,16px)}
+.db-tile .db-leg{min-width:0;max-height:100%;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:0 12px;align-content:start}
+.db-tile .db-li{grid-template-columns:12px minmax(0,1fr) auto 34px;padding-top:2px;padding-bottom:2px}
+.db-tile .rp-bars{height:100%;gap:2px}
+.db-tile .rp-bar{flex:1 1 0;min-height:18px;max-height:32px;padding-top:0;padding-bottom:0}
+.db-tile .rp-table{overflow:hidden}
+.db-tile .rp-tr{min-width:0}
+.db-more{display:block;width:100%;border:0;border-top:1px solid var(--line);background:var(--sunk);padding:7px 12px;font:inherit;font-size:13px;font-weight:600;color:var(--accent);text-align:left;cursor:pointer}
+.db-more:hover{text-decoration:underline;text-underline-offset:2px}
+.rp-ln{padding-right:12px}
+.rp-pt.end .rp-tip{left:auto;right:0;transform:none}
+.rp-pt.start .rp-tip{left:0;transform:none}
+.v-short{display:none}
+.db-tile.compact .v-full{display:none}
+.db-tile.compact .v-short{display:inline}
+.db-tile .db-pivot .rp-td.num .db-cellb{text-align:right}
