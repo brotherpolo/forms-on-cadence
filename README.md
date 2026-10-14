@@ -67,6 +67,9 @@ src/
   lists.js, lists.css      Records list: saved views, columns, filters, select several
   grids.css                Sub-form grids on the record page
   listlogic.js             List columns, views, sorting, filters and CSV (pure, unit-tested)
+  imports.js, imports.css  Import screens: templates menu, choose file, match columns, check rows, history and undo
+  importlogic.js           Templates, column matching, checking rows, undo plans (pure, unit-tested)
+  xlsx.js                  Reads and writes .xlsx and .csv with no extra packages (unit-tested)
   app.js                   Navigation, record screens, form designer
   admin.js                 Security groups and users screens (admins only)
   auth.js                  Sign-in screen: Google, email and password, password reset
@@ -92,6 +95,8 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | `users/{uid}` | `email, displayName, role, groups[], access{…}, createdAt` | self on first sign-in; admins after |
 | `profiles/{uid}` | `displayName` (readable by everyone signed in, for "Created by") | self |
 | `listViews/{id}` | `formId, name, ownerId, shared, cols[], sort{key, dir}, filters{fieldId: [options]}, density, createdAt, updatedAt` | owner (private); admins (shared, and `dflt-<formId>`) |
+| `imports/{id}` | `formId, formName, fileName, ownerId, createdAt, stamp, status, added[], updated[], counts{}, finishedAt, undoneAt, undoneBy, undo{}` | admins |
+| `imports/{id}/before/{recordId}` | `values, parentId, parentFormId, updatedAt, updatedBy`: a record as it was before the import changed it | admins |
 
 Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Signatures are stored inline as small PNG data URLs.
 
@@ -112,7 +117,14 @@ Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Si
 
 **A dashboard** lays out saved reports and text blocks on a grid with no gaps.
 
-- **Edit dashboard** to add reports (or make a new one from there), add text blocks, set each item's width and height, move items earlier or later, and remove them. Rows always fill the width. Press **Save dashboard** when done.
+- **Edit dashboard** turns the dashboard into a canvas with a 12-column grid:
+  - **Move:** drag an item by its handle (top-left). A dashed outline shows where it will land; items in the way slide down.
+  - **Resize:** drag an item's bottom-right corner. A badge shows its size in columns × rows.
+  - **Keyboard:** focus a handle; arrow keys move the item, Shift + arrow keys resize it.
+  - Gaps are allowed. **Float items up** slides everything up to close vertical gaps (saved with the dashboard).
+  - Add saved reports (or make a new one from there) and text blocks; new items go in the first free spot. ✕ removes an item. Press **Save dashboard** when done.
+  - On phones, items stack full width in reading order (top to bottom, left to right).
+  - Dashboards saved before the canvas keep their arrangement as the starting layout.
 - **Filters:** a period (All time, This month, Last 30 days, This quarter, This year) and any number of field filters you add while editing (*Clients › Company name*). Everyone can change them while viewing; the period picked while editing is saved as the starting one. A field filter applies to each report whose form is that form or sits below it; the others say it doesn't reach them.
 - **Home:** **Set as home** on any dashboard makes it open when you start Formwright. Everyone picks their own.
 
@@ -158,6 +170,28 @@ Each form's list can be set up from the list itself.
 - **Phones:** the list shows cards with tick boxes, and menus open as a sheet at the bottom.
 
 A view only decides how the list looks. It never shows anyone records they couldn't already see.
+
+## Importing records (admins)
+
+Admins see **Import and templates** at the top of each form's list.
+
+- **Templates:** an Excel file (.xlsx) with one column per field, headed with the field labels. Required fields end in `*`. Choice fields and Yes / No have dropdowns, and so do links to records when there are up to 2,000 of them. A **Guide** sheet explains every column. Calculations, files, photos and signatures are left out.
+  - **Blank template:** for new records.
+  - **Export with data, to update:** every record of the form, with a **Record ID** column.
+  - **<Sub-form> template:** for a form that sits under this one (line items, site visits). Its second column names the parent record, by name or Record ID.
+- **Import a filled-in file…:** works with .xlsx and .csv files, up to 5,000 rows at a time.
+  1. **Choose file.** Old .xls and Numbers files are explained rather than refused silently.
+  2. **Match columns.** Columns are matched to fields by name. Change any that are wrong, or set them to **Don't import**.
+  3. **Check rows.** Nothing is saved yet. Each row is **New**, **Update**, **No change** or **Problem**. Problems say what's wrong (a choice that isn't on the list, a date that isn't a date, a client name with a typo and the closest match) and can be fixed right there. Rows that still have problems are skipped, and can be downloaded afterwards with a **Problem** column.
+  4. **Import.** Saved in batches with a progress bar. Keep the tab open until it finishes.
+- **How rows are read:**
+  - A blank Record ID adds a new record, owned by the admin who imports it. A Record ID updates that record, and only the columns in the file change; an emptied cell clears that field.
+  - Dates can be Excel dates, `2026-10-13`, `10/13/2026` or `Oct 13, 2026`. Yes / No accepts Yes, No, Y, N, True, False, 1, 0 and X. Several choices are separated with `;`. Numbers may have `$` and commas.
+  - Links and parents are matched by the record's name, or by its Record ID when two records share a name.
+  - Calculations are worked out as each record is saved. A new row under a parent gets the parent's values the same way **+ Add** does.
+- **Import history** (also under Administration in the sidebar) lists every import. **Undo** is offered for 7 days. It removes what the import added, including rows added under those records since, and puts updated records back the way they were. Records someone has edited since the import are left alone, and the confirmation names them.
+
+The import is admins-only in the app and in the rules (`imports/…`). The records themselves are saved through the normal record rules.
 
 ## Links and Cadence tasks
 
@@ -246,7 +280,7 @@ npm run make-admin -- you@example.com --emulator
 ## Tests
 
 ```bash
-npm run test:unit        # formulas, permissions, addresses and task helpers (no Firebase needed)
+npm run test:unit        # formulas, permissions, addresses, lists, dashboards and imports (no Firebase needed)
 ```
 
 The security rules tests, including Formwright's, are in the Cadence folder under `tests/`.
@@ -283,6 +317,15 @@ Create a `production` environment in GitHub if you want deploy approvals. The de
 Manual deploy: `FIREBASE_HOSTING_SITE=cadence-forms npm run deploy` (with your site's name).
 
 ---
+
+## Security
+
+- **New accounts see nothing** until an admin adds them to a security group: no forms, names, shared dashboards, reports or list views. The rules enforce it; the app also waits, so a new account gets no permission errors.
+- **Records** are only ever readable as the person's access allows (see How permissions work). Shared dashboards, reports and list views hold settings only, never record data.
+- **Uploads:** up to 25 MB each. Web pages, SVG images, scripts and XML are refused, so a file link can't run code.
+- **The site** sends security headers: no framing by other sites (stops click-jacking), no MIME sniffing, a strict referrer policy, and camera/location limited to this site.
+- **App Check** (optional, recommended): set the `VITE_APPCHECK_SITE_KEY` variable to a reCAPTCHA Enterprise site key and Firebase can refuse requests that don't come from these sites. It does nothing until the key is set; enforce it in the Firebase console once requests show as verified.
+- The Firebase web settings (API key and so on) are public by design. What protects data is the rules above, plus the browser-key website restrictions in Google Cloud.
 
 ## Things to know
 
