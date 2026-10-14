@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   rowsFor, condHit, periodRange, kpiOf, slicesOf, groupRows, pivotOf, normalizeDef, newDef, defFromWidget,
-  migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, sortRecs, chainFields,
+  migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, sortRecs, chainFields, bucketOf, groupLabel,
 } from '../../src/dashlogic.js';
 import { parseRoute, routeFor } from '../../src/route.js';
 
@@ -19,7 +19,9 @@ const forms = [
     { id: 'cat', type: 'select', label: 'Category', options: ['Labour', 'Materials'] },
     { id: 'amt', type: 'currency', label: 'Amount' },
     { id: 'tags', type: 'multiselect', label: 'Tags', options: ['A', 'B'] },
-    { id: 'bill', type: 'checkbox', label: 'Billable' }] },
+    { id: 'bill', type: 'checkbox', label: 'Billable' },
+    { id: 'inv', type: 'number', label: 'Invoice #' },
+    { id: 'notes', type: 'textarea', label: 'Notes' }] },
 ];
 const T = (s) => new Date(s).getTime();
 const rec = (id, formId, values, parentId = null, createdAt = T('2026-10-05T10:00')) => ({ id, formId, values, parentId, ownerId: 'u1', createdAt });
@@ -27,9 +29,9 @@ const records = [
   rec('c1', 'clients', { name: 'Acme', status: 'Active' }), rec('c2', 'clients', { name: 'Globex', status: 'Lead' }),
   rec('p1', 'projects', { title: 'Lobby', stage: 'In progress', due: '2026-10-20' }, 'c1'),
   rec('p2', 'projects', { title: 'Roof', stage: 'Done', due: '2026-09-02' }, 'c2'),
-  rec('l1', 'lines', { desc: 'Design', cat: 'Labour', amt: 100, tags: ['A'], bill: true }, 'p1', T('2026-10-03T09:00')),
-  rec('l2', 'lines', { desc: 'Panels', cat: 'Materials', amt: 300, tags: ['A', 'B'], bill: false }, 'p1', T('2026-10-08T09:00')),
-  rec('l3', 'lines', { desc: 'Survey', cat: 'Labour', amt: 50, tags: [], bill: true }, 'p2', T('2026-09-12T09:00')),
+  rec('l1', 'lines', { desc: 'Design', cat: 'Labour', amt: 100, tags: ['A'], bill: true, inv: 10 }, 'p1', T('2026-10-03T09:00')),
+  rec('l2', 'lines', { desc: 'Panels', cat: 'Materials', amt: 300, tags: ['A', 'B'], bill: false, inv: 2 }, 'p1', T('2026-10-08T09:00')),
+  rec('l3', 'lines', { desc: 'Survey', cat: 'Labour', amt: 50, tags: [], bill: true, inv: 10 }, 'p2', T('2026-09-12T09:00')),
 ];
 const byF = new Map(forms.map((f) => [f.id, f])), byR = new Map(records.map((r) => [r.id, r]));
 const ctx = { forms, records, profiles: {}, formById: (id) => byF.get(id) || null, recById: (id) => byR.get(id) || null, fmt: (f, v) => String(v), recTitle: (r) => r.values.name || r.values.title || r.values.desc };
@@ -91,6 +93,30 @@ test('groups, slices, pivots', () => {
   assert.equal(pivotOf(ctx, { ...def, col: null }, list), null);
   const s = sortRecs(ctx, list, { form: 'lines', id: 'amt' }, -1);
   assert.deepEqual(s.map((r) => r.id), ['l2', 'l1', 'l3']);
+});
+
+test('split by a number (low to high) or by a date period', () => {
+  const sum = { form: 'lines', measure: { fn: 'sum', ref: { form: 'lines', id: 'amt' } } };
+  const list = rowsFor(ctx, sum);
+  assert.deepEqual(groupRows(ctx, sum, { form: 'lines', id: 'inv' }, list).map((g) => [g.key, g.value]), [['2', 300], ['10', 150]], 'numeric order, not text order');
+  assert.deepEqual(groupRows(ctx, sum, { form: 'lines', id: '_created', by: 'month' }, list).map((g) => [g.key, g.value]), [['Sep 2026', 50], ['Oct 2026', 400]]);
+  assert.deepEqual(groupRows(ctx, sum, { form: 'projects', id: 'due', by: 'quarter' }, list).map((g) => g.key), ['Q3 2026', 'Q4 2026'], 'a parent’s date');
+  assert.deepEqual(bucketOf(T('2026-10-08T09:00'), 'week'), { k: 'Week of Oct 5, 2026', s: T('2026-10-05T00:00') });
+  assert.equal(bucketOf(T('2026-10-08T09:00'), 'year').k, '2026');
+  const p = pivotOf(ctx, { ...sum, group: { form: 'lines', id: 'inv' }, col: { form: 'lines', id: '_created', by: 'month' } }, list);
+  assert.deepEqual(p.cols, ['Sep 2026', 'Oct 2026']);
+  assert.deepEqual(p.rows.map((r) => [r.key, r.cells]), [['2', [null, 300]], ['10', [50, 100]]]);
+  assert.equal(groupLabel(ctx, { form: 'lines', id: '_created', by: 'week' }), 'Created on by week');
+});
+
+test('a split by something that can’t split (long text) is replaced; dates get a period', () => {
+  const d = normalizeDef(ctx, { form: 'lines', type: 'donut', group: { form: 'lines', id: 'notes' } });
+  assert.notEqual(d.group.id, 'notes');
+  assert.deepEqual(normalizeDef(ctx, { form: 'lines', type: 'bar', group: { form: 'lines', id: 'inv' } }).group, { form: 'lines', id: 'inv' });
+  assert.deepEqual(normalizeDef(ctx, { form: 'lines', type: 'bar', group: { form: 'projects', id: 'due' } }).group, { form: 'projects', id: 'due', by: 'month' });
+  assert.deepEqual(normalizeDef(ctx, { form: 'lines', type: 'bar', group: { form: 'lines', id: 'cat', by: 'week' } }).group, { form: 'lines', id: 'cat' });
+  const pv = normalizeDef(ctx, { form: 'lines', type: 'pivot', group: { form: 'lines', id: '_created', by: 'year' }, col: { form: 'lines', id: '_created', by: 'month' } });
+  assert.deepEqual([pv.group.by, pv.col.by], ['year', 'month'], 'the same date by year and by month is fine');
 });
 
 test('reports fill in what their type needs', () => {
