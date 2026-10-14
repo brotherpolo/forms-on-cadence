@@ -5,6 +5,7 @@ import './lists.css';
 import { store, saveListView, deleteListView, deleteRecords, setRecordsValue } from './store.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
 import { $, esc, uid, toast, badge, itemName } from './ui.js';
+import { importButton } from './imports.js';
 import {
   columnCatalog, defaultConfig, cleanConfig, sameConfig, cellOf, filterRecords, searchRows, sortRows, firstDir,
   columnTotal, viewsFor, canSaveView, canDeleteView, viewDoc, toCsv, optionsOf, defaultViewId, filterCount,
@@ -127,7 +128,7 @@ export function viewRecords(form) {
   const head = `
   <div class="head">
     <div class="ttl">${badge(form, 1)}<div><h1>${esc(form.name)}</h1>${form.description ? `<p class="sub">${esc(form.description)}</p>` : ''}</div></div>
-    <div class="actions">${admin ? `<button class="btn ghost" data-act="edit-form" data-id="${form.id}">Edit form</button>` : ''}${mayCreate ? `<button class="btn primary" data-act="new-record" data-id="${form.id}">+ New ${esc(itemName(form).toLowerCase())}</button>` : ''}</div>
+    <div class="actions">${admin ? `<button class="btn ghost" data-act="edit-form" data-id="${form.id}">Edit form</button>` : ''}${importButton(form)}${mayCreate ? `<button class="btn primary" data-act="new-record" data-id="${form.id}">+ New ${esc(itemName(form).toLowerCase())}</button>` : ''}</div>
   </div>${scope}`;
 
   if (!all.length) {

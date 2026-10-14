@@ -10,6 +10,7 @@ import {
   onSnapshot,
   setDoc,
   getDoc,
+  getDocs,
   updateDoc,
   deleteDoc,
   writeBatch,
@@ -35,6 +36,7 @@ export const store = {
   dashboards: [], // dashboards: mine and shared ones
   dashReady: false,
   listViewsReady: false,
+  imports: [], // admins: past imports, newest first
   recordsLoading: new Set(),
   onChange: () => {},
   onError: () => {},
@@ -165,7 +167,7 @@ export function stopData() {
   recordSubs.forEach((s) => s.unsub());
   recordSubs.clear();
   recordsByForm.clear();
-  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, reportDefs: [], dashboards: [], dashReady: false });
+  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, imports: [], reportDefs: [], dashboards: [], dashReady: false });
   store.recordsLoading.clear();
 }
 
@@ -184,6 +186,16 @@ function syncAdminSubs() {
     );
     adminUnsubs.push(
       onSnapshot(
+        collection(db, 'imports'),
+        (s) => {
+          store.imports = s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          changed();
+        },
+        fail('import history')
+      )
+    );
+    adminUnsubs.push(
+      onSnapshot(
         collection(db, 'users'),
         (s) => {
           store.users = s.docs.map((d) => ({ ...d.data(), id: d.id }));
@@ -197,6 +209,7 @@ function syncAdminSubs() {
     adminUnsubs = [];
     store.groups = [];
     store.users = [];
+    store.imports = [];
   }
 }
 
@@ -327,6 +340,85 @@ export async function setRecordsValue(recs, fieldId, value) {
       b.update(doc(db, 'records', r.id), { ['values.' + fieldId]: plain(value), updatedAt: now, updatedBy: me })
     )
   );
+}
+
+/* ---------- Imports (admins) ---------- */
+
+/**
+ * Save an import. The import's record (imports/{id}) is written first and lists every record
+ * it will add or change, so even an import cut short can be undone. Each update writes the
+ * record as it was (imports/{id}/before/{recordId}) in the same batch as the change.
+ * creates: [{ id, values, parentId, parentFormId }]; updates: [{ id, values, parentId, parentFormId }].
+ * onProgress(done, total) runs after each batch.
+ */
+export async function runImport({ id, formId, formName, fileName, counts, creates, updates }, onProgress = () => {}) {
+  const me = store.user.uid;
+  const stamp = Date.now();
+  const byId = new Map(store.records.map((r) => [r.id, r]));
+  await setDoc(doc(db, 'imports', id), plain({
+    formId, formName: String(formName || '').slice(0, 120), fileName: String(fileName || '').slice(0, 200), ownerId: me,
+    createdAt: stamp, stamp, status: 'running', added: creates.map((c) => c.id), updated: updates.map((u) => u.id), counts,
+  }));
+  const groups = [];
+  creates.forEach((c) => groups.push([(b) => b.set(doc(db, 'records', c.id), plain({
+    formId, values: c.values || {}, parentId: c.parentId || null, parentFormId: c.parentFormId || null,
+    ownerId: me, createdBy: me, createdAt: stamp, updatedAt: stamp, updatedBy: me,
+  }))]));
+  updates.forEach((u) => {
+    const old = byId.get(u.id);
+    if (!old) return;
+    groups.push([
+      (b) => b.set(doc(db, 'imports', id, 'before', u.id), plain({ values: old.values || {}, parentId: old.parentId || null, parentFormId: old.parentFormId || null, updatedAt: old.updatedAt || 0, updatedBy: old.updatedBy || '' })),
+      (b) => b.set(doc(db, 'records', u.id), plain({
+        formId: old.formId, values: u.values || {}, parentId: u.parentId || null, parentFormId: u.parentFormId || null,
+        ownerId: old.ownerId, createdBy: old.createdBy, createdAt: old.createdAt || stamp, updatedAt: stamp, updatedBy: me,
+      })),
+    ]);
+  });
+  const total = groups.length;
+  try {
+    let batch = writeBatch(db), n = 0, done = 0;
+    for (const g of groups) {
+      if (n + g.length > 450) { await batch.commit(); onProgress(done, total); batch = writeBatch(db); n = 0; }
+      g.forEach((op) => op(batch));
+      n += g.length; done++;
+    }
+    if (n) await batch.commit();
+    onProgress(done, total);
+    await updateDoc(doc(db, 'imports', id), { status: 'done', finishedAt: Date.now() });
+  } catch (e) {
+    try { await updateDoc(doc(db, 'imports', id), { status: 'failed', finishedAt: Date.now() }); } catch (e2) { /* offline */ }
+    throw e;
+  }
+  return stamp;
+}
+
+/** The records an import changed, as they were before it: Map(recordId -> before). */
+export async function importBefore(importId) {
+  const s = await getDocs(collection(db, 'imports', importId, 'before'));
+  return new Map(s.docs.map((d) => [d.id, d.data()]));
+}
+
+/** Carry out an undo plan (importlogic.undoPlan) and mark the import undone. */
+export async function undoImport(imp, plan) {
+  const me = store.user.uid, now = Date.now();
+  const byId = new Map(store.records.map((r) => [r.id, r]));
+  const ops = [];
+  [...plan.del, ...plan.under].forEach((rid) => ops.push((b) => b.delete(doc(db, 'records', rid))));
+  plan.restore.forEach((x) => {
+    const old = byId.get(x.id);
+    if (!old) return;
+    ops.push((b) => b.set(doc(db, 'records', x.id), plain({
+      formId: old.formId, values: x.values || {}, parentId: x.parentId || null, parentFormId: x.parentFormId || null,
+      ownerId: old.ownerId, createdBy: old.createdBy, createdAt: old.createdAt || now, updatedAt: now, updatedBy: me,
+    })));
+  });
+  (imp.updated || []).forEach((rid) => ops.push((b) => b.delete(doc(db, 'imports', imp.id, 'before', rid))));
+  await commitOps(ops);
+  await updateDoc(doc(db, 'imports', imp.id), {
+    status: 'undone', undoneAt: now, undoneBy: me,
+    undo: { removed: plan.del.length, under: plan.under.length, restored: plan.restore.length, kept: plan.kept.slice(0, 50), gone: plan.gone },
+  });
 }
 
 /* ---------- Saved reports and dashboards ---------- */

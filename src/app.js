@@ -8,6 +8,7 @@ import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
 import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts } from './dash.js';
 import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
+import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
 import { FX } from './formulas.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
@@ -16,7 +17,7 @@ import { signOutUser } from './auth.js';
 import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
 import examples from './examples.json';
 
-const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit']);
+const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'import', 'imports']);
 
 const TYPES=[
  ['text','Short text','Aa','Text'],['textarea','Long text','¶','Text'],
@@ -127,7 +128,7 @@ let view={name:'loading'},hist=[],rdraft=null,fdraft=null,pdraft=null;
 const ui={search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false};
 
 function dirty(){return (view.name==='record'&&rdraft?.dirty)||(view.name==='formEdit'&&fdraft?.dirty)||(view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId))||admin.isDirty(view)}
-function guard(){if(dirty()&&!ui.leaveOk){ui.leaveOk=true;toast('You have unsaved changes. Tap again to leave without saving.');setTimeout(()=>ui.leaveOk=false,4000);return false;}ui.leaveOk=true;return true;}
+function guard(){if(importRunning()){toast('The import is still running. Wait for it to finish.');return false;}if(dirty()&&!ui.leaveOk){ui.leaveOk=true;toast('You have unsaved changes. Tap again to leave without saving.');setTimeout(()=>ui.leaveOk=false,4000);return false;}ui.leaveOk=true;return true;}
 export function goRec(draft,v){if(!guard())return;rdraft=draft;go(v);}
 export function go(v,push=true){
   if(ADMIN_VIEWS.has(v.name)&&!isAdmin(store.me)){toast('Only administrators can open that.');return false;}
@@ -224,6 +225,8 @@ function onData(){
   if(admin.isDirty(view))return;
   if(view.name==='formEdit')return;
   if(view.name==='record'&&rdraft?.dirty)return;
+  if(view.name==='import'&&importBusy())return;
+  if(view.name==='import'&&!formById(view.formId)){home();return;}
   maybeMigrate();
   if((view.name==='report'||view.name==='dashboard')&&reportBusy())return;
   if(view.name==='record'||view.name==='records'){if(!formById(view.formId)){home();return;}}
@@ -248,7 +251,8 @@ function renderSide(){
     ${adm?`<div class="navlabel" style="margin-top:12px">Administration</div>
     <button class="nav${view.name==='designer'||view.name==='formEdit'?' on':''}" data-act="nav-designer"><span class="glyph navg">⚙</span><span class="t">Form designer</span><span class="n">${store.forms.length}</span></button>
     <button class="nav${view.name==='groups'||view.name==='groupEdit'?' on':''}" data-act="nav-groups"><span class="glyph navg">◫</span><span class="t">Security groups</span><span class="n">${store.groups.length}</span></button>
-    <button class="nav${view.name==='users'?' on':''}" data-act="nav-users"><span class="glyph navg">☺</span><span class="t">Users</span><span class="n">${store.users.length}</span></button>`:''}
+    <button class="nav${view.name==='users'?' on':''}" data-act="nav-users"><span class="glyph navg">☺</span><span class="t">Users</span><span class="n">${store.users.length}</span></button>
+    <button class="nav${view.name==='imports'?' on':''}" data-act="nav-imports"><span class="glyph navg">⇪</span><span class="t">Import history</span><span class="n">${store.imports.length}</span></button>`:''}
     <div class="side-foot"><div class="who"><b>${esc(name)}</b><span>${adm?'Administrator':'Member'}</span></div><button class="btn sm ghost" data-act="sign-out">Sign out</button></div>`;
 }
 function renderMain(){
@@ -261,6 +265,8 @@ function renderMain(){
   else if(view.name==='dashboard'){title=dashName(view.dashboardId);h=viewDashboard(view.dashboardId);wide=true;}
   else if(view.name==='records'){const f=formById(view.formId);title=f?.name;h=viewRecords(f);}
   else if(view.name==='record'){const f=formById(view.formId);title=f?.name;h=viewRecord(f);}
+  else if(view.name==='import'){title=importTitle();h=viewImport(formById(view.formId));}
+  else if(view.name==='imports'){title='Import history';h=viewImports();}
   else if(view.name==='designer'){title='Form designer';h=viewDesigner();}
   else if(view.name==='formEdit'){title='Edit form';h=viewFormEdit();}
   else if(admin.handles(view)){const r=admin.renderView(view);title=r.title;h=r.html;}
@@ -902,6 +908,7 @@ document.addEventListener('click',async e=>{
     case 'nav-dashboards':go({name:'dashboards'});break;
     case 'nav-groups':go({name:'groups'});break;
     case 'nav-users':go({name:'users'});break;
+    case 'nav-imports':go({name:'imports'});break;
     case 'sign-out':if(!guard())return;await signOutUser();break;
     case 'back':back();break;
     case 'new-record':{const f=formById(id);if(f)goRec(newRecordDraft(f,null),{name:'record',formId:id,recordId:null});break;}
@@ -1117,12 +1124,13 @@ export function startApp(){
   booted=false;pendingRoute=null;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
   initReports({fmt,valOf,recTitle,go,renderMain,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
   initLists({fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,search:()=>ui.search});
+  initImports({fmt,recTitle,formById,go,renderMain,computeFormulas:(form,rec)=>{const out={};(form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,rec);out[f.id]=r.e?null:r.v;});return out;}});
   Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false});
   store.onChange=onData;
   store.onError=(err)=>{if(err?.code==='permission-denied')toast('Some data could not be loaded because of your permissions.');else toast('Lost the connection to the database. Changes will sync when it returns.');};
 }
 export function stopApp(){
-  booted=false;store.onChange=()=>{};$('#app').hidden=true;closeMenu();resetLists();forgetDrafts();
+  booted=false;store.onChange=()=>{};$('#app').hidden=true;closeMenu();resetLists();resetImports();forgetDrafts();
   if(tw.unsub){tw.unsub();tw.unsub=null;}tw.recordId=null;
 }
 export { view as currentView, ui, byOrder, formById, recordsOf, renderMain };
