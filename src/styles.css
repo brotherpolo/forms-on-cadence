@@ -357,3 +357,8 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .fs-item mark{background:none;color:inherit;font-weight:700;text-decoration:underline;text-decoration-color:var(--accent);text-underline-offset:3px}
 .fs-none,.fs-hint{margin:6px 8px;font-size:13px;color:var(--fg)}
 .fs-hint{font-size:11.5px;color:var(--muted);margin-top:4px}
+
+/* theme button (sidebar footer): Auto → Light → Dark, kept per device (theme.js) */
+.side-foot .who{flex:1}
+.theme-btn{width:36px;height:36px;display:grid;place-items:center;border-radius:9px;color:var(--muted);flex:none}
+.theme-btn:hover,.theme-btn:focus-visible{color:var(--fg);background:var(--sunk)}

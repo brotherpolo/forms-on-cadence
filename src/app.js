@@ -1,6 +1,7 @@
 // Formwright application: navigation, record screens and the form designer.
 import './designer.css';
 import './grids.css';
+import { readTheme, applyTheme, nextTheme, themeLabel } from './theme.js';
 // Admin screens (users and groups) live in admin.js; data access in store.js.
 
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
@@ -65,7 +66,7 @@ function fmt(f,v){
     case 'checkbox':return v?'Yes':'No';
     case 'decimal':return Number(v).toLocaleString(undefined,{minimumFractionDigits:f.decimals??2,maximumFractionDigits:f.decimals??2});
     case 'number':return Number(v).toLocaleString();
-    case 'currency':return new Intl.NumberFormat(undefined,{style:'currency',currency:(f.currency||'USD').toUpperCase()}).format(v);
+    case 'currency':return new Intl.NumberFormat(undefined,{style:'currency',currency:(f.currency||'CAD').toUpperCase()}).format(v);
     case 'percent':return v+'%';
     case 'range':return v+(f.suffix||'');
     case 'rating':return '★'.repeat(v)+'☆'.repeat(Math.max(0,(f.max||5)-v));
@@ -79,7 +80,7 @@ function fmt(f,v){
     default:return String(v);
   }}catch(e){return String(v)}
 }
-function curSym(code){try{return new Intl.NumberFormat(undefined,{style:'currency',currency:(code||'USD').toUpperCase()}).formatToParts(0).find(p=>p.type==='currency').value}catch(e){return code||'$'}}
+function curSym(code){try{return new Intl.NumberFormat(undefined,{style:'currency',currency:(code||'CAD').toUpperCase()}).formatToParts(0).find(p=>p.type==='currency').value}catch(e){return code||'$'}}
 const fsize=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
 function mapUrl(v){if(!v)return '';if(v.lat!=null&&v.lng!=null&&v.lat!==''&&v.lng!=='')return `https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}`;if(v.address)return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(v.address);return '';}
 
@@ -125,7 +126,7 @@ function fmtCalc(f,v){
   const d=f.decimals??2;
   try{switch(f.format){
     case 'number':return v.toLocaleString(undefined,{maximumFractionDigits:d});
-    case 'currency':return new Intl.NumberFormat(undefined,{style:'currency',currency:(f.currency||'USD').toUpperCase()}).format(v);
+    case 'currency':return new Intl.NumberFormat(undefined,{style:'currency',currency:(f.currency||'CAD').toUpperCase()}).format(v);
     case 'percent':return v.toLocaleString(undefined,{maximumFractionDigits:d})+'%';
     case 'days':return v.toLocaleString()+(Math.abs(v)===1?' day':' days');
     default:return v.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -260,6 +261,16 @@ function paintFormResults(){
   q.setAttribute('aria-expanded',box.hidden?'false':'true');
   const hi=box.querySelector('.fs-item.hi');if(hi){q.setAttribute('aria-activedescendant',hi.id);hi.scrollIntoView({block:'nearest'});}else q.removeAttribute('aria-activedescendant');
 }
+const THEME_ICON={
+  auto:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>',
+  light:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>',
+  dark:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>'};
+/** Light / Dark / Auto, per device: one button that steps through them */
+function themeButton(){
+  const t=readTheme(localStorage),nx=nextTheme(t);
+  const now=t==='auto'?'Auto (follows this device)':themeLabel(t);
+  return `<button type="button" class="ibtn theme-btn" data-act="theme" aria-label="Theme: ${now}. Switch to ${themeLabel(nx)}" title="Theme: ${now} · click for ${themeLabel(nx)}">${THEME_ICON[t]}</button>`;
+}
 function renderSide(){
   const fsFocus=document.activeElement?.id==='fs-q'?document.activeElement.selectionStart:null; // a redraw while searching keeps the cursor
   const fs=sidebarForms();
@@ -282,7 +293,7 @@ function renderSide(){
     <button class="nav${view.name==='groups'||view.name==='groupEdit'?' on':''}" data-act="nav-groups"><span class="glyph navg">◫</span><span class="t">Security groups</span><span class="n">${store.groups.length}</span></button>
     <button class="nav${view.name==='users'?' on':''}" data-act="nav-users"><span class="glyph navg">☺</span><span class="t">Users</span><span class="n">${store.users.length}</span></button>
     <button class="nav${view.name==='imports'?' on':''}" data-act="nav-imports"><span class="glyph navg">⇪</span><span class="t">Import history</span><span class="n">${store.imports.length}</span></button>`:''}
-    <div class="side-foot"><div class="who"><b>${esc(name)}</b><span>${adm?'Administrator':'Member'}</span></div><button class="btn sm ghost" data-act="sign-out">Sign out</button></div>`;
+    <div class="side-foot"><div class="who"><b>${esc(name)}</b><span>${adm?'Administrator':'Member'}</span></div>${themeButton()}<button class="btn sm ghost" data-act="sign-out">Sign out</button></div>`;
   if(fsFocus!=null){const q=$('#fs-q');if(q){q.focus({preventScroll:true});try{q.setSelectionRange(fsFocus,fsFocus)}catch(e){}paintFormResults();}}
 }
 function renderMain(){
@@ -961,7 +972,7 @@ function fieldEditor(x){
   if(CHOICE.has(x.type))h+=P('Options, one per line',`<textarea class="in" data-prop="options" data-kind="lines" rows="4">${esc((x.options||[]).join('\n'))}</textarea>`,'full');
   if(['number','decimal','currency','percent','range'].includes(x.type))h+=P('Minimum',num('min',x.min))+P('Maximum',num('max',x.max));
   if(x.type==='decimal')h+=P('Decimal places',num('decimals',x.decimals));
-  if(x.type==='currency')h+=P('Currency code',inp('currency',x.currency,'maxlength="3" style="text-transform:uppercase"'));
+  if(x.type==='currency')h+=P('Currency code',inp('currency',x.currency||'CAD','maxlength="3" style="text-transform:uppercase"'));
   if(x.type==='range')h+=P('Step',num('step',x.step))+P('Unit after value',inp('suffix',x.suffix,'placeholder="e.g. %"'));
   if(x.type==='rating')h+=P('Number of stars',num('max',x.max));
   if(x.type==='relation')h+=P('Links to form',`<select class="in" data-prop="relForm"><option value="">Choose a form…</option>${[...store.forms].sort(byOrder).map(o=>`<option value="${o.id}"${o.id===x.relForm?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`);
@@ -1061,6 +1072,7 @@ document.addEventListener('click',async e=>{
     case 'nav-groups':go({name:'groups'});break;
     case 'nav-users':go({name:'users'});break;
     case 'nav-imports':go({name:'imports'});break;
+    case 'theme':{const t=applyTheme(document,nextTheme(readTheme(localStorage)),localStorage);renderSide();toast(themeLabel(t)==='Auto'?'Theme: Auto (follows this device)':'Theme: '+themeLabel(t)+' on this device');$('[data-act="theme"]')?.focus({preventScroll:true});break;}
     case 'sign-out':if(!guard())return;await signOutUser();break;
     case 'back':back();break;
     case 'new-record':{const f=formById(id);if(f)goRec(newRecordDraft(f,null),{name:'record',formId:id,recordId:null});break;}

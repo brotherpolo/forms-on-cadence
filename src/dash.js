@@ -103,7 +103,7 @@ function fmtMeasure(c, def, v) {
   if (f.type === 'rating') return (Math.round(v * 10) / 10).toLocaleString() + ' ★';
   const val = def.measure.fn === 'avg' ? Math.round(v * 100) / 100 : v;
   if (f.type === 'currency' || (f.type === 'formula' && f.format === 'currency')) {
-    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: String(f.currency || 'USD').toUpperCase(), maximumFractionDigits: Math.abs(val) >= 100 ? 0 : 2 }).format(val); } catch (e) { return String(val); }
+    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: String(f.currency || 'CAD').toUpperCase(), maximumFractionDigits: Math.abs(val) >= 100 ? 0 : 2 }).format(val); } catch (e) { return String(val); }
   }
   if (f.type === 'percent' || (f.type === 'formula' && f.format === 'percent')) return (Math.round(val * 10) / 10).toLocaleString() + '%';
   if (f.type === 'range') return (Math.round(val * 10) / 10) + (f.suffix || '');
