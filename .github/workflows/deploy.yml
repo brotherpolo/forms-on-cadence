@@ -22,7 +22,15 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
+      # Exact library versions from package-lock.json when it's there (npm ci); otherwise the newest allowed.
+      - name: Install libraries
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            echo "::warning::No package-lock.json yet, so the newest allowed versions were installed. See README, Locked libraries."
+            npm install --no-audit --no-fund
+          fi
       - name: Unit tests
         run: npm run test:unit
       - name: Build
@@ -53,7 +61,15 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
+      # Exact library versions from package-lock.json when it's there (npm ci); otherwise the newest allowed.
+      - name: Install libraries
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            echo "::warning::No package-lock.json yet, so the newest allowed versions were installed. See README, Locked libraries."
+            npm install --no-audit --no-fund
+          fi
       - uses: actions/download-artifact@v5
         with:
           name: dist
