@@ -10,6 +10,7 @@ import './dash.css';
 import { store, saveReportDef, deleteReportDef, saveDashboard, deleteDashboard, setHomeDashboard, writeMigration } from './store.js';
 import { canViewForm, isAdmin } from './access.js';
 import { esc, uid, clone, toast, badge } from './ui.js';
+import { REPORT_COLS, REPORT_DEFAULT, DASH_COLS, DASH_DEFAULT, readCols, saveCols, toggleCol, moveCol, searchRows, sortRows, nextSort } from './catalog.js';
 import {
   fieldOf, valueOf, textOf, kindOf, chainOf, measureOf, bucketsOf, niceStep, refLabel, autoTitle, titleFieldOf, parentsOf,
 } from './reportlogic.js';
@@ -496,23 +497,107 @@ window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = set
 
 /* ---------- the Reports list ---------- */
 
+/* ---------- the Reports and Dashboards lists: columns you pick, one search across them ---------- */
+
+const CT = { reports: { q: '', sort: { k: 'name', d: 1 }, pop: false }, dashes: { q: '', sort: { k: 'name', d: 1 }, pop: false } };
+const CT_DEF = { reports: [REPORT_COLS, REPORT_DEFAULT], dashes: [DASH_COLS, DASH_DEFAULT] };
+const ctCols = (kind) => readCols(localStorage, kind, me(), CT_DEF[kind][0], CT_DEF[kind][1]);
+const shortDate = (t) => (t ? new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
+const dateCell = (t) => ({ text: shortDate(t), sort: t || null });
+const who = (u) => (u === me() ? 'You' : nameOf(u));
+const groupNames = (ids) => (ids || []).map((g) => store.groups.find((y) => y.id === g)?.name || 'a group');
+const sharingText = (x) => (x.shared ? ((x.groups || []).length ? 'Shared with ' + groupNames(x.groups).join(', ') : 'Everyone') : 'Private');
+const byWord = (ref) => (ref && ref.by ? ' (by ' + ((BYS.find((b) => b[0] === ref.by) || [0, ref.by])[1]).toLowerCase() + ')' : '');
+
+function reportRow(c, r, dashes) {
+  const def = r.def || {}, t = def.type;
+  const lab = (ref) => (ref ? refLabel(c, ref, def.form) : '');
+  const conds = (def.conditions || []).filter((x) => x && x.ref && x.value !== undefined && x.value !== '')
+    .map((x) => lab(x.ref) + (x.op === 'not' ? ' is not ' : ' is ') + (x.value === '(blank)' ? 'blank' : x.value)).join(def.join === 'or' ? ' or ' : ' and ');
+  const on = usedOn(dashes, r.id).map((d) => d.name);
+  return { id: r.id, name: r.name || 'Report', cells: {
+    type: { text: (TYPES.find((x) => x[0] === t) || [0, 'Report'])[1] },
+    form: { text: c.formById(def.form)?.name || '' },
+    dashes: { text: on.join(', '), sort: on.length ? on.join(', ') : '' },
+    updated: dateCell(r.updatedAt),
+    value: { text: t === 'table' ? '' : measureLabel(c, def) },
+    group: { text: ['grouped', 'pivot', 'bar', 'donut'].includes(t) && def.group ? lab(def.group) + byWord(def.group) : '' },
+    col: { text: t === 'pivot' && def.col ? lab(def.col) + byWord(def.col) : '' },
+    time: { text: ['line', 'area'].includes(t) && def.time ? lab(def.time) + ', by ' + (def.interval || 'month') : '' },
+    conds: { text: conds },
+    owner: { text: who(r.ownerId) },
+    sharing: { text: sharingText(r) },
+    created: dateCell(r.createdAt),
+  } };
+}
+function dashRow(x, home) {
+  const reps = (x.tiles || []).filter((t) => t.report).map((t) => reportById(t.report)?.name).filter(Boolean);
+  return { id: x.id, name: x.name || 'Dashboard', cells: {
+    count: { text: String(reps.length), sort: reps.length },
+    home: { text: x.id === home ? 'Home' : '', sort: x.id === home ? 'Home' : '' },
+    sharing: { text: sharingText(x) },
+    updated: dateCell(x.updatedAt),
+    reports: { text: reps.join(', ') },
+    period: { text: (PERIODS.find((p) => p[0] === (x.filters?.period || 'all')) || PERIODS[0])[1] },
+    owner: { text: who(x.ownerId) },
+    created: dateCell(x.createdAt),
+  } };
+}
+
+/** The table: search box, Columns picker, sortable headings; each row opens its item. */
+function catalogHTML(kind, rows, openAct, empty) {
+  const st = CT[kind], [ALL] = CT_DEF[kind], cols = ctCols(kind);
+  const colOf = (k) => ALL.find((c) => c.key === k);
+  const found = sortRows(searchRows(rows, st.q, cols), st.sort.k, st.sort.d);
+  const noun = kind === 'reports' ? 'report' : 'dashboard';
+  const th = (k, label) => { const on = st.sort.k === k; return `<th scope="col" aria-sort="${on ? (st.sort.d > 0 ? 'ascending' : 'descending') : 'none'}"><button type="button" class="ct-sort${on ? ' on' : ''}" data-ct="sort" data-k="${k}" data-kind="${kind}">${esc(label)}${on ? `<span aria-hidden="true">${st.sort.d > 0 ? ' ↑' : ' ↓'}</span>` : ''}</button></th>`; };
+  const pop = st.pop ? `<div class="ct-pop" role="dialog" aria-label="Columns"><p class="ct-plab">Columns to show</p><ul>${
+    cols.map((k, i) => `<li><label><input type="checkbox" checked data-ct="col" data-k="${k}" data-kind="${kind}"> ${esc(colOf(k).label)}</label><span class="ct-mv"><button type="button" class="ibtn" data-ct="mv" data-k="${k}" data-dir="-1" data-kind="${kind}" aria-label="Move ${esc(colOf(k).label)} left"${i === 0 ? ' disabled' : ''}>↑</button><button type="button" class="ibtn" data-ct="mv" data-k="${k}" data-dir="1" data-kind="${kind}" aria-label="Move ${esc(colOf(k).label)} right"${i === cols.length - 1 ? ' disabled' : ''}>↓</button></span></li>`).join('')
+  }${ALL.filter((c) => !cols.includes(c.key)).map((c) => `<li><label><input type="checkbox" data-ct="col" data-k="${c.key}" data-kind="${kind}"> ${esc(c.label)}</label></li>`).join('')}</ul><p class="ct-pnote">The name is always first. Your choice is kept on this device.</p><button type="button" class="btn sm" data-ct="pop" data-kind="${kind}">Done</button></div>` : '';
+  const head = `<div class="ct-bar"><div class="ct-search"><svg class="fs-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg><input type="search" class="in" data-ksearch="ct-${kind}" data-ctq="${kind}" value="${esc(st.q)}" placeholder="Search ${noun}s" aria-label="Search ${noun}s" autocomplete="off"></div>
+    <span class="help" role="status">${st.q.trim() ? `Showing ${found.length} of ${rows.length}` : `${rows.length} ${noun}${rows.length === 1 ? '' : 's'}`}</span>
+    <div class="ct-colwrap"><button type="button" class="btn sm" data-ct="pop" data-kind="${kind}" aria-expanded="${st.pop}">Columns</button>${pop}</div></div>`;
+  if (!rows.length) return head + `<div class="panel"><p class="note">${empty}</p></div>`;
+  const body = found.length ? found.map((r) => `<tr data-d="${openAct}" data-v="${esc(r.id)}"><th scope="row" class="ct-name"><button type="button" class="ct-open" data-d="${openAct}" data-v="${esc(r.id)}">${esc(r.name)}</button></th>${
+    cols.map((k) => { const c = r.cells[k] || {}; const lab = esc(colOf(k).label); return `<td data-label="${lab}"${colOf(k).num ? ' class="num"' : ''}>${k === 'home' && kind === 'dashes' ? (c.text ? `<button type="button" class="db-home on" data-d="sethome" data-v="" aria-pressed="true" title="Opens when you start Formwright">Home</button>` : `<button type="button" class="db-home" data-d="sethome" data-v="${esc(r.id)}" aria-pressed="false">Set as home</button>`) : c.text ? esc(c.text) : '<span class="ct-blank">—</span>'}</td>`; }).join('')}</tr>`).join('')
+    : `<tr><td colspan="${cols.length + 1}" class="ct-none">No ${noun}s match “${esc(st.q.trim())}”.</td></tr>`;
+  return head + `<div class="panel ct-wrap"><table class="ct-tbl"><thead><tr>${th('name', 'Name')}${cols.map((k) => th(k, colOf(k).label)).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-ct]');
+  if (!b || b.tagName === 'INPUT') { if (CT.reports.pop || CT.dashes.pop) { if (!e.target.closest('.ct-colwrap')) { CT.reports.pop = CT.dashes.pop = false; repaint(); } } return; }
+  const kind = b.dataset.kind, st = CT[kind]; if (!st) return;
+  const a = b.dataset.ct;
+  if (a === 'pop') { st.pop = !st.pop; repaint(() => document.querySelector(st.pop ? '.ct-pop input' : `[data-ct="pop"][data-kind="${kind}"]`)?.focus()); }
+  else if (a === 'sort') { st.sort = nextSort(st.sort, b.dataset.k, CT_DEF[kind][0]); repaint(); }
+  else if (a === 'mv') { saveCols(localStorage, kind, me(), moveCol(ctCols(kind), b.dataset.k, +b.dataset.dir)); repaint(() => document.querySelector(`[data-ct="mv"][data-k="${b.dataset.k}"][data-dir="${b.dataset.dir}"]:not(:disabled)`)?.focus()); }
+});
+document.addEventListener('change', (e) => {
+  const t = e.target; if (!t.dataset || t.dataset.ct !== 'col') return;
+  const kind = t.dataset.kind; saveCols(localStorage, kind, me(), toggleCol(ctCols(kind), t.dataset.k));
+  repaint(() => document.querySelector(`[data-ct="col"][data-k="${t.dataset.k}"]`)?.focus());
+});
+document.addEventListener('input', (e) => {
+  const t = e.target; if (!t.dataset || !t.dataset.ctq) return;
+  CT[t.dataset.ctq].q = t.value; repaint();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const t = e.target;
+  if (t.dataset && t.dataset.ctq && t.value) { e.preventDefault(); CT[t.dataset.ctq].q = ''; repaint(); return; }
+  for (const kind of ['reports', 'dashes']) if (CT[kind].pop) { CT[kind].pop = false; repaint(() => document.querySelector(`[data-ct="pop"][data-kind="${kind}"]`)?.focus()); return; }
+});
+/** Back closes the Columns pop-up first (app.js asks). */
+export function closeCatalogPop() { if (!CT.reports.pop && !CT.dashes.pop) return false; CT.reports.pop = CT.dashes.pop = false; repaint(); return true; }
+
 export function viewReportsList() {
   maybeMigrate();
-  const c = ctx();
-  const list = reportsVisible();
-  const own = list.filter((r) => r.ownerId === me()), shared = list.filter((r) => r.ownerId !== me());
-  const typeName = (t) => (TYPES.find((x) => x[0] === t) || ['', 'Report'])[1];
-  const card = (r) => {
-    const f = c.formById(r.def?.form);
-    const on = usedOn(dashesVisible(), r.id);
-    return `<button class="card" data-d="openrep" data-v="${esc(r.id)}"><b>${esc(r.name)}</b><div class="meta"><span>${esc(typeName(r.def?.type))}${f ? ' · ' + esc(f.name) : ''}</span>${on.length ? `<span>On ${on.map((d) => esc(d.name)).join(', ')}</span>` : ''}${r.ownerId !== me() ? `<span>By ${esc(nameOf(r.ownerId))}</span>` : r.shared ? '<span>Shared</span>' : ''}</div></button>`;
-  };
+  const c = ctx(), dashes = dashesVisible();
+  const rows = reportsVisible().map((r) => reportRow(c, r, dashes));
   return `
   <div class="head"><div class="ttl"><div><h1>Reports</h1><p class="sub">Each report is one chart, table, pivot or number. Put it on as many dashboards as you like; changing it changes it everywhere.</p></div></div>
     <div class="actions"><button class="btn" data-d="nav-dashes">Dashboards</button><button class="btn primary" data-d="newrep">+ New report</button></div></div>
-  <section class="section"><div class="section-h"><h2>Your reports <span class="count">${own.length}</span></h2></div>
-    <div class="panel">${own.length ? `<div class="cards" style="display:flex">${own.map(card).join('')}</div>` : `<p class="note">No reports yet. Press <b>New report</b> to make one.</p>`}</div></section>
-  ${shared.length ? `<section class="section"><div class="section-h"><h2>Shared with you <span class="count">${shared.length}</span></h2></div><div class="panel"><div class="cards" style="display:flex">${shared.map(card).join('')}</div></div></section>` : ''}`;
+  ${catalogHTML('reports', rows, 'openrep', 'No reports yet. Press <b>New report</b> to make one.')}`;
 }
 
 /* ---------- the report editor ---------- */
@@ -693,14 +778,12 @@ function dashData(x) {
 
 export function viewDashboards() {
   maybeMigrate();
-  const list = dashesVisible();
   const home = homeId();
-  const card = (x) => `<div class="db-dcard${x.id === home ? ' home' : ''}"><button class="card" data-d="opendash" data-v="${esc(x.id)}"><b>${esc(x.name)}</b><div class="meta"><span>${(x.tiles || []).length} item${(x.tiles || []).length === 1 ? '' : 's'}</span>${x.ownerId !== me() ? `<span>By ${esc(nameOf(x.ownerId))}</span>` : x.shared ? `<span>Shared${(x.groups || []).length ? ' with ' + (x.groups || []).map((g) => esc(store.groups.find((y) => y.id === g)?.name || 'a group')).join(', ') : ''}</span>` : ''}</div></button>
-    ${x.id === home ? `<button class="db-home on" data-d="sethome" data-v="" aria-pressed="true" title="Opens when you start Formwright">Home</button>` : `<button class="db-home" data-d="sethome" data-v="${esc(x.id)}" aria-pressed="false">Set as home</button>`}</div>`;
+  const rows = dashesVisible().map((x) => dashRow(x, home));
   return `
   <div class="head"><div class="ttl"><div><h1>Dashboards</h1><p class="sub">Saved reports and notes on one page, with a period and filters across the top. Your home dashboard opens when you start Formwright.</p></div></div>
     <div class="actions"><button class="btn" data-d="nav-reports">Reports</button><button class="btn primary" data-d="newdash">+ New dashboard</button></div></div>
-  <div class="panel">${list.length ? `<div class="db-dlist">${list.map(card).join('')}</div>` : `<p class="note">No dashboards yet. Press <b>New dashboard</b>, then add reports to it.</p>`}</div>`;
+  ${catalogHTML('dashes', rows, 'opendash', 'No dashboards yet. Press <b>New dashboard</b>, then add reports to it.')}`;
 }
 
 /* ---------- one dashboard ---------- */

@@ -369,3 +369,11 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .dsearch .in{flex:1 1 320px;max-width:520px;min-height:42px;padding-left:34px}
 .flist.searching [data-act="form-move"]{display:none}
 .flist .fcard[hidden]{display:none}
+.ucad{margin-top:2px}
+
+/* no access yet (app.js accessGate) */
+#noaccess{position:fixed;inset:0;z-index:200;overflow:auto}
+.na-card p{color:var(--muted)}
+.na-card .na-who{font-size:13px}
+.na-card .na-who b{color:var(--fg);word-break:break-all}
+.na-card .btn{align-self:flex-start;min-height:44px}

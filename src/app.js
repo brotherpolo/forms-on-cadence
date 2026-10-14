@@ -7,7 +7,7 @@ import { readTheme, applyTheme, nextTheme, themeLabel } from './theme.js';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
-import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts, drillNav, fitTiles } from './dash.js';
+import { initReports, closeCatalogPop, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts, drillNav, fitTiles } from './dash.js';
 import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { initAttach, openPickChildren, closeAttach } from './attach.js';
 import { titleSortOf } from './listlogic.js';
@@ -188,6 +188,7 @@ function syncHash(push){
 function closeOverlay(){
   if($('#side')?.classList.contains('open')){closeMenu();return true;}
   if(fsShown()){closeFormSearch();return true;}
+  if(closeCatalogPop())return true;
   const fc=document.querySelector('[data-act="close-field"]');if(fc){fc.click();return true;}
   if(cdraft){document.querySelector('[data-act="cell-close"]')?.click();return true;}
   if(document.querySelector('#at-root, #db-dd, .lv-scrim, .lv-pop, .im-scrim')){document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return true;}
@@ -270,8 +271,27 @@ window.addEventListener('hashchange',()=>{
   const n0=hist.length;
   if(!openRoute(r)){pendingRoute=r;if(foreign&&hist.length===n0){hist.pop();history.replaceState(st(hist.length),'',urlFor(view));}}
 });
+/* ---------- No access yet: one blocking screen, nothing of the app behind it ----------
+   Admins and people in at least one security group get in. Everyone else signed in sees only
+   this screen (the rules give them no data either). It lifts by itself the moment an admin adds
+   them to a group, and comes back at once if their access is taken away. */
+const hasAccess=()=>!!store.me&&(isAdmin(store.me)||(store.me.groups||[]).length>0);
+function accessGate(){
+  let g=document.getElementById('noaccess');
+  if(hasAccess()){if(g){g.remove();$('#app').hidden=!booted;}return false;}
+  $('#boot').hidden=true;$('#app').hidden=true;
+  if(!g){
+    g=document.createElement('div');g.id='noaccess';g.className='auth';
+    g.innerHTML=`<div class="auth-card na-card" role="alertdialog" aria-modal="true" aria-labelledby="na-t" aria-describedby="na-d"><div class="brand"><span class="brand-mark"><i></i></span><b>Formwright</b></div><h1 id="na-t">You don’t have access yet</h1><p id="na-d">Please contact an administrator.</p><p class="na-who">Signed in as <b>${esc(store.user?.email||'this account')}</b></p><button type="button" class="btn" id="na-out">Sign out</button></div>`;
+    g.querySelector('#na-out').addEventListener('click',async()=>{await signOutUser();});
+    document.body.appendChild(g);
+    g.querySelector('#na-out').focus({preventScroll:true});
+  }
+  return true;
+}
 function onData(){
   if(!store.ready)return;
+  if(accessGate())return;
   if(!booted){
     booted=true;$('#boot').hidden=true;$('#app').hidden=false;
     // the exit step below the first screen (see the back button notes above)
@@ -416,7 +436,7 @@ function tasksInner(){
   const head=`<div class="section-h"><h2>${foldBtn('t:tasks',tOpen,`<span class="badge" style="background:${COLORS[6]}" aria-hidden="true">T</span><span>Tasks</span>${openTasks.length?` <span class="count">${openTasks.length}</span>`:''}`,tSum)}</h2></div>`;
   if(!tOpen)return head;
   if(tw.status==='loading'||tw.recordId!==view.recordId)return head+`<div class="panel"><p class="note">Loading tasks…</p></div>`;
-  if(tw.status==='error')return head+`<div class="panel"><p class="note">${tw.error==='failed-precondition'?'Tasks need a database index that is still being built. Try again in a few minutes.':'Couldn’t load tasks ('+esc(tw.error)+').'}</p></div>`;
+  if(tw.status==='error')return head+`<div class="panel"><p class="note">${tw.error==='failed-precondition'?'Tasks need a database index that is still being built. Try again in a few minutes.':tw.error==='permission-denied'&&!isAdmin(store.me)&&store.me?.cadence!==true?'Tasks come from Cadence, which isn’t switched on for you yet. Ask an administrator to turn on Cadence for you under Users.':'Couldn’t load tasks ('+esc(tw.error)+').'}</p></div>`;
   if(!tw.tasks.length)return head+`<div class="panel"><p class="note">No tasks for this ${esc(noun)} yet.${cadenceUrl?' Add one, or link an existing task to it in Cadence.':' Link a task to it from Cadence.'}</p>${add}</div>`;
   const me=store.user?.uid,today=dateKey(new Date());
   const tq=(rdraft?.kq||{})['t:tasks']||'';
@@ -1257,7 +1277,7 @@ document.addEventListener('input',e=>{
   if(t.id==='fs-q'){ui.fq=t.value;ui.fi=0;paintFormResults();return;}
   if(t.id==='dq'){ui.dq=t.value;applyDq();return;}
   if(t.dataset.grid&&t.dataset.gf){if(t.type!=='checkbox'&&t.tagName!=='SELECT')setGridVal(t);return;}
-  if(t.dataset.ksearch&&rdraft){rdraft.kq={...(rdraft.kq||{}),[t.dataset.ksearch]:t.value};const k=t.dataset.ksearch,pos=t.selectionStart;renderMain();const s=document.querySelector(`[data-ksearch="${CSS.escape(k)}"]`);if(s){s.focus({preventScroll:true});try{s.setSelectionRange(pos,pos)}catch(err){}}return;}
+  if(t.dataset.ksearch&&rdraft&&view.name==='record'){rdraft.kq={...(rdraft.kq||{}),[t.dataset.ksearch]:t.value};const k=t.dataset.ksearch,pos=t.selectionStart;renderMain();const s=document.querySelector(`[data-ksearch="${CSS.escape(k)}"]`);if(s){s.focus({preventScroll:true});try{s.setSelectionRange(pos,pos)}catch(err){}}return;}
   if(t.id==='search'){ui.search=t.value;const pos=t.selectionStart;renderMain();const s=$('#search');if(s){s.focus();s.setSelectionRange(pos,pos);}return;}
   if(t.dataset.fid&&t.type!=='file'&&!(t.type==='radio'||t.type==='checkbox'))setVal(t);
   if(t.dataset.fprop&&t.dataset.kind!=='bool'){fdraft[t.dataset.fprop]=t.value;setFdirty();}
@@ -1502,7 +1522,7 @@ export function startApp(){
   store.onError=(err)=>{if(err?.code==='permission-denied')toast('Some data could not be loaded because of your permissions.');else toast('Lost the connection to the database. Changes will sync when it returns.');};
 }
 export function stopApp(){
-  booted=false;store.onChange=()=>{};$('#app').hidden=true;closeMenu();resetLists();resetImports();forgetDrafts();
+  booted=false;store.onChange=()=>{};$('#app').hidden=true;document.getElementById('noaccess')?.remove();closeMenu();resetLists();resetImports();forgetDrafts();
   if(tw.unsub){tw.unsub();tw.unsub=null;}tw.recordId=null;
 }
 export { view as currentView, ui, byOrder, formById, recordsOf, renderMain };

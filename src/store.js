@@ -605,6 +605,11 @@ export async function setUserRole(userId, role) {
   await updateDoc(doc(db, 'users', userId), { role });
 }
 
+/** Let someone use Cadence, or stop them (admins only; the rules check users/{uid}.cadence). */
+export async function setUserCadence(userId, on) {
+  await updateDoc(doc(db, 'users', userId), { cadence: !!on });
+}
+
 /** Recompute everyone's access from their groups (repair tool). */
 export async function recomputeAllAccess(forms = store.forms) {
   const ops = store.users.map((u) => (b) =>

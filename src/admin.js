@@ -2,7 +2,7 @@
 // Effective access is recomputed here and written to each affected users/{uid} document,
 // where firestore.rules and storage.rules read it.
 
-import { store, saveGroup, deleteGroup, setUserGroups, setUserRole, recomputeAllAccess } from './store.js';
+import { store, saveGroup, deleteGroup, setUserGroups, setUserRole, setUserCadence, recomputeAllAccess } from './store.js';
 import { go, render, renderMain, byOrder } from './app.js';
 import { esc, uid, clone, toast, badge } from './ui.js';
 import { LEVELS, NONE, PRESETS, normalize, describeLevel, levelFor, isAdmin, accessParents } from './access.js';
@@ -120,7 +120,7 @@ function viewUsers() {
   const admins = store.users.filter(isAdmin).length;
   const formsVisible = (u) => (isAdmin(u) ? store.forms.length : store.forms.filter((f) => levelFor(u.access, f.id).view !== 'none').length);
   return `
-  <div class="head"><div class="ttl"><div><h1>Users</h1><p class="sub">People appear here after they sign in for the first time. Add them to security groups to give them access to forms.</p></div></div></div>
+  <div class="head"><div class="ttl"><div><h1>Users</h1><p class="sub">People appear here after they sign in to Formwright or Cadence for the first time. Add them to security groups to give them access to forms, and switch on Cadence for the people who should use it.</p></div></div></div>
   ${users.length ? `<div class="panel flist">${users.map((u) => {
     const self = u.id === store.user?.uid;
     const lastAdmin = isAdmin(u) && admins <= 1;
@@ -129,6 +129,7 @@ function viewUsers() {
         <label class="prop urole"><span class="sr">Role</span><select class="in" data-urole="${u.id}"${self || lastAdmin ? ' disabled title="You can’t remove the last administrator or change your own role."' : ''}><option value="member"${!isAdmin(u) ? ' selected' : ''}>Member</option><option value="admin"${isAdmin(u) ? ' selected' : ''}>Administrator</option></select></label></div>
       ${isAdmin(u) ? `<p class="help">Administrators see and edit every form and manage forms, groups and users.</p>` : gs.length ? `<div class="opts">${gs.map((g) => `<label class="opt"><input type="checkbox" data-ugroup="${u.id}" value="${g.id}"${(u.groups || []).includes(g.id) ? ' checked' : ''}>${esc(g.name || 'Untitled group')}</label>`).join('')}</div>
         <p class="help">${(u.groups || []).length ? `Can open ${formsVisible(u)} of ${store.forms.length} forms.` : 'Not in any group, so no forms are visible yet.'}</p>` : `<p class="help">Create a security group first, then add this person to it.</p>`}
+      ${isAdmin(u) ? `<p class="help ucad">Cadence: administrators can always use it.</p>` : `<label class="switch ucad"><input type="checkbox" data-ucad="${u.id}"${u.cadence === true ? ' checked' : ''}><span class="tr"></span><span>Can use Cadence${u.cadence === true ? '' : ' <span class="chip">Waiting</span>'}</span></label>`}
     </div>`;
   }).join('')}</div>` : `<div class="panel empty"><p>No one has signed in yet.</p></div>`}`;
 }
@@ -249,6 +250,17 @@ export async function onChange(t) {
     gdraft.members = gdraft.members.filter((m) => m !== id).concat(t.checked ? [id] : []);
     setDirty();
     renderMain();
+    return;
+  }
+  if (t.dataset.ucad) {
+    try {
+      await setUserCadence(t.dataset.ucad, t.checked);
+      toast(t.checked ? 'They can use Cadence now. Their Cadence opens by itself.' : 'Cadence switched off for them.');
+    } catch (e) {
+      console.error(e);
+      toast('Could not change that. Try again.');
+      render();
+    }
     return;
   }
   if (t.dataset.urole) {
