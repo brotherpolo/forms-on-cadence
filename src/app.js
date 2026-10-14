@@ -798,12 +798,12 @@ function sectionCards(f){
     let badgeHTML,name,kind;
     if(k===TASKS_KEY){badgeHTML=`<span class="badge" style="background:${COLORS[6]}" aria-hidden="true">T</span>`;name='Tasks';kind='Tasks linked from Cadence';}
     else{const cf=formById(k)||(f._newForms||[]).find(x=>x.id===k);const rel=(f.children||[]).find(c=>c.formId===k);if(!rel)return '';badgeHTML=cf?badge(cf):'<span class="badge">?</span>';name=cf?.name||'New sub-form';kind=rel.display==='grid'?'Sub-form, shown as a grid':'Child form, separate records';}
-    return `<li class="scard"><span class="sgrip" aria-hidden="true">${i+1}</span>${badgeHTML}<div class="crow-m"><b>${esc(name)}</b><small>${esc(kind)}</small></div>
+    return `<li class="scard"><button type="button" class="pgrip" data-pdrag="section" data-v="${esc(k)}" aria-label="Move ${esc(name)}: drag, or use the up and down arrow keys" title="Drag to move"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="6" r="1.8"/><circle cx="16" cy="6" r="1.8"/><circle cx="8" cy="12" r="1.8"/><circle cx="16" cy="12" r="1.8"/><circle cx="8" cy="18" r="1.8"/><circle cx="16" cy="18" r="1.8"/></svg></button><span class="sgrip" aria-hidden="true">${i+1}</span>${badgeHTML}<div class="crow-m"><b>${esc(name)}</b><small>${esc(kind)}</small></div>
       ${k===TASKS_KEY?'':`<button type="button" class="btn sm ghost" data-act="tab" data-tab="relations">Relationships</button>`}
       <button type="button" class="ibtn" data-act="sec-move" data-k="${esc(k)}" data-dir="-1" aria-label="Move ${esc(name)} up"${i===0?' disabled':''}>↑</button>
       <button type="button" class="ibtn" data-act="sec-move" data-k="${esc(k)}" data-dir="1" aria-label="Move ${esc(name)} down"${i===order.length-1?' disabled':''}>↓</button></li>`;
   };
-  return `<section class="dz-secs" aria-labelledby="dz-secs-h"><h3 id="dz-secs-h" class="dz-h">Under the fields</h3><p class="help">On a record, these come after all the fields, in this order. Use the arrows to rearrange them; add or remove sub-forms and child forms on the Relationships tab.</p><ol class="scards">${order.map(card).join('')}</ol></section>`;
+  return `<section class="dz-secs" aria-labelledby="dz-secs-h"><h3 id="dz-secs-h" class="dz-h">Under the fields</h3><p class="help">On a record, these come after all the fields, in this order. Drag a card by its handle, or use the arrows, to rearrange them; add or remove sub-forms and child forms on the Relationships tab.</p><ol class="scards">${order.map(card).join('')}</ol></section>`;
 }
 /** Filter the field types by what's typed in their search box (every word must match a name, group or other word). */
 function applyDzq(){
@@ -835,8 +835,8 @@ function viewFormEdit(){
         ${f.fields.length?`<ol class="dz-ol">${f.fields.map((x,i)=>`<li><button class="dz-li" data-act="focus-field" data-id="${x.id}"><span class="num">${i+1}</span><span class="fname">${esc(x.label||'Untitled field')}</span><span class="ftype">${esc(T[x.type].label)}</span></button></li>`).join('')}</ol>`:`<p class="note">No fields yet.</p>`}
       </aside>
       <main class="panel dz-canvas" data-dz-canvas aria-label="Form canvas">
-        ${f.fields.length?f.fields.map((x)=>`<div class="crow" draggable="true" data-feid="${x.id}">
-          <span class="grip" aria-hidden="true"></span>
+        ${f.fields.length?f.fields.map((x)=>`<div class="crow" data-feid="${x.id}">
+          <button type="button" class="pgrip" data-pdrag="field" data-v="${x.id}" aria-label="Move ${esc(x.label||'field')}: drag, or use the up and down arrow keys" title="Drag to move"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="6" r="1.8"/><circle cx="16" cy="6" r="1.8"/><circle cx="8" cy="12" r="1.8"/><circle cx="16" cy="12" r="1.8"/><circle cx="8" cy="18" r="1.8"/><circle cx="16" cy="18" r="1.8"/></svg></button>
           <span class="glyph" title="${esc(T[x.type].label)}">${T[x.type].glyph}</span>
           <div class="crow-m"><b id="frl-${x.id}">${esc(x.label||'Untitled field')}${x.required?'<span class="req">*</span>':''}</b><small>${esc(T[x.type].label)}${x.type==='relation'&&formById(x.relForm)?' → '+esc(formById(x.relForm).name):''}${x.inList?' · in list':''}${f.titleField===x.id?' · title':''}</small></div>
           <button class="ibtn dz-dots" data-act="open-field" data-id="${x.id}" aria-label="Options for ${esc(x.label||'field')}">⋯</button>
@@ -1201,8 +1201,81 @@ async function loadExamples(){
   catch(e){console.error(e);toast('Loading the examples failed. Try again.');}
 }
 
-/* ---------- Designer drag and drop ---------- */
-// Canvas rows and palette types use HTML5 drag and drop (desktop). On touch screens, use the ↑ ↓ buttons in the options popup.
+/* ---------- Designer: moving fields and section cards by their handle ----------
+   Pointer events, so it works with a mouse, a finger or a pen. Only the handle starts a
+   drag (touch-action:none on it), so scrolling the page with a thumb never moves anything.
+   Arrow keys on a focused handle move it one place. */
+let pd=null; // { kind:'field'|'section', id, el, others, to, y0, cy, pid, moved, line, raf }
+const pdItems=kind=>[...document.querySelectorAll(kind==='field'?'[data-dz-canvas] .crow':'.scards .scard')];
+function pdApply(kind,id,to){
+  if(kind==='field'){
+    const fs=fdraft.fields,moved=fs.find(x=>x.id===id);if(!moved)return false;
+    const rest=fs.filter(x=>x.id!==id),next=[...rest.slice(0,to),moved,...rest.slice(to)];
+    if(next.every((x,k)=>x===fs[k]))return false;
+    fdraft.fields=next;
+  }else{
+    const order=sectionOrder(fdraft),rest=order.filter(k=>k!==id),next=[...rest.slice(0,to),id,...rest.slice(to)];
+    if(next.join()===order.join())return false;
+    fdraft.sectionOrder=next;
+  }
+  setFdirty();renderMain();
+  document.querySelector(`[data-pdrag="${kind}"][data-v="${CSS.escape(id)}"]`)?.focus({preventScroll:true});
+  return true;
+}
+function pdTrack(){
+  if(!pd)return;
+  const dy=(pd.cy+window.scrollY)-pd.y0;
+  pd.el.style.transform=`translateY(${dy}px)`;
+  let i=pd.others.length;
+  for(let k=0;k<pd.others.length;k++){const r=pd.others[k].getBoundingClientRect();if(pd.cy<r.top+r.height/2){i=k;break;}}
+  pd.to=i;
+  const ref=pd.others[i],last=pd.others[pd.others.length-1];
+  const box=(ref||last||pd.el).getBoundingClientRect();
+  const y=ref?box.top-5:box.bottom+3;
+  Object.assign(pd.line.style,{top:y+'px',left:box.left+'px',width:box.width+'px'});
+}
+function pdLoop(){
+  if(!pd)return;
+  const edge=70,dir=pd.cy<edge?-1:pd.cy>window.innerHeight-edge?1:0; // near the top or bottom: scroll the page
+  if(dir){window.scrollBy(0,dir*12);pdTrack();}
+  pd.raf=requestAnimationFrame(pdLoop);
+}
+function pdEnd(apply){
+  const d=pd;if(!d)return;pd=null;
+  cancelAnimationFrame(d.raf);d.line.remove();d.el.classList.remove('lifting');d.el.style.transform='';
+  document.body.classList.remove('pd-on');
+  if(apply&&d.moved)pdApply(d.kind,d.id,d.to);
+}
+document.addEventListener('pointerdown',e=>{
+  const g=e.target.closest?.('[data-pdrag]');
+  if(!g||!fdraft||(e.button!=null&&e.button!==0))return;
+  const kind=g.dataset.pdrag,items=pdItems(kind),el=g.closest(kind==='field'?'.crow':'.scard');
+  if(!el||items.indexOf(el)<0||items.length<2)return;
+  e.preventDefault();
+  try{g.setPointerCapture(e.pointerId);}catch(err){/* older browsers */}
+  const line=document.createElement('div');line.className='pd-line';document.body.appendChild(line);
+  pd={kind,id:g.dataset.v,el,others:items.filter(x=>x!==el),to:items.indexOf(el),y0:e.clientY+window.scrollY,cy:e.clientY,pid:e.pointerId,moved:false,line,raf:0};
+  el.classList.add('lifting');document.body.classList.add('pd-on');
+  pdTrack();pd.raf=requestAnimationFrame(pdLoop);
+});
+window.addEventListener('pointermove',e=>{
+  if(!pd||e.pointerId!==pd.pid)return;
+  pd.cy=e.clientY;
+  if(Math.abs(e.clientY+window.scrollY-pd.y0)>4)pd.moved=true;
+  pdTrack();
+});
+window.addEventListener('pointerup',e=>{if(pd&&e.pointerId===pd.pid)pdEnd(true);});
+window.addEventListener('pointercancel',e=>{if(pd&&e.pointerId===pd.pid)pdEnd(false);});
+document.addEventListener('keydown',e=>{
+  const g=e.target.closest?.('[data-pdrag]');
+  if(!g||!fdraft||!['ArrowUp','ArrowDown'].includes(e.key))return;
+  e.preventDefault();
+  const kind=g.dataset.pdrag,id=g.dataset.v,dir=e.key==='ArrowUp'?-1:1;
+  if(kind==='field'){const i=fdraft.fields.findIndex(x=>x.id===id);if(i<0||i+dir<0||i+dir>=fdraft.fields.length)return;pdApply('field',id,i+dir);}
+  else{const order=sectionOrder(fdraft),i=order.indexOf(id);if(i<0||i+dir<0||i+dir>=order.length)return;pdApply('section',id,i+dir);}
+});
+
+/* ---------- Designer: dragging a field type onto the form (mouse; tapping a type adds it) ---------- */
 let dzDrag=null;            // {kind:'move', id} or {kind:'new', type}
 let dzGap=null;             // the blue insertion line
 function dzIndex(canvas,y){
@@ -1215,9 +1288,7 @@ function dzIndex(canvas,y){
 }
 document.addEventListener('dragstart',e=>{
   const chip=e.target.closest?.('.dz-chip');
-  const row=e.target.closest?.('.crow');
   if(chip){dzDrag={kind:'new',type:chip.dataset.type};e.dataTransfer.effectAllowed='copy';}
-  else if(row){dzDrag={kind:'move',id:row.dataset.feid};row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}
   else return;
   try{e.dataTransfer.setData('text/plain',dzDrag.kind);}catch(err){}
 });

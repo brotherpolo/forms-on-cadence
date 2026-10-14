@@ -73,3 +73,12 @@
 .scard .crow-m b{display:block}
 .scard .crow-m small{color:var(--muted)}
 .sgrip{font:600 12px var(--mono);color:var(--muted);width:18px;text-align:center}
+/* the handle that moves a field row or a section card (mouse or finger) */
+.pgrip{flex:none;width:34px;height:40px;margin:-4px 0 -4px -4px;border:0;border-radius:8px;background:none;color:var(--muted);display:grid;place-items:center;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none}
+.pgrip:hover,.pgrip:focus-visible{background:var(--sunk);color:var(--fg)}
+.scard .pgrip:hover,.scard .pgrip:focus-visible{background:var(--surface)}
+.crow{cursor:default}
+.crow.lifting,.scard.lifting{position:relative;z-index:30;box-shadow:0 14px 32px rgba(10,12,20,.3);border-color:var(--accent);transition:none}
+.pd-line{position:fixed;z-index:31;height:4px;border-radius:2px;background:var(--accent);pointer-events:none}
+body.pd-on{cursor:grabbing;-webkit-user-select:none;user-select:none}
+body.pd-on .pgrip{cursor:grabbing}
