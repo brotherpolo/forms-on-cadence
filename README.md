@@ -159,14 +159,19 @@ A child form can show **inside** its parent record as an editable grid, like lin
 
 Records made on their own (imported line items, say) can be put under a parent later, for any child form, grid or separate records.
 
-- **Attach existing** (under a grid, or in a child section's header) opens a window of the child form's records that aren't on any parent yet. Search, tick, **Attach**. **Include … attached elsewhere** adds ones already under another parent (of any form); attaching those moves them, and the window says from where.
+- **Attach existing** (under a grid, or in a child section's header) opens a window of the child form's records. Tick, **Attach**. Records already under another parent (of any form) show where they are under **Currently on**; attaching those moves them, and the window says from where.
+- **Suggested match:** when the parent and child have a field with the same name (Invoice # on both), the window opens filtered to the child records whose value matches this parent's, for example **Invoice # is 1**. The parent's title field is tried first, then other text and number fields, then dates, then choices. ✕ removes it and a link puts it back.
+- **+ Filter** narrows by any field (not long text, files or photos), picking from the values that exist, with counts; dates go by month. Filters stack. **Search** looks through every field, long text included, and the parent's name, with words in any order.
+- With no filter or search, the window shows only records that aren't on any parent; **Include … attached elsewhere** shows the rest. A suggested match, a filter or a search always looks at all of them.
 - In a **grid**, attached rows are saved with the parent, so they also work on a new parent before its first save; Discard undoes them. For **separate records**, attaching saves straight away.
 - **Detach** (the broken-link button on a row or card) takes a record off its parent without deleting it, so it shows up as unattached again. In a grid it happens when you save.
-- From a child form's **list**: tick records, **Attach to…**, pick the parent.
+- From a child form's **list**: tick records, **Attach to…**, pick the parent. When a same-named field matches, the parent that matches the most ticked records is suggested at the top, and picked for you when it matches all of them.
 - With **Copy matching fields** on, attaching fills matching fields that are empty on the child; it never overwrites. "Link to record" fields that point at the parent's form follow the move, and are cleared on detach. Calculations that use `PARENT(…)` are worked out again.
 - You need edit rights on the parent and on the records being attached. Access is per form, so attaching or detaching doesn't change who can see a record.
 
 ## Records lists
+
+Sorting goes by the real value everywhere (lists, grids, report tables, drill-downs): dates and times by calendar, numbers by size, text in natural order (Item 2 before Item 10), blanks last. That includes a record's title column when the title field is a date or a number, the parent column, and "Link to record" columns.
 
 Each form's list can be set up from the list itself.
 
