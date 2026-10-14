@@ -64,3 +64,65 @@ test('attach and detach changes', () => {
   const m = movesFrom([{ from: byId('i1') }, { from: null }, { from: byId('i1') }, { from: byId('i2') }], (r) => r.values.no);
   assert.deepEqual(m, { n: 3, names: ['INV-1', 'INV-2'] });
 });
+
+/* ---------- suggested matches, filters and search ---------- */
+import { keyOf, namePairs, suggestMatch, suggestParent, filterValuesOf, chipHit, valueOrder, searchHit } from '../../src/attachlogic.js';
+
+const INV = { id: 'inv', name: 'Invoice', titleField: 'no', fields: [
+  { id: 'no', type: 'text', label: 'Invoice #' }, { id: 'date', type: 'date', label: 'Date' }, { id: 'st', type: 'select', label: 'Status' }] };
+const LI = { id: 'li', name: 'Line Item', titleField: 'date', fields: [
+  { id: 'date', type: 'date', label: 'Date' }, { id: 'no', type: 'number', label: 'invoice #' }, { id: 'desc', type: 'textarea', label: 'Description' },
+  { id: 'kind', type: 'multiselect', label: 'Type of Billable' }, { id: 'st', type: 'select', label: 'Status' }, { id: 'ok', type: 'checkbox', label: 'Billable' }] };
+const lines = [
+  { id: 'l1', formId: 'li', values: { date: '2026-09-01', no: 1, st: 'Open' } },
+  { id: 'l2', formId: 'li', values: { date: '2026-09-02', no: 1, st: 'Open' } },
+  { id: 'l3', formId: 'li', values: { date: '2026-09-01', no: 2, st: 'Open' } },
+  { id: 'l4', formId: 'li', values: { date: '2026-10-05', no: null, st: 'Open' } },
+];
+const v = (f, r) => r.values[f.id];
+
+test('a value key: 1 and "1" match; blanks never do', () => {
+  assert.equal(keyOf(1), '1'); assert.equal(keyOf(' 1 '), '1'); assert.equal(keyOf('INV-7'), 'inv-7');
+  assert.equal(keyOf(''), null); assert.equal(keyOf(null), null); assert.equal(keyOf(NaN), null); assert.equal(keyOf(['a']), null);
+});
+
+test('the suggested match prefers the parent’s title field, even over a narrower date match', () => {
+  assert.deepEqual(namePairs(INV, LI).map((x) => x.c.id), ['date', 'no', 'st'], 'same name, types may differ; long text and choices of many never pair');
+  const m = suggestMatch({ parentForm: INV, childForm: LI, parentValues: { no: '1', date: '2026-09-02', st: 'Open' }, records: lines, valOf: v, titleField: INV.fields[0] });
+  assert.equal(m.c.id, 'no'); assert.equal(m.key, '1'); assert.equal(m.n, 2);
+  const noTitle = suggestMatch({ parentForm: INV, childForm: LI, parentValues: { date: '2026-09-01', st: 'Open' }, records: lines, valOf: v, titleField: INV.fields[0] });
+  assert.equal(noTitle.c.id, 'date', 'no Invoice #: a date beats a choice field');
+  assert.equal(suggestMatch({ parentForm: INV, childForm: LI, parentValues: { no: '99' }, records: lines, valOf: v, titleField: INV.fields[0] }), null, 'nothing matches: no suggestion');
+  assert.equal(suggestMatch({ parentForm: INV, childForm: { fields: [{ id: 'x', type: 'text', label: 'Other' }] }, parentValues: { no: '1' }, records: lines, valOf: v }), null);
+});
+
+test('the suggested parent for ticked records', () => {
+  const invs = [{ id: 'i1', formId: 'inv', values: { no: '1' } }, { id: 'i2', formId: 'inv', values: { no: '2' } }];
+  const s = suggestParent({ childForm: LI, parentForms: [INV], recs: lines.slice(0, 2), parentsOf: () => invs, valOf: v, titleFieldOf: (f) => f.fields[0] });
+  assert.equal(s.parent.id, 'i1'); assert.equal(s.n, 2); assert.equal(s.total, 2); assert.equal(s.c.label, 'invoice #');
+  const mixed = suggestParent({ childForm: LI, parentForms: [INV], recs: lines.slice(0, 3), parentsOf: () => invs, valOf: v, titleFieldOf: (f) => f.fields[0] });
+  assert.equal(mixed.parent.id, 'i1'); assert.equal(mixed.n, 2); assert.equal(mixed.total, 3);
+  assert.equal(suggestParent({ childForm: LI, parentForms: [INV], recs: [lines[3]], parentsOf: () => invs, valOf: v, titleFieldOf: (f) => f.fields[0] }), null);
+});
+
+test('filter values: months for dates, each choice, yes/no, blank', () => {
+  const fmt = (f, x) => (f.type === 'number' ? '#' + x : String(x));
+  assert.deepEqual(filterValuesOf(LI.fields[0], '2026-09-01', fmt), [{ label: 'Sep 2026', sort: '2026-09' }]);
+  assert.deepEqual(filterValuesOf(LI.fields[3], ['Design', 'QA'], fmt).map((x) => x.label), ['Design', 'QA']);
+  assert.deepEqual(filterValuesOf(LI.fields[5], false, fmt).map((x) => x.label), ['No']);
+  assert.deepEqual(filterValuesOf(LI.fields[1], null, fmt).map((x) => x.label), ['(blank)']);
+  assert.deepEqual(filterValuesOf(LI.fields[1], 12, fmt), [{ label: '#12', sort: 12 }]);
+  assert.ok(chipHit({ labels: ['Sep 2026'] }, LI.fields[0], '2026-09-30', fmt));
+  assert.ok(!chipHit({ labels: ['Sep 2026'] }, LI.fields[0], '2026-10-01', fmt));
+  assert.ok(chipHit({ labels: ['QA', 'Testing'] }, LI.fields[3], ['Design', 'QA'], fmt), 'any ticked value');
+  assert.ok(chipHit({ key: '1' }, LI.fields[1], 1, fmt) && !chipHit({ key: '1' }, LI.fields[1], 11, fmt), 'a suggested chip matches exactly');
+  const vals = [{ sort: 10 }, { sort: 2 }, { sort: 'b' }, { sort: '￿' }, { sort: 'a10' }, { sort: 'a9' }].sort(valueOrder).map((x) => x.sort);
+  assert.deepEqual(vals, [2, 10, 'a9', 'a10', 'b', '￿']);
+});
+
+test('search: every word, any order, any case', () => {
+  assert.ok(searchHit('Mass update to receivables • Quality Assurance', 'mass RECEIV'));
+  assert.ok(searchHit('Mass update to receivables', 'receiv mass'));
+  assert.ok(!searchHit('Mass update', 'mass delete'));
+  assert.ok(searchHit('anything', '  '));
+});

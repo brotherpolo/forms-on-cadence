@@ -160,3 +160,18 @@ test('CSV quotes, escapes, and defuses formulas but keeps numbers', () => {
   assert.equal(s, 'Name,Note\r\n"A, B","say ""hi"""\r\n\'=SUM(1),-5\r\n\'-x,');
   assert.deepEqual(optionsOf({ type: 'checkbox' }), ['Yes', 'No']);
 });
+
+test('titles sort by their real value: dates by calendar, numbers by size, blanks last', async () => {
+  const { titleSortOf, cellOf, sortRows } = await import('../../src/listlogic.js');
+  const form = { id: 'li', titleField: 'd', fields: [{ id: 'd', type: 'date', label: 'Date' }] };
+  const fmt = (f, v) => (v ? new Date(v + 'T00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '');
+  const h = { form, valOf: (f, r) => r.values[f.id], fmt, recTitle: (r) => fmt(null, r.values.d) || 'Untitled' };
+  const recs = ['2020-08-26', '2022-12-02', '2020-12-03', '2021-08-29', ''].map((d, i) => ({ id: 'r' + i, values: { d } }));
+  const rows = recs.map((rec) => ({ rec, sortVal: cellOf('title', rec, h).sort }));
+  assert.deepEqual(sortRows(rows, 'asc').map((r) => r.rec.values.d), ['2020-08-26', '2020-12-03', '2021-08-29', '2022-12-02', '']);
+  assert.deepEqual(sortRows(rows, 'desc').map((r) => r.rec.values.d), ['2022-12-02', '2021-08-29', '2020-12-03', '2020-08-26', '']);
+  const nform = { id: 'inv', titleField: 'n', fields: [{ id: 'n', type: 'number', label: '#' }] };
+  const nh = { form: nform, valOf: (f, r) => r.values[f.id], fmt: (f, v) => String(v), recTitle: (r) => String(r.values.n) };
+  const nrows = [10, 2, 1].map((n) => ({ rec: { values: { n } }, sortVal: titleSortOf({ values: { n } }, nform, nh) }));
+  assert.deepEqual(sortRows(nrows, 'asc').map((r) => r.rec.values.n), [1, 2, 10]);
+});

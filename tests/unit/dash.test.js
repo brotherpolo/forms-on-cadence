@@ -246,3 +246,21 @@ test('cards count records in the form’s own words; shares only where a share m
   assert.equal(shareOf({ measure: { fn: 'avg', ref: {} } }, 10, 40), null);
   assert.equal(shareOf({}, 3, 0), null);
 });
+
+test('report tables and drill-downs sort a date or number title by value, and text naturally', async () => {
+  const { sortRecs } = await import('../../src/dashlogic.js');
+  const f = { id: 'li', titleField: 'd', fields: [{ id: 'd', type: 'date', label: 'Date' }, { id: 'n', type: 'text', label: 'Name' }, { id: 'inv', type: 'relation', label: 'Invoice', relForm: 'iv' }] };
+  const iv = { id: 'iv', titleField: 'no', fields: [{ id: 'no', type: 'number', label: '#' }] };
+  const recs = [
+    { id: 'a', formId: 'li', values: { d: '2020-12-03', n: 'Item 10', inv: 'x10' } },
+    { id: 'b', formId: 'li', values: { d: '2020-08-26', n: 'Item 2', inv: 'x2' } },
+    { id: 'c', formId: 'li', values: { d: '2021-01-01', n: 'item 1', inv: 'x1' } },
+    { id: 'x10', formId: 'iv', values: { no: 10 } }, { id: 'x2', formId: 'iv', values: { no: 2 } }, { id: 'x1', formId: 'iv', values: { no: 1 } }];
+  const byId = new Map(recs.map((r) => [r.id, r]));
+  const c = { formById: (id) => ({ li: f, iv }[id]), recById: (id) => byId.get(id), fmt: (ff, x) => String(x), recTitle: (r) => String(r.values.d || r.values.no) };
+  const ids = (ref, dir) => sortRecs(c, recs.slice(0, 3), ref, dir).map((r) => r.id).join('');
+  assert.equal(ids({ form: 'li', id: 'd' }, 1), 'bac');
+  assert.equal(ids({ form: 'li', id: 'n' }, 1), 'cba', 'Item 2 before Item 10');
+  assert.equal(ids({ form: 'li', id: 'inv' }, 1), 'cba', 'linked invoice numbers by size');
+  assert.equal(ids({ form: 'li', id: 'inv' }, -1), 'abc');
+});
