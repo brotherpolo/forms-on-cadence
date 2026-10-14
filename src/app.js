@@ -13,7 +13,7 @@ import { titleSortOf } from './listlogic.js';
 import { headingOf, readFolds, isFolded, setFold, setFolds, foldKeys } from './foldlogic.js';
 import { copyPatch, linkPatch, attachChange, detachChange, searchHit } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
-import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
+import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey, taskText } from './tasks.js';
 import { FX } from './formulas.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
 import * as admin from './admin.js';
@@ -278,7 +278,9 @@ function renderMain(){
   else if(admin.handles(view)){const r=admin.renderView(view);title=r.title;h=r.html;}
   else if(view.name==='welcome'){title='Formwright';h=viewWelcome();}
   $('#topttl').textContent=title||'Formwright';
+  const ae=document.activeElement,ks=ae&&ae.dataset?.ksearch?[ae.dataset.ksearch,ae.selectionStart]:null; // a redraw while searching keeps the cursor in the box
   m.innerHTML=`<div class="wrap${wide?' wide':''}${wide==='full'?' full':''}">${h}</div>`;
+  if(ks){const s2=m.querySelector(`[data-ksearch="${CSS.escape(ks[0])}"]`);if(s2){s2.focus({preventScroll:true});try{s2.setSelectionRange(ks[1],ks[1])}catch(e){}}}
   document.querySelectorAll('canvas[data-sig]').forEach(initSig);
   if(view.name==='records')afterRecords();
   if(view.name==='dashboard')fitTiles();
@@ -298,7 +300,12 @@ function syncTaskWatch(){
     console.error('[formwright] tasks',err);tw.status='error';tw.error=err?.code||'unknown';paintTasks();
   });
 }
-function paintTasks(){const el=$('#rec-tasks');if(el)el.innerHTML=tasksInner();}
+function paintTasks(){
+  const el=$('#rec-tasks');if(!el)return;
+  const a=document.activeElement,typing=a&&a.dataset?.ksearch==='t:tasks'?a.selectionStart:null; // a task update mid-search keeps the cursor
+  el.innerHTML=tasksInner();
+  if(typing!=null){const s=el.querySelector('[data-ksearch="t:tasks"]');if(s){s.focus({preventScroll:true});try{s.setSelectionRange(typing,typing)}catch(e){}}}
+}
 function tasksInner(){
   const rec=view.recordId?recById(view.recordId):null;
   const form=rec?formById(rec.formId):null;
@@ -319,7 +326,11 @@ function tasksInner(){
   if(tw.status==='error')return head+`<div class="panel"><p class="note">${tw.error==='failed-precondition'?'Tasks need a database index that is still being built. Try again in a few minutes.':'Couldn’t load tasks ('+esc(tw.error)+').'}</p></div>`;
   if(!tw.tasks.length)return head+`<div class="panel"><p class="note">No tasks for this ${esc(noun)} yet.${cadenceUrl?' Add one, or link an existing task to it in Cadence.':' Link a task to it from Cadence.'}</p>${add}</div>`;
   const me=store.user?.uid,today=dateKey(new Date());
-  return head+`<div class="panel"><div class="tlist">${sortTasks(tw.tasks).map(t=>{
+  const tq=(rdraft?.kq||{})['t:tasks']||'';
+  const shown=sortTasks(tw.tasks).filter(t=>!tq.trim()||searchHit(taskText(t,today),tq));
+  const tSearch=tw.tasks.length>5||tq?kSearch('t:tasks',{name:'Tasks'},tq,shown.length,tw.tasks.length,false):'';
+  if(!shown.length)return head+`<div class="panel">${tSearch}<p class="note">No tasks match “${esc(tq)}”.</p>${add}</div>`;
+  return head+`<div class="panel">${tSearch}<div class="tlist">${shown.map(t=>{
     const due=t.done?{text:'Done',tone:'ok'}:dueInfo(t.due,today);
     const rep=repeats(t),busy=tw.busy.has(t.id);
     const meta=[`<span class="tdue ${due.tone}">${esc(due.text)}</span>`,whoLine(t,me),rep?repeatLabel(t):''].filter(Boolean);

@@ -48,6 +48,13 @@ export function whoLine(t, myUid) {
 
 export const repeatLabel = (t) => REPEATS[t.repeat] || '';
 
+/** Everything a task can be found by: title, notes, people, its due text, Done, repeats, subtasks. */
+export function taskText(t, todayKey) {
+  const subs = Array.isArray(t.subtasks) ? t.subtasks.map((x) => (typeof x === 'string' ? x : x && (x.title || x.text)) || '') : [];
+  return [t.title, t.notes, t.ownerName, t.assigneeName, t.done ? 'Done' : dueInfo(t.due, todayKey).text, t.due || '', repeatLabel(t), ...subs]
+    .filter(Boolean).join(' \u2022 ');
+}
+
 /** A link into Cadence: base address plus query parameters, or '' when Cadence's address isn't set. */
 export function cadenceLink(base, params) {
   base = String(base || '').trim();
