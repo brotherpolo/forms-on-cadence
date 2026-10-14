@@ -68,6 +68,7 @@ src/
   lists.js, lists.css      Records list: saved views, columns, filters, select several
   grids.css                Sub-form grids on the record page
   listlogic.js             List columns, views, sorting, filters and CSV (pure, unit-tested)
+  foldlogic.js             Which sections are folded on a record page (pure, unit-tested)
   attach.js, attach.css    Attach existing records to a parent, Attach to…, and Detach
   attachlogic.js           Which records can be attached, and what attaching or detaching changes (pure, unit-tested)
   imports.js, imports.css  Import screens: templates menu, choose file, match columns, check rows, history and undo
@@ -171,6 +172,8 @@ Records made on their own (imported line items, say) can be put under a parent l
 - You need edit rights on the parent and on the records being attached. Access is per form, so attaching or detaching doesn't change who can see a record.
 
 ## Records lists
+
+On a record, **Section Heading** fields, sub-form grids and child sections fold and open from their headings (a folded one shows a short summary, such as a grid's totals); **Collapse all / Expand all** is at the top. Everything starts open. What you fold is remembered for each form (folding Notes on one invoice folds it on every invoice), for your account on that device. A section with a problem to fix opens by itself when you save.
 
 Every screen uses the width it has, up to 1,600 pixels (dashboards use all of it); phones are unchanged.
 
