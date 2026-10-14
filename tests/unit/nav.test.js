@@ -27,3 +27,23 @@ test('search: any case, anywhere in the name, earlier matches first', () => {
   assert.equal(r.form.id, 'inv'); assert.equal(r.at, 2); assert.equal(r.len, 3);
   assert.deepEqual(searchForms(forms, 'contact', all), [], 'a hidden child form is not found');
 });
+
+import { allSearchable, designerMatch } from '../../src/navlogic.js';
+
+test('clicking into Search forms lists every form it can find, in order', () => {
+  const forms = [
+    { id: 'b', name: 'Billing', order: 2, children: [{ formId: 'li' }] },
+    { id: 'a', name: 'Accounts', order: 1 },
+    { id: 'li', name: 'Line Item', order: 3 },
+    { id: 'x', name: 'Secret', order: 0 }
+  ];
+  const out = allSearchable(forms, (f) => f.id !== 'x');
+  assert.deepEqual(out.map((r) => r.form.id), ['a', 'b']);
+  assert.deepEqual([out[0].at, out[0].len], [0, 0]);
+});
+
+test('the designer search matches form names only, any case', () => {
+  assert.equal(designerMatch({ name: 'Line Item' }, 'item'), true);
+  assert.equal(designerMatch({ name: 'Line Item', fields: [{ label: 'Invoice #' }] }, 'invoice'), false);
+  assert.equal(designerMatch({ name: 'Anything' }, '  '), true);
+});
