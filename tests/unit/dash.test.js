@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   rowsFor, condHit, periodRange, kpiOf, slicesOf, groupRows, pivotOf, normalizeDef, newDef, defFromWidget,
-  migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, sortRecs, chainFields, bucketOf, groupLabel,
+  migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, sortRecs, chainFields, bucketOf, groupLabel, drillRows, drillLabel, baseRows,
 } from '../../src/dashlogic.js';
 import { parseRoute, routeFor } from '../../src/route.js';
 
@@ -117,6 +117,34 @@ test('a split by something that can’t split (long text) is replaced; dates get
   assert.deepEqual(normalizeDef(ctx, { form: 'lines', type: 'bar', group: { form: 'lines', id: 'cat', by: 'week' } }).group, { form: 'lines', id: 'cat' });
   const pv = normalizeDef(ctx, { form: 'lines', type: 'pivot', group: { form: 'lines', id: '_created', by: 'year' }, col: { form: 'lines', id: '_created', by: 'month' } });
   assert.deepEqual([pv.group.by, pv.col.by], ['year', 'month'], 'the same date by year and by month is fine');
+});
+
+test('"Other" is worked out from its records, and a dated bar chart doesn’t fold', () => {
+  const avg = { form: 'lines', type: 'donut', measure: { fn: 'avg', ref: { form: 'lines', id: 'amt' } }, group: { form: 'lines', id: 'desc' } };
+  const list = rowsFor(ctx, avg);
+  const s = slicesOf(ctx, avg, list, 2);
+  assert.equal(s.length, 2);
+  assert.equal(s[1].key, 'Other (2)');
+  assert.equal(s[1].value, (100 + 50) / 2, 'the average of its records, not a sum of averages');
+  assert.deepEqual(s[1].keys.slice().sort(), ['Design', 'Survey']);
+  const bar = { form: 'lines', type: 'bar', measure: { fn: 'count' }, group: { form: 'lines', id: '_created', by: 'week' } };
+  assert.ok(slicesOf(ctx, bar, list, 1).every((x) => !x.other), 'periods stay in order instead of folding');
+});
+
+test('drilling: the records behind a slice, a pivot cell, a period, and a KPI', () => {
+  const def = { form: 'lines', type: 'pivot', measure: { fn: 'count' }, group: { form: 'lines', id: 'cat' }, col: { form: 'projects', id: 'stage' } };
+  const ids2 = (l) => l.map((r) => r.id).sort().join();
+  assert.equal(ids2(drillRows(ctx, def, {}, [{ ref: def.group, keys: ['Labour'] }])), 'l1,l3');
+  assert.equal(ids2(drillRows(ctx, def, {}, [{ ref: def.group, keys: ['Labour'] }, { ref: def.col, keys: ['Done'] }])), 'l3');
+  assert.equal(ids2(drillRows(ctx, def, {}, [{ ref: { form: 'lines', id: 'inv' }, keys: ['10'] }])), 'l1,l3', 'a number split');
+  assert.equal(ids2(drillRows(ctx, def, {}, [{ ref: { form: 'lines', id: '_created', by: 'month' }, keys: ['Oct 2026'] }])), 'l1,l2');
+  assert.equal(ids2(drillRows(ctx, def, {}, [{ ref: { form: 'lines', id: '_created' }, from: T('2026-10-01'), to: T('2026-10-06'), text: 'x' }])), 'l1');
+  assert.equal(ids2(drillRows(ctx, def, {}, [{ ref: { form: 'lines', id: 'cat' }, keys: ['Labour', 'Materials'] }])), 'l1,l2,l3', '"Other" stands for several groups');
+  const kpi = { form: 'lines', type: 'kpi', measure: { fn: 'count' }, compare: true };
+  assert.equal(ids2(baseRows(ctx, kpi, {}, NOW)), 'l1,l2', 'a KPI compared with last month is this month’s records');
+  assert.equal(drillLabel(ctx, { ref: { form: 'lines', id: 'cat' }, keys: ['Labour'] }), 'Category is Labour');
+  assert.equal(drillLabel(ctx, { ref: { form: 'lines', id: '_created', by: 'month' }, keys: ['Oct 2026'] }), 'Created on in Oct 2026');
+  assert.equal(drillLabel(ctx, { ref: { form: 'lines', id: 'cat' }, keys: ['a', 'b', 'c'] }), 'Category is one of 3');
 });
 
 test('reports fill in what their type needs', () => {

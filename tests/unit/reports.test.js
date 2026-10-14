@@ -106,6 +106,28 @@ test('weekly buckets count records in the right week', () => {
   assert.equal(m[11].value, 2);
 });
 
+test('charts over time can follow the records’ dates, a chosen range, or a dashboard period', () => {
+  const now = new Date('2026-10-13T12:00').getTime();
+  const w = { form: 'visits', type: 'line', measure: { fn: 'count' }, time: { form: 'visits', id: 'when' }, interval: 'week', span: 'fit' };
+  const fit = bucketsOf(ctx, w, rowsOf(ctx, w), now);
+  assert.equal(fit.length, 2, 'just the weeks from the first visit to the last');
+  assert.deepEqual(fit.map((x) => x.value), [1, 1]);
+  assert.equal(fit[0].date.getDate(), 5); // week of Monday Oct 5
+  const old = [{ id: 'o1', formId: 'visits', values: { when: '2020-08-03T10:00' } }, { id: 'o2', formId: 'visits', values: { when: '2021-02-14T10:00' } }];
+  const om = bucketsOf(ctx, { ...w, interval: 'month' }, old, now);
+  assert.equal(om.length, 7, 'Aug 2020 to Feb 2021, years ago');
+  assert.equal(om[0].date.getFullYear(), 2020); assert.equal(om[6].value, 1);
+  const q = bucketsOf(ctx, { ...w, interval: 'quarter' }, old, now);
+  assert.deepEqual(q.map((x) => [x.date.getFullYear(), x.date.getMonth(), x.value]), [[2020, 6, 1], [2020, 9, 0], [2021, 0, 1]]);
+  const cu = bucketsOf(ctx, { ...w, interval: 'month', span: 'custom', from: '2020-10-01', to: '2020-12-31' }, old, now);
+  assert.deepEqual(cu.map((x) => x.date.getMonth()), [9, 10, 11]);
+  const half = bucketsOf(ctx, { ...w, interval: 'year', span: 'custom', from: '2019-05-01' }, old, now);
+  assert.deepEqual(half.map((x) => [x.date.getFullYear(), x.value]), [[2019, 0], [2020, 1], [2021, 1]], 'a blank end follows the records');
+  const yr = bucketsOf(ctx, { ...w, interval: 'month' }, rowsOf(ctx, w), now, { from: new Date(2026, 0, 1).getTime(), to: new Date(2027, 0, 1).getTime() });
+  assert.equal(yr.length, 10, 'This year: Jan to now');
+  assert.equal(bucketsOf(ctx, { ...w, span: 'fit' }, [], now).length, 26, 'no records: the last 26 weeks');
+});
+
 test('a dropped field makes the right widget', () => {
   assert.equal(widgetFor(ctx, { form: 'projects', id: 'budget' }, 'a').type, 'kpi');
   assert.equal(widgetFor(ctx, { form: 'projects', id: 'stage' }, 'b').type, 'bar');
