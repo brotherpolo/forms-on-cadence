@@ -60,3 +60,16 @@
   .dz{flex-wrap:nowrap;align-items:stretch;height:calc(100dvh - 270px);min-height:420px}
   .dz>aside,.dz>main{min-height:0;overflow-y:auto;padding-bottom:88px}
 }
+
+/* searching field types */
+.dz-q{min-height:40px;font-size:14px}
+.dz-none{margin:0}
+/* what shows under the fields: sub-forms, child forms and Tasks */
+.dz-secs{margin-top:22px;display:flex;flex-direction:column;gap:8px}
+.dz-secs .help{margin:0}
+.scards{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.scard{display:flex;align-items:center;gap:10px;min-height:56px;padding:8px 8px 8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--sunk);flex-wrap:wrap}
+.scard .crow-m{flex:1;min-width:140px}
+.scard .crow-m b{display:block}
+.scard .crow-m small{color:var(--muted)}
+.sgrip{font:600 12px var(--mono);color:var(--muted);width:18px;text-align:center}

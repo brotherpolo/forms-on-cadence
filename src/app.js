@@ -11,6 +11,7 @@ import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { initAttach, openPickChildren, closeAttach } from './attach.js';
 import { titleSortOf } from './listlogic.js';
 import { headingOf, readFolds, isFolded, setFold, setFolds, foldKeys } from './foldlogic.js';
+import { sectionOrder, moveSection, TASKS as TASKS_KEY } from './sectionlogic.js';
 import { copyPatch, linkPatch, attachChange, detachChange, searchHit } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey, taskText } from './tasks.js';
@@ -23,6 +24,8 @@ import examples from './examples.json';
 
 const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'import', 'imports']);
 
+// other words people search field types by
+const TYPE_WORDS={text:'short single line string name title',textarea:'long paragraph notes description multi line memo comments',email:'mail address',phone:'telephone mobile cell number',url:'website link web address',location:'address map gps place',number:'integer whole count quantity',decimal:'float number fraction',currency:'money price cost dollar amount',percent:'percentage rate',rating:'stars score',range:'slider scale',formula:'calculation calculated computed formula sum total',date:'day calendar',time:'clock hour',datetime:'timestamp date time when',checkbox:'yes no toggle boolean switch tick check',select:'dropdown choice pick list menu options',radio:'single choice option buttons one of',multiselect:'multiple choice checkboxes tags many',file:'upload attachment document pdf',image:'photo picture camera',signature:'sign autograph',color:'colour',relation:'link to record lookup reference relationship connect',heading:'section heading title divider group fold'};
 const TYPES=[
  ['text','Short text','Aa','Text'],['textarea','Long text','¶','Text'],
  ['email','Email','@','Contact'],['phone','Phone','+1','Contact'],['url','Website','//','Contact'],['location','Location','⌖','Contact'],
@@ -147,7 +150,7 @@ export function go(v,push=true){
   if(push&&view.name!=='loading')hist.push(view);
   view=v;closeMenu();syncHash();
   if(v.name==='records'){ui.search='';}
-  if(v.name==='formEdit'){ui.tab=v.tab||'fields';ui.openField=null;ui.palette=false;}
+  if(v.name==='formEdit'){ui.tab=v.tab||'fields';ui.openField=null;ui.palette=false;ui.dzq='';}
   render();window.scrollTo(0,0);return true;
 }
 export function back(){if(!guard())return;const v=hist.pop();if(v){if(v.name==='record')rdraft=null;go(v,false)}else home()}
@@ -283,6 +286,7 @@ function renderMain(){
   if(ks){const s2=m.querySelector(`[data-ksearch="${CSS.escape(ks[0])}"]`);if(s2){s2.focus({preventScroll:true});try{s2.setSelectionRange(ks[1],ks[1])}catch(e){}}}
   document.querySelectorAll('canvas[data-sig]').forEach(initSig);
   if(view.name==='records')afterRecords();
+  if(view.name==='formEdit')applyDzq();
   if(view.name==='dashboard')fitTiles();
   syncTaskWatch();
 }
@@ -389,8 +393,9 @@ function viewRecord(form){
     parentPick=`<div class="panel parentcard"><div class="grow"><small>Belongs to</small><select class="in" id="parent-pick" style="margin-top:6px" aria-label="Parent record"${ro?' disabled':''}><option value="">No parent</option>${opts}</select></div>${parent?`<button class="btn sm" data-act="open-record" data-id="${parent.id}">Open ${esc(itemName(pform).toLowerCase())}</button>`:''}</div>`;
   }
   const children=(form.children||[]).filter(c=>c.display!=='grid').map(c=>({rel:c,cf:formById(c.formId)})).filter(x=>x.cf&&canViewForm(store.me,x.cf.id));
-  const gridHTML=grels.map(({rel,cf})=>gridSection(form,rel,cf,rdraft,ro)).join('');
-  const childHTML=rec?children.map(({cf})=>{
+  const sec={}; // the sections under the fields, by child form id (or 'tasks'), shown in the form's chosen order
+  grels.forEach(({rel,cf})=>{sec[cf.id]=gridSection(form,rel,cf,rdraft,ro);});
+  if(rec)children.forEach(({cf})=>{sec[cf.id]=(()=>{
     const allRs=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
     const kq=(rdraft.kq||{})['c:'+cf.id]||'';
     const recText=r=>[recTitle(r,cf),...(cf.fields||[]).filter(f=>!['heading','file','image','signature'].includes(f.type)).map(f=>{try{return fmt(f,valOf(f,r))}catch(e){return ''}})].join(' \u2022 ');
@@ -404,7 +409,9 @@ function viewRecord(form){
     const cBtns=`${canCreate(store.me,cf.id)?`<button class="btn sm" data-act="add-child" data-id="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${ro?'':`<button class="btn sm" data-act="child-attach" data-id="${cf.id}">Attach existing</button>`}`;
     return `<section class="section" id="kids-${cf.id}">${cHead}
       <div class="panel">${allRs.length>5||kq?kSearch('c:'+cf.id,cf,kq,rs.length,allRs.length,false):''}${rs.length?`<div class="cards" style="display:flex">${rs.map(r=>detachable(r)?`<div class="at-card">${card(r)}<button type="button" class="ibtn at-det" data-act="child-detach" data-id="${r.id}" aria-label="Detach ${esc(recTitle(r,cf))} (keeps it)" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button></div>`:card(r)).join('')}</div>`:`<p class="note">${kq.trim()&&allRs.length?`No ${esc(cf.name.toLowerCase())} match “${esc(kq)}”.`:`No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.`}</p>`}${cBtns?`<div class="gfoot">${cBtns}</div>`:''}</div></section>`;
-  }).join(''):'';
+  })();});
+  if(rec)sec[TASKS_KEY]=`<section class="section" id="rec-tasks">${tasksInner()}</section>`;
+  const sectionsHTML=sectionOrder(form).map(k=>sec[k]||'').join('');
   let backHTML='';
   if(rec){
     const links=[];
@@ -428,9 +435,7 @@ function viewRecord(form){
   <div class="panel">
     <fieldset class="fset"${ro?' disabled':''}>${formFieldsHTML(form,rdraft,'record')}</fieldset>
   </div>
-  ${gridHTML}
-  ${rec?`<section class="section" id="rec-tasks">${tasksInner()}</section>`:''}
-  ${childHTML}${backHTML}
+  ${sectionsHTML}${backHTML}
   ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}
   ${cellPopup()}`;
 }
@@ -786,6 +791,33 @@ function newField(type){
   if(type==='relation'){const o=store.forms.find(x=>x.id!==fdraft?.id);f.relForm=o?.id||'';f.label=o?itemName(o):'Linked record';}
   return f;
 }
+/** The designer's cards for what shows under a record's fields: sub-forms, child forms and Tasks, in order. */
+function sectionCards(f){
+  const order=sectionOrder(f);
+  const card=(k,i)=>{
+    let badgeHTML,name,kind;
+    if(k===TASKS_KEY){badgeHTML=`<span class="badge" style="background:${COLORS[6]}" aria-hidden="true">T</span>`;name='Tasks';kind='Tasks linked from Cadence';}
+    else{const cf=formById(k)||(f._newForms||[]).find(x=>x.id===k);const rel=(f.children||[]).find(c=>c.formId===k);if(!rel)return '';badgeHTML=cf?badge(cf):'<span class="badge">?</span>';name=cf?.name||'New sub-form';kind=rel.display==='grid'?'Sub-form, shown as a grid':'Child form, separate records';}
+    return `<li class="scard"><span class="sgrip" aria-hidden="true">${i+1}</span>${badgeHTML}<div class="crow-m"><b>${esc(name)}</b><small>${esc(kind)}</small></div>
+      ${k===TASKS_KEY?'':`<button type="button" class="btn sm ghost" data-act="tab" data-tab="relations">Relationships</button>`}
+      <button type="button" class="ibtn" data-act="sec-move" data-k="${esc(k)}" data-dir="-1" aria-label="Move ${esc(name)} up"${i===0?' disabled':''}>↑</button>
+      <button type="button" class="ibtn" data-act="sec-move" data-k="${esc(k)}" data-dir="1" aria-label="Move ${esc(name)} down"${i===order.length-1?' disabled':''}>↓</button></li>`;
+  };
+  return `<section class="dz-secs" aria-labelledby="dz-secs-h"><h3 id="dz-secs-h" class="dz-h">Under the fields</h3><p class="help">On a record, these come after all the fields, in this order. Use the arrows to rearrange them; add or remove sub-forms and child forms on the Relationships tab.</p><ol class="scards">${order.map(card).join('')}</ol></section>`;
+}
+/** Filter the field types by what's typed in their search box (every word must match a name, group or other word). */
+function applyDzq(){
+  const box=document.querySelector('[data-dzq]');if(!box)return;
+  if(box.value!==(ui.dzq||''))box.value=ui.dzq||'';
+  const words=(ui.dzq||'').toLowerCase().split(/\s+/).filter(Boolean);
+  let any=false;
+  document.querySelectorAll('.dz-types .pgroup').forEach(g=>{
+    let n=0;
+    g.querySelectorAll('.dz-chip').forEach(c=>{const hit=words.every(w=>c.dataset.words.includes(w));c.hidden=!hit;if(hit)n++;});
+    g.hidden=!n;if(n)any=true;
+  });
+  const none=document.querySelector('.dz-none');if(none)none.hidden=any;
+}
 function viewFormEdit(){
   const f=fdraft;const tabs=[['fields','Fields'],['relations','Relationships'],['settings','Settings'],['preview','Preview']];
   let body='';
@@ -794,7 +826,9 @@ function viewFormEdit(){
     body=`<div class="dz">
       <aside class="panel dz-types" aria-label="Field types">
         <h2 class="dz-h">Field types</h2>
-        ${groups.map(g=>`<div class="pgroup"><span>${g}</span>${TYPES.filter(t=>t[3]===g).map(t=>`<button class="dz-chip" draggable="true" data-act="add-field" data-type="${t[0]}" title="Drag onto the form, or tap to add"><span class="glyph">${t[2]}</span>${t[1]}</button>`).join('')}</div>`).join('')}
+        <input type="search" class="in dz-q" data-dzq placeholder="Search field types" aria-label="Search field types" autocomplete="off">
+        <p class="note dz-none" hidden>No field type matches.</p>
+        ${groups.map(g=>`<div class="pgroup"><span>${g}</span>${TYPES.filter(t=>t[3]===g).map(t=>`<button class="dz-chip" draggable="true" data-act="add-field" data-type="${t[0]}" data-words="${esc((t[1]+' '+t[3]+' '+(TYPE_WORDS[t[0]]||'')).toLowerCase())}" title="Drag onto the form, or tap to add"><span class="glyph">${t[2]}</span>${t[1]}</button>`).join('')}</div>`).join('')}
       </aside>
       <aside class="panel dz-list" aria-label="Fields in this form">
         <h2 class="dz-h">In this form (${f.fields.length})</h2>
@@ -808,6 +842,7 @@ function viewFormEdit(){
           <button class="ibtn dz-dots" data-act="open-field" data-id="${x.id}" aria-label="Options for ${esc(x.label||'field')}">⋯</button>
         </div>`).join(''):`<p class="note dz-empty">Drag a field type here to add it.</p>`}
         <div class="dz-drop">Drop a field type here</div>
+        ${sectionCards(f)}
       </main>
     </div>${ui.openField?fieldModal():''}`;
   }else if(ui.tab==='relations'){
@@ -1068,6 +1103,7 @@ document.addEventListener('click',async e=>{
     case 'open-field':ui.openField=id;fmPos={x:0,y:0};renderMain();break;
     case 'close-field':ui.openField=null;renderMain();break;
     case 'focus-field':document.querySelector(`.crow[data-feid="${id}"]`)?.scrollIntoView({block:'center',behavior:'smooth'});break;
+    case 'sec-move':{const k=el.dataset.k,dir=+el.dataset.dir;fdraft.sectionOrder=moveSection(sectionOrder(fdraft),k,dir);setFdirty();renderMain();const b=document.querySelector(`[data-act="sec-move"][data-k="${CSS.escape(k)}"][data-dir="${dir}"]:not(:disabled)`)||document.querySelector(`[data-act="sec-move"][data-k="${CSS.escape(k)}"]:not(:disabled)`);b?.focus();break;}
     case 'add-field':{const f=newField(el.dataset.type);fdraft.fields.push(f);ui.openField=f.id;setFdirty();renderMain();document.querySelector(`[data-feid="${f.id}"]`)?.scrollIntoView({block:'center',behavior:'smooth'});break;}
     case 'field-move':{const fs=fdraft.fields,i=fs.findIndex(x=>x.id===id),j=i+(+el.dataset.dir);if(j<0||j>=fs.length)return;[fs[i],fs[j]]=[fs[j],fs[i]];setFdirty();renderMain();break;}
     case 'field-dup':{const i=fdraft.fields.findIndex(x=>x.id===id);const c={...clone(fdraft.fields[i]),id:uid('x')};c.label+=' (copy)';fdraft.fields.splice(i+1,0,c);ui.openField=c.id;setFdirty();renderMain();break;}
@@ -1106,6 +1142,7 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('input',e=>{
   const t=e.target;
+  if(t.dataset.dzq!==undefined){ui.dzq=t.value;applyDzq();return;}
   if(t.dataset.grid&&t.dataset.gf){if(t.type!=='checkbox'&&t.tagName!=='SELECT')setGridVal(t);return;}
   if(t.dataset.ksearch&&rdraft){rdraft.kq={...(rdraft.kq||{}),[t.dataset.ksearch]:t.value};const k=t.dataset.ksearch,pos=t.selectionStart;renderMain();const s=document.querySelector(`[data-ksearch="${CSS.escape(k)}"]`);if(s){s.focus({preventScroll:true});try{s.setSelectionRange(pos,pos)}catch(err){}}return;}
   if(t.id==='search'){ui.search=t.value;const pos=t.selectionStart;renderMain();const s=$('#search');if(s){s.focus();s.setSelectionRange(pos,pos);}return;}
@@ -1145,6 +1182,12 @@ document.addEventListener('change',async e=>{
     else{c.formId=t.value;if(c.display==='grid'){const cf=formById(t.value);if(cf&&(cf.children||[]).some(x=>x.display==='grid'))c.display='records';}delete c.cols;}
     setFdirty();renderMain();return;}
   await admin.onChange(t);
+});
+document.addEventListener('keydown',e=>{
+  if(e.target?.dataset?.dzq!==undefined){
+    if(e.key==='Enter'){e.preventDefault();const first=[...document.querySelectorAll('.dz-types .dz-chip')].find(c=>!c.hidden&&!c.closest('.pgroup')?.hidden);if(first)first.click();return;}
+    if(e.key==='Escape'&&e.target.value){e.preventDefault();ui.dzq='';applyDzq();return;}
+  }
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cdraft){e.preventDefault();document.querySelector('[data-act="cell-close"]')?.click();}});
 function closeMenu(){$('#side').classList.remove('open');$('#scrim').classList.remove('open');}
@@ -1262,7 +1305,7 @@ export function startApp(){
   initLists({fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,withFormulas,search:()=>ui.search});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
   initImports({fmt,recTitle,formById,go,renderMain,computeFormulas:(form,rec)=>{const out={};(form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,rec);out[f.id]=r.e?null:r.v;});return out;}});
-  Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false});
+  Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false,dzq:''});
   store.onChange=onData;
   store.onError=(err)=>{if(err?.code==='permission-denied')toast('Some data could not be loaded because of your permissions.');else toast('Lost the connection to the database. Changes will sync when it returns.');};
 }
