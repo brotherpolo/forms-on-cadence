@@ -60,3 +60,12 @@ test('ticking off matches what Cadence writes', () => {
   assert.equal(repeats({ repeat: 'weekly' }), true);
   assert.equal(repeats({ repeat: 'none' }), false);
 });
+
+test('a task can be found by its title, notes, people, due text, repeat and subtasks', async () => {
+  const { taskText } = await import('../../src/tasks.js');
+  const t = { title: 'Send invoice', notes: 'Attach the timesheet', ownerName: 'Adam Pollack', assigneeName: 'Sam Ritchie', due: '2026-10-16', repeat: 'monthly', subtasks: [{ title: 'Check hours' }, 'Export PDF'] };
+  const text = taskText(t, '2026-10-14').toLowerCase();
+  for (const w of ['send invoice', 'timesheet', 'sam', 'adam', 'repeats monthly', 'check hours', 'export pdf', '2026-10-16']) assert.ok(text.includes(w), w);
+  assert.ok(taskText({ title: 'x', done: true }, '2026-10-14').includes('Done'));
+  assert.equal(taskText({}, '2026-10-14'), 'No date');
+});
