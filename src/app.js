@@ -11,7 +11,7 @@ import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { initAttach, openPickChildren, closeAttach } from './attach.js';
 import { titleSortOf } from './listlogic.js';
 import { headingOf, readFolds, isFolded, setFold, setFolds, foldKeys } from './foldlogic.js';
-import { copyPatch, linkPatch, attachChange, detachChange } from './attachlogic.js';
+import { copyPatch, linkPatch, attachChange, detachChange, searchHit } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
 import { FX } from './formulas.js';
@@ -303,20 +303,30 @@ function tasksInner(){
   const rec=view.recordId?recById(view.recordId):null;
   const form=rec?formById(rec.formId):null;
   const noun=form?itemName(form).toLowerCase():'record';
-  const add=cadenceUrl?`<button class="btn sm" data-act="add-task">+ Add task</button>`:'';
-  const head=`<div class="section-h"><h2>Tasks${tw.status==='ready'&&tw.tasks.length?` <span class="count">${tw.tasks.filter(t=>!t.done).length}</span>`:''}</h2>${add}</div>`;
+  const add=cadenceUrl?`<div class="gfoot"><button class="btn sm" data-act="add-task">+ Add task</button></div>`:'';
+  const ready=tw.status==='ready'&&tw.recordId===view.recordId;
+  const openTasks=ready?tw.tasks.filter(t=>!t.done):[];
+  const tOpen=!(form&&folded(form.id,'t:tasks'));
+  let tSum='';
+  if(ready&&tw.tasks.length){
+    const next=sortTasks(openTasks).find(t=>t.due);
+    const done=tw.tasks.length-openTasks.length;
+    tSum=[next?'next due '+new Date(next.due+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}):'',done?done+' done':''].filter(Boolean).join(' · ');
+  }
+  const head=`<div class="section-h"><h2>${foldBtn('t:tasks',tOpen,`<span class="badge" style="background:${COLORS[6]}" aria-hidden="true">T</span><span>Tasks</span>${openTasks.length?` <span class="count">${openTasks.length}</span>`:''}`,tSum)}</h2></div>`;
+  if(!tOpen)return head;
   if(tw.status==='loading'||tw.recordId!==view.recordId)return head+`<div class="panel"><p class="note">Loading tasks…</p></div>`;
   if(tw.status==='error')return head+`<div class="panel"><p class="note">${tw.error==='failed-precondition'?'Tasks need a database index that is still being built. Try again in a few minutes.':'Couldn’t load tasks ('+esc(tw.error)+').'}</p></div>`;
-  if(!tw.tasks.length)return head+`<div class="panel"><p class="note">No tasks for this ${esc(noun)} yet.${cadenceUrl?' Add one, or link an existing task to it in Cadence.':' Link a task to it from Cadence.'}</p></div>`;
+  if(!tw.tasks.length)return head+`<div class="panel"><p class="note">No tasks for this ${esc(noun)} yet.${cadenceUrl?' Add one, or link an existing task to it in Cadence.':' Link a task to it from Cadence.'}</p>${add}</div>`;
   const me=store.user?.uid,today=dateKey(new Date());
-  return head+`<div class="panel tlist">${sortTasks(tw.tasks).map(t=>{
+  return head+`<div class="panel"><div class="tlist">${sortTasks(tw.tasks).map(t=>{
     const due=t.done?{text:'Done',tone:'ok'}:dueInfo(t.due,today);
     const rep=repeats(t),busy=tw.busy.has(t.id);
     const meta=[`<span class="tdue ${due.tone}">${esc(due.text)}</span>`,whoLine(t,me),rep?repeatLabel(t):''].filter(Boolean);
     return `<div class="trow${t.done?' done':''}">
       <button class="tcheck${t.done?' on':''}" data-act="task-done" data-id="${esc(t.id)}" aria-pressed="${!!t.done}" aria-label="${t.done?'Reopen':'Mark done'}: ${esc(t.title)}"${busy?' disabled':''}${rep&&!t.done?' title="Repeating tasks are completed in Cadence, so the next one is created"':''}>✓</button>
       <button class="tmain" data-act="task-open" data-id="${esc(t.id)}"${cadenceUrl?'':' disabled'}><b>${esc(t.title||'Untitled task')}</b><span class="tmeta">${meta.map(x=>x.startsWith('<')?x:`<span>${esc(x)}</span>`).join('')}</span></button>
-    </div>`;}).join('')}</div>`;
+    </div>`;}).join('')}</div>${add}</div>`;
 }
 async function toggleTask(id){
   const t=tw.tasks.find(x=>x.id===id);if(!t)return;
@@ -370,16 +380,19 @@ function viewRecord(form){
   const children=(form.children||[]).filter(c=>c.display!=='grid').map(c=>({rel:c,cf:formById(c.formId)})).filter(x=>x.cf&&canViewForm(store.me,x.cf.id));
   const gridHTML=grels.map(({rel,cf})=>gridSection(form,rel,cf,rdraft,ro)).join('');
   const childHTML=rec?children.map(({cf})=>{
-    const rs=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+    const allRs=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+    const kq=(rdraft.kq||{})['c:'+cf.id]||'';
+    const recText=r=>[recTitle(r,cf),...(cf.fields||[]).filter(f=>!['heading','file','image','signature'].includes(f.type)).map(f=>{try{return fmt(f,valOf(f,r))}catch(e){return ''}})].join(' \u2022 ');
+    const rs=kq.trim()?allRs.filter(r=>searchHit(recText(r),kq)):allRs;
     const cols=(cf.fields||[]).filter(f=>f.inList&&!NOCOL.has(f.type)&&f.id!==titleFieldOf(cf)?.id).slice(0,3);
     const card=r=>`<button class="card" data-act="open-record" data-id="${r.id}"><b>${esc(recTitle(r,cf))}</b><div class="meta">${cols.map(c=>{const t=fmt(c,valOf(c,r));return t?`<span>${esc(c.label)}: ${esc(t)}</span>`:''}).join('')}</div></button>`;
     const detachable=r=>!ro&&canEditRecord(store.me,r);
     const cOpen=!folded(form.id,'c:'+cf.id);
-    const cHead=`<div class="section-h"><h2>${foldBtn('c:'+cf.id,cOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${rs.length}</span>`,rs.length?'latest: '+recTitle(rs[0],cf):'')}</h2></div>`;
+    const cHead=`<div class="section-h"><h2>${foldBtn('c:'+cf.id,cOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${allRs.length}</span>`,allRs.length?'latest: '+recTitle(allRs[0],cf):'')}</h2></div>`;
     if(!cOpen)return `<section class="section" id="kids-${cf.id}">${cHead}</section>`;
     const cBtns=`${canCreate(store.me,cf.id)?`<button class="btn sm" data-act="add-child" data-id="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${ro?'':`<button class="btn sm" data-act="child-attach" data-id="${cf.id}">Attach existing</button>`}`;
     return `<section class="section" id="kids-${cf.id}">${cHead}
-      <div class="panel">${rs.length?`<div class="cards" style="display:flex">${rs.map(r=>detachable(r)?`<div class="at-card">${card(r)}<button type="button" class="ibtn at-det" data-act="child-detach" data-id="${r.id}" aria-label="Detach ${esc(recTitle(r,cf))} (keeps it)" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button></div>`:card(r)).join('')}</div>`:`<p class="note">No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.</p>`}${cBtns?`<div class="gfoot">${cBtns}</div>`:''}</div></section>`;
+      <div class="panel">${allRs.length>5||kq?kSearch('c:'+cf.id,cf,kq,rs.length,allRs.length,false):''}${rs.length?`<div class="cards" style="display:flex">${rs.map(r=>detachable(r)?`<div class="at-card">${card(r)}<button type="button" class="ibtn at-det" data-act="child-detach" data-id="${r.id}" aria-label="Detach ${esc(recTitle(r,cf))} (keeps it)" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button></div>`:card(r)).join('')}</div>`:`<p class="note">${kq.trim()&&allRs.length?`No ${esc(cf.name.toLowerCase())} match “${esc(kq)}”.`:`No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.`}</p>`}${cBtns?`<div class="gfoot">${cBtns}</div>`:''}</div></section>`;
   }).join(''):'';
   let backHTML='';
   if(rec){
@@ -438,10 +451,14 @@ const folded=(formId,key)=>isFolded(folds(),formId,key);
 const CHEV='<svg class="fold-c" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 /** The heading of a foldable section: a button that says whether it's open, plus a summary when folded. */
 function foldBtn(key,open,inner,summary){return `<button type="button" class="fold-t" data-act="fold" data-k="${esc(key)}" aria-expanded="${open}">${CHEV}${inner}${!open&&summary?`<span class="fold-sum">${esc(summary)}</span>`:''}</button>`;}
+/** The search box at the top of a sub-form grid or a child section (shown from 6 rows, or while searching). */
+function kSearch(key,cf,q,shown,all,anyNew){
+  return `<div class="ksearch"><input type="search" class="in" data-ksearch="${esc(key)}" value="${esc(q)}" placeholder="Search ${esc(cf.name.toLowerCase())}" aria-label="Search ${esc(cf.name)}">${q.trim()?`<span class="help" role="status">Showing ${shown} of ${all}${anyNew?'; new rows always show':''}</span>`:''}</div>`;
+}
 function recordFoldKeys(form,rec){
   const grids=gridRels(form).map(x=>x.cf.id);
   const kids=rec?(form.children||[]).filter(c=>c.display!=='grid').map(c=>formById(c.formId)).filter(cf=>cf&&canViewForm(store.me,cf.id)).map(cf=>cf.id):[];
-  return foldKeys(form,grids,kids);
+  return foldKeys(form,grids,kids).concat(rec?['t:tasks']:[]);
 }
 const SORT_H={valOf:(f,r,fm)=>valOf(f,r,fm),fmt:(f,v)=>fmt(f,v),recTitle:(r,fm)=>recTitle(r,fm),recById:id=>recById(id),formById:id=>formById(id)};
 const DETACH_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 4 8"/><path d="M8 12h3"/><path d="M3 3l18 18"/></svg>';
@@ -515,7 +532,11 @@ function gridTotal(cf,f,d,rows){
 }
 function gridSection(form,rel,cf,d,parentRo){
   const g=d.grids[cf.id];const cols=gridCols(rel,cf);
-  const rows=sortRowsGrid(g,cf,d);
+  const allRows=sortRowsGrid(g,cf,d);
+  // search across the grid's columns; new rows and rows with a problem always show
+  const q=(d.kq||{})['g:'+cf.id]||'';
+  const rowText=row=>cols.map(f=>{try{const v=valOf(f,rowRec(row,cf,d),cf);return f.type==='formula'?fmtCalc(f,v):fmt(f,v);}catch(e){return ''}}).join(' \u2022 ');
+  const rows=q.trim()?allRows.filter(r=>r.isNew||(r.errors&&Object.keys(r.errors).length)||searchHit(rowText(r),q)):allRows;
   const mayAdd=!parentRo&&canCreate(store.me,cf.id);
   const errs=[];
   const body=rows.map((row,i)=>{
@@ -525,17 +546,18 @@ function gridSection(form,rel,cf,d,parentRo){
     return `<tr class="${row.isNew?'gnew':''}${bad?' gbad':''}" data-growid="${row.id}">${cols.map(f=>`<td class="${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?'num':''}${row.errors?.[f.id]?' bad':''}">${gridCell(cf,row,f,d,ro)}</td>`).join('')}
       <td class="gact">${row.isNew?'':`<button type="button" class="ibtn" data-act="open-record" data-id="${row.id}" aria-label="Open this row on its own" title="Open on its own">↗</button>`}${ro||row.isNew?'':`<button type="button" class="ibtn at-det" data-act="grid-detach" data-grid="${cf.id}" data-row="${row.id}" aria-label="Detach row ${i+1} (keeps the ${esc(itemName(cf).toLowerCase())})" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button>`}${ro?'':`<button type="button" class="ibtn" data-act="grid-del" data-grid="${cf.id}" data-row="${row.id}" aria-label="Delete row ${i+1}" title="Delete row">✕</button>`}</td></tr>`;
   }).join('');
-  const totals=cols.map(f=>gridTotal(cf,f,d,rows));
-  const showTot=rows.length>1&&totals.some(t=>t!=null);
+  const totals=cols.map(f=>gridTotal(cf,f,d,allRows)); // totals always cover every row
+  const showTot=allRows.length>1&&totals.some(t=>t!=null);
   const head=cols.map(f=>{const on=g.sort?.key===f.id;return `<th${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?' class="num"':''} aria-sort="${on?(g.sort.dir==='asc'?'ascending':'descending'):'none'}"><button type="button" class="ghb${on?' on':''}" data-act="grid-sort" data-grid="${cf.id}" data-key="${f.id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}<span class="arr" aria-hidden="true">${on?(g.sort.dir==='asc'?'▲':'▼'):''}</span></button></th>`;}).join('');
   const gOpen=!folded(form.id,'g:'+cf.id)||errs.length>0;
   const gSum=cols.map((f,i)=>totals[i]==null?'':`${f.label} ${f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i])}`).filter(Boolean).slice(0,3).join(' · ');
-  const gHead=`<div class="section-h"><h2>${foldBtn('g:'+cf.id,gOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${rows.length}</span>`,gSum)}</h2><span class="chip acc">Grid</span></div>`;
+  const gHead=`<div class="section-h"><h2>${foldBtn('g:'+cf.id,gOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${allRows.length}</span>`,gSum)}</h2><span class="chip acc">Grid</span></div>`;
+  const gSearch=allRows.length>5||q?kSearch('g:'+cf.id,cf,q,rows.length,allRows.length,rows.some(r=>r.isNew)):'';
   if(!gOpen)return `<section class="section gsec" id="grid-${cf.id}">${gHead}</section>`;
   return `<section class="section gsec" id="grid-${cf.id}">${gHead}
-    <div class="panel"><div class="gwrap"><table class="gtbl"><thead><tr>${head}<th class="gact"><span class="sr">Row actions</span></th></tr></thead>
-      <tbody>${body||`<tr><td class="gempty" colspan="${cols.length+1}">No ${esc(cf.name.toLowerCase())} yet.</td></tr>`}</tbody>
-      ${showTot?`<tfoot><tr>${cols.map((f,i)=>`<td class="num" id="gt-${cf.id}-${f.id}">${totals[i]==null?(i===0?'Total':''):esc(f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i]))}</td>`).join('')}<td></td></tr></tfoot>`:''}
+    <div class="panel">${gSearch}<div class="gwrap"><table class="gtbl"><thead><tr>${head}<th class="gact"><span class="sr">Row actions</span></th></tr></thead>
+      <tbody>${body||`<tr><td class="gempty" colspan="${cols.length+1}">${q.trim()&&allRows.length?`No ${esc(cf.name.toLowerCase())} match “${esc(q)}”.`:`No ${esc(cf.name.toLowerCase())} yet.`}</td></tr>`}</tbody>
+      ${showTot?`<tfoot><tr>${cols.map((f,i)=>`<td class="num" id="gt-${cf.id}-${f.id}">${totals[i]==null?(i===0?(rows.length<allRows.length?`Total (all ${allRows.length})`:'Total'):''):esc(f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i]))}</td>`).join('')}<td></td></tr></tfoot>`:''}
     </table></div>
     ${errs.length?`<div class="gerrs" role="alert">${errs.slice(0,6).map(e=>`<p>${esc(e)}</p>`).join('')}</div>`:''}
     <div class="gfoot">${mayAdd?`<button type="button" class="btn sm" data-act="grid-add" data-grid="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${parentRo?'':`<button type="button" class="btn sm" data-act="grid-attach" data-grid="${cf.id}">Attach existing</button>`}<span class="help">${g.sort?'Click a heading again to reverse. ':'Click a heading to sort. '}${mayAdd?'New rows stay at the bottom until you save.':''}</span></div></div></section>`;
@@ -1074,6 +1096,7 @@ document.addEventListener('click',async e=>{
 document.addEventListener('input',e=>{
   const t=e.target;
   if(t.dataset.grid&&t.dataset.gf){if(t.type!=='checkbox'&&t.tagName!=='SELECT')setGridVal(t);return;}
+  if(t.dataset.ksearch&&rdraft){rdraft.kq={...(rdraft.kq||{}),[t.dataset.ksearch]:t.value};const k=t.dataset.ksearch,pos=t.selectionStart;renderMain();const s=document.querySelector(`[data-ksearch="${CSS.escape(k)}"]`);if(s){s.focus({preventScroll:true});try{s.setSelectionRange(pos,pos)}catch(err){}}return;}
   if(t.id==='search'){ui.search=t.value;const pos=t.selectionStart;renderMain();const s=$('#search');if(s){s.focus();s.setSelectionRange(pos,pos);}return;}
   if(t.dataset.fid&&t.type!=='file'&&!(t.type==='radio'||t.type==='checkbox'))setVal(t);
   if(t.dataset.fprop&&t.dataset.kind!=='bool'){fdraft[t.dataset.fprop]=t.value;setFdirty();}

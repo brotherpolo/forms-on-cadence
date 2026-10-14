@@ -52,3 +52,7 @@ th.num .ghb{justify-content:flex-end;width:100%}
 .relinh{margin:0 16px 4px}
 .relcard>.help{margin:0 16px 12px}
 .gtbl select.gin{min-width:130px}
+/* searching a sub-form grid or a child section */
+.ksearch{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.ksearch .in{flex:1 1 240px;max-width:420px;min-height:40px}
+.ksearch .help{margin:0}
