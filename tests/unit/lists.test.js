@@ -40,19 +40,26 @@ const h = {
   nameOf: (u) => ({ u1: 'Adam', u2: 'Farren' }[u]),
 };
 
-test('catalog leaves out the title, headings and long text, and adds parent, counts and record info', () => {
+test('catalog leaves out the title and headings, keeps long text, and adds parent, counts and record info', () => {
   const keys = columnCatalog(ctx).map((c) => c.key);
   assert.ok(!keys.includes('f:pname'));
-  assert.ok(!keys.includes('f:brief') && !keys.includes('f:h1'));
+  assert.ok(keys.includes('f:brief') && !keys.includes('f:h1'));
   assert.ok(keys.includes('f:stage') && keys.includes('parent'));
-  assert.ok(keys.includes('p:clients:cstatus') && !keys.includes('p:clients:notes'));
+  assert.ok(keys.includes('p:clients:cstatus') && keys.includes('p:clients:notes'));
   assert.ok(keys.includes('kids:visits') && keys.includes('sys:by'));
 });
 
 test('default config follows "Show as list column", with Belongs to first', () => {
   const d = defaultConfig(ctx);
-  assert.deepEqual(d.cols, ['parent', 'f:stage', 'f:budget']);
+  assert.deepEqual(d.cols, ['parent', 'f:stage', 'f:budget', 'f:brief']);
   assert.deepEqual(d.sort, { key: 'sys:updated', dir: 'desc' });
+});
+
+test('long text shows on one line in a list', () => {
+  const h = { form: projects, valOf: (f, r) => r.values[f.id], fmt: (f, v) => (v == null ? '' : String(v)) };
+  const c = cellOf('f:brief', { values: { brief: 'First line\n\n  second line ' } }, h);
+  assert.equal(c.text, 'First line second line');
+  assert.equal(c.long, true);
 });
 
 test('cleanConfig drops missing columns, duplicates and stale filter options', () => {
