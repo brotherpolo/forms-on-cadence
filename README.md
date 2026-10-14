@@ -125,6 +125,8 @@ Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Si
   - Gaps are allowed. **Float items up** slides everything up to close vertical gaps (saved with the dashboard).
   - Add saved reports (or make a new one from there) and text blocks; new items go in the first free spot. ✕ removes an item. Press **Save dashboard** when done.
   - On phones, items stack full width in reading order (top to bottom, left to right).
+  - On phones, each report is a small card: the number for a KPI, the ring for a donut (no legend), the top 5 bars with short labels, the line or area chart, and the top 3 rows of a table, grouped table (its groups) or pivot (row totals). "See all" opens the rest.
+  - Tap a bar, slice or point to see its records; tap anywhere else on a card to see all of its records. Press and hold (any touch screen) for a bubble with the name, the number of records, the total and its share. A tip says so the first three times a dashboard is opened.
   - Dashboards saved before the canvas keep their arrangement as the starting layout.
 - **Filters:** a period (All time, This month, Last 30 days, This quarter, This year) and any number of field filters you add while editing (*Clients › Company name*). Everyone can change them while viewing; the period picked while editing is saved as the starting one. A field filter applies to each report whose form is that form or sits below it; the others say it doesn't reach them.
 - **Home:** **Set as home** on any dashboard makes it open when you start Formwright. Everyone picks their own.
