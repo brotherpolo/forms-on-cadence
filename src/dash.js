@@ -11,11 +11,12 @@ import { store, saveReportDef, deleteReportDef, saveDashboard, deleteDashboard, 
 import { canViewForm, isAdmin } from './access.js';
 import { esc, uid, clone, toast, badge } from './ui.js';
 import {
-  fieldOf, valueOf, textOf, kindOf, chainOf, measureOf, bucketsOf, niceStep, refLabel, autoTitle,
+  fieldOf, valueOf, textOf, kindOf, chainOf, measureOf, bucketsOf, niceStep, refLabel, autoTitle, titleFieldOf, parentsOf,
 } from './reportlogic.js';
 import {
   TYPES, PERIODS, chainFields, rowsFor, periodRange, kpiOf, slicesOf, groupRows, pivotOf, sortRecs, normalizeDef,
   newDef, migrateLegacy, visibleTo, usedOn, filterReaches, dateRefOf, keysOf, groupable as canSplit, groupLabel, BYS,
+  drillRows, drillLabel, bucketOf,
   canvasTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_ROW, CANVAS_COLS,
 } from './dashlogic.js';
 
@@ -29,7 +30,9 @@ const D = {
   sorts: {},                              // table sorts per tile/report
   returnTo: null,                         // dashboard to add a new report to after its first save
   migrating: false, migrated: new Set(),
+  drill: null,                            // the records behind a clicked bar, slice, cell or number
 };
+const DRAWN = new Map();                  // report body key -> { def, extra } it was last drawn from
 
 /* ---------- data ---------- */
 
@@ -136,17 +139,17 @@ function captionOf(c, def, n, extra) {
   const parts = [n + ' ' + (n === 1 ? (form?.itemName || form?.name || 'record').toLowerCase().replace(/s$/, '') : (form?.name || 'records').toLowerCase())];
   const conds = (def.conditions || []).filter((x) => x.ref && fieldOf(c, x.ref) && x.value !== '');
   if (conds.length) parts.push(conds.map((x) => refLabel(c, x.ref, def.form) + (x.op === 'not' ? ' is not ' : ' is ') + x.value).join(def.join === 'or' ? ' or ' : ' and '));
-  if (extra?.range && ['line', 'area'].includes(def.type)) parts.push('period doesn’t apply to charts over time');
   const blocked = (extra?.fields || []).filter((ff) => ff.values?.length && !filterReaches(c, def, ff.ref));
   if (blocked.length) parts.push(blocked.map((ff) => (fieldOf(c, ff.ref)?.label || 'filter')).join(', ') + ' filter doesn’t reach this report');
   return parts.join(' · ');
 }
 
 function bodyHTML(c, def, extra, key) {
+  DRAWN.set(key, { def, extra });
   const form = c.formById(def.form);
   if (!form) return { html: `<p class="rp-empty">You don’t have access to the form this report uses.</p>`, caption: '' };
   const time = ['line', 'area'].includes(def.type);
-  const ex = time ? { ...extra, range: null } : extra;
+  const ex = extra;
   if (def.type === 'kpi') {
     const k = kpiOf(c, def, ex, Date.now());
     let cmp = '';
@@ -154,7 +157,7 @@ function bodyHTML(c, def, extra, key) {
       if (k.delta == null) cmp = `<div class="db-kd">Nothing in ${esc(k.prevLabel)} to compare with</div>`;
       else { const up = k.delta >= 0; cmp = `<div class="db-kd"><span aria-hidden="true">${up ? '▲' : '▼'}</span> ${up ? '+' : ''}${Math.round(k.delta)}% vs ${esc(k.prevLabel)} <span class="db-kp">(${esc(fmtMeasure(c, def, k.prev))})</span></div>`; }
     }
-    return { html: `<div class="rp-kpi">${esc(fmtMeasure(c, def, k.value))}</div><div class="rp-kpisub">${esc(measureLabel(c, def))}${def.compare && !extra?.range ? ' · ' + esc(k.label) : ''}</div>${cmp}`, caption: captionOf(c, def, k.n, extra) };
+    return { html: `<button type="button" class="rp-kpi db-dr" data-d="drill" data-k="${esc(key)}" title="See the records behind this number">${esc(fmtMeasure(c, def, k.value))}</button><div class="rp-kpisub">${esc(measureLabel(c, def))}${def.compare && !extra?.range ? ' · ' + esc(k.label) : ''}</div>${cmp}`, caption: captionOf(c, def, k.n, extra) };
   }
   const list = rowsFor(c, def, ex);
   const caption = captionOf(c, def, list.length, extra);
@@ -162,32 +165,37 @@ function bodyHTML(c, def, extra, key) {
   if (def.type === 'bar') {
     const items = slicesOf(c, def, list);
     const max = Math.max(0, ...items.map((x) => x.value)) || 1;
-    return { caption, html: `<div class="rp-bars" role="list">${items.map((x) => { const t = fmtMeasure(c, def, x.value); return `<div class="rp-bar" role="listitem" title="${esc(x.key + ': ' + t)}"><span class="rp-bl">${esc(x.key)}</span><span class="rp-bt"><span class="rp-bf" style="width:${Math.max(0.5, (x.value / max) * 100).toFixed(1)}%"></span></span><span class="rp-bv">${esc(t)}</span></div>`; }).join('')}</div>` };
+    return { caption, html: `<div class="rp-bars" role="list">${items.map((x, i) => { const t = fmtMeasure(c, def, x.value); return `<button type="button" class="rp-bar db-dr" role="listitem" data-d="drill" data-k="${esc(key)}" data-i="${i}" title="${esc(x.key + ': ' + t)}"><span class="rp-bl">${esc(x.key)}</span><span class="rp-bt"><span class="rp-bf" style="width:${Math.max(0.5, (x.value / max) * 100).toFixed(1)}%"></span></span><span class="rp-bv">${esc(t)}</span></button>`; }).join('')}</div>` };
   }
   if (def.type === 'donut') {
     const items = slicesOf(c, def, list).filter((x) => x.value > 0);
     const total = items.reduce((a, b) => a + b.value, 0) || 1;
     let acc = 0;
     const segs = items.map((x, i) => { const a = acc, b = acc + (x.value / total) * 100; acc = b; const gap = Math.min(0.6, (b - a) / 3); return `var(--dc${(i % COLORS) + 1}) ${a.toFixed(2)}% ${(b - gap).toFixed(2)}%, var(--surface) ${(b - gap).toFixed(2)}% ${b.toFixed(2)}%`; }).join(', ');
-    return { caption, html: `<div class="db-donut"><div class="db-ring" style="background:conic-gradient(${segs})" role="img" aria-label="${esc(items.map((x) => x.key + ' ' + Math.round((x.value / total) * 100) + '%').join(', '))}"><div class="db-ringc">${esc(fmtShort(c, def, total))}<small>total</small></div></div>
-      <div class="db-leg" role="list">${items.map((x, i) => `<div class="db-li" role="listitem"><span class="db-sw" style="background:var(--dc${(i % COLORS) + 1})"></span><span class="db-lk">${esc(x.key)}</span><span class="db-lv">${esc(fmtMeasure(c, def, x.value))}</span><span class="db-lp">${Math.round((x.value / total) * 100)}%</span></div>`).join('')}</div></div>` };
+    return { caption, html: `<div class="db-donut"><div class="db-ring db-dr" data-d="drillring" data-k="${esc(key)}" data-cuts="${esc(cutsOf(items))}" style="background:conic-gradient(${segs})" role="img" aria-label="${esc(items.map((x) => x.key + ' ' + Math.round((x.value / total) * 100) + '%').join(', '))}"><div class="db-ringc">${esc(fmtShort(c, def, total))}<small>total</small></div></div>
+      <div class="db-leg" role="list">${items.map((x, i) => `<button type="button" class="db-li db-dr" role="listitem" data-d="drill" data-k="${esc(key)}" data-i="${i}"><span class="db-sw" style="background:var(--dc${(i % COLORS) + 1})"></span><span class="db-lk">${esc(x.key)}</span><span class="db-lv">${esc(fmtMeasure(c, def, x.value))}</span><span class="db-lp">${Math.round((x.value / total) * 100)}%</span></button>`).join('')}</div></div>` };
   }
   if (time) {
     if (!fieldOf(c, def.time)) return { caption, html: `<p class="rp-empty">Choose a date field in the report’s settings.</p>` };
-    const weeks = (def.interval || 'month') === 'week';
-    const b = bucketsOf(c, def, list, Date.now());
+    const iv = def.interval || 'month';
+    const b = bucketsOf(c, def, list, Date.now(), ex?.range);
     const n = b.length;
     const step = niceStep(Math.max(0, ...b.map((x) => x.value)) / 4);
     const top = step * 4;
     const X = (i) => (n === 1 ? 50 : (i / (n - 1)) * 100);
     const Y = (v) => (v / top) * 100;
     const path = b.map((x, i) => (i ? 'L' : 'M') + X(i).toFixed(2) + ' ' + (100 - Y(x.value)).toFixed(2)).join(' ');
-    const label = (x) => x.date.toLocaleDateString(undefined, weeks ? { month: 'short', day: 'numeric' } : { month: 'short' });
-    const every = weeks ? 5 : 2;
+    const years = n > 1 && b[0].date.getFullYear() !== b[n - 1].date.getFullYear();
+    const yy = (d) => (years ? ' ’' + String(d.getFullYear()).slice(2) : '');
+    const label = (x) => (iv === 'week' ? x.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + yy(x.date)
+      : iv === 'month' ? x.date.toLocaleDateString(undefined, { month: 'short' }) + yy(x.date)
+      : iv === 'quarter' ? 'Q' + (Math.floor(x.date.getMonth() / 3) + 1) + ' ’' + String(x.date.getFullYear()).slice(2)
+      : String(x.date.getFullYear()));
+    const every = Math.max(1, Math.ceil(n / 8));
     return { caption, html: `<div class="rp-ln"><div class="rp-plot">
       ${[0, 1, 2, 3, 4].map((k) => `<div class="rp-gl" style="bottom:${k * 25}%"><span>${esc(fmtShort(c, def, step * k))}</span></div>`).join('')}
       <svg class="rp-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${def.type === 'area' ? `<path class="rp-area" d="${path} L100 100 L0 100 Z"></path>` : ''}<path class="rp-path" d="${path}"></path></svg>
-      ${b.map((x, i) => { const tip = (weeks ? 'Week of ' : '') + label(x) + ' · ' + fmtMeasure(c, def, x.value); return `<button type="button" class="rp-pt" style="left:${X(i).toFixed(2)}%;bottom:${Y(x.value).toFixed(2)}%" aria-label="${esc(tip)}"><i></i><span class="rp-tip">${esc(tip)}</span></button>`; }).join('')}
+      ${b.map((x, i) => { const tip = bucketOf(x.start, iv).k + ' · ' + fmtMeasure(c, def, x.value); return `<button type="button" class="rp-pt" data-d="drill" data-k="${esc(key)}" data-i="${i}" style="left:${X(i).toFixed(2)}%;bottom:${Y(x.value).toFixed(2)}%" aria-label="${esc(tip)}"><i></i><span class="rp-tip">${esc(tip)}</span></button>`; }).join('')}
     </div><div class="rp-xax">${b.map((x, i) => ((n - 1 - i) % every === 0 ? `<span style="left:${X(i).toFixed(2)}%">${esc(label(x))}</span>` : '')).join('')}</div></div>` };
   }
   if (def.type === 'pivot') {
@@ -195,9 +203,9 @@ function bodyHTML(c, def, extra, key) {
     if (!p) return { caption, html: `<p class="rp-empty">Choose rows and columns in the report’s settings.</p>` };
     const tc = `minmax(140px,1.6fr) ${p.cols.map(() => 'minmax(84px,1fr)').join(' ')} minmax(96px,1fr)`;
     const rl = groupLabel(c, def.group) || 'Rows', cl = groupLabel(c, def.col) || 'Columns';
-    return { caption, html: `<div class="rp-table db-pivot" role="table"><div class="rp-tr rp-th" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="columnheader">${esc(rl)} ↓ · ${esc(cl)} →</div>${p.cols.map((k) => `<div class="rp-td num" role="columnheader">${esc(k)}</div>`).join('')}<div class="rp-td num" role="columnheader">Total</div></div>
-      ${p.rows.map((r) => `<div class="rp-tr" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader">${esc(r.key)}</div>${r.cells.map((v) => `<div class="rp-td num" role="cell">${v == null ? '–' : esc(fmtMeasure(c, def, v))}</div>`).join('')}<div class="rp-td num db-b" role="cell">${esc(fmtMeasure(c, def, r.total))}</div></div>`).join('')}
-      <div class="rp-tr db-tot" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader">Total</div>${p.colTotals.map((v) => `<div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, v))}</div>`).join('')}<div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, p.grand))}</div></div></div>
+    return { caption, html: `<div class="rp-table db-pivot" role="table"><div class="rp-tr rp-th" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="columnheader">${esc(rl)} ↓ · ${esc(cl)} →</div>${p.cols.map((k, j) => `<div class="rp-td num" role="columnheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${esc(k)}</button></div>`).join('')}<div class="rp-td num" role="columnheader">Total</div></div>
+      ${p.rows.map((r, i) => `<div class="rp-tr" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}">${esc(r.key)}</button></div>${r.cells.map((v, j) => `<div class="rp-td num" role="cell">${v == null ? '–' : `<button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}" data-c="${j}" aria-label="${esc(r.key + ', ' + p.cols[j] + ': ' + fmtMeasure(c, def, v))}">${esc(fmtMeasure(c, def, v))}</button>`}</div>`).join('')}<div class="rp-td num db-b" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-r="${i}">${esc(fmtMeasure(c, def, r.total))}</button></div></div>`).join('')}
+      <div class="rp-tr db-tot" role="row" style="grid-template-columns:${tc}"><div class="rp-td" role="rowheader">Total</div>${p.colTotals.map((v, j) => `<div class="rp-td num" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}" data-c="${j}">${esc(fmtMeasure(c, def, v))}</button></div>`).join('')}<div class="rp-td num" role="cell"><button type="button" class="db-cellb" data-d="drill" data-k="${esc(key)}">${esc(fmtMeasure(c, def, p.grand))}</button></div></div></div>
       ${p.moreRows || p.moreCols ? `<p class="rp-more">Showing the first ${p.rows.length} rows and ${p.cols.length} columns.</p>` : ''}` };
   }
   // table and grouped table
@@ -212,14 +220,183 @@ function bodyHTML(c, def, extra, key) {
     const groups = groupRows(c, def, def.group, list);
     if (!groups.length) return { caption, html: `<p class="rp-empty">Choose what to group by in the report’s settings.</p>` };
     const gl = groupLabel(c, def.group) || 'Group';
-    return { caption, html: `<div class="rp-table" role="table">${head}${groups.map((g) => {
+    return { caption, html: `<div class="rp-table" role="table">${head}${groups.map((g, gi) => {
       const rs = sortRecs(c, g.rows, sref, sort.dir).slice(0, 10);
-      return `<div class="rp-tr db-grp" role="row"><div class="rp-td" role="rowheader"><b>${esc(g.key)}</b> <span class="db-gn">${esc(gl)} · ${g.rows.length}</span></div><div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, g.value))}</div></div>${rs.map(row).join('')}${g.rows.length > rs.length ? `<p class="rp-more db-gm">and ${g.rows.length - rs.length} more</p>` : ''}`;
+      return `<div class="rp-tr db-grp" role="row"><div class="rp-td" role="rowheader"><button type="button" class="db-cellb db-grpb" data-d="drill" data-k="${esc(key)}" data-i="${gi}"><b>${esc(g.key)}</b> <span class="db-gn">${esc(gl)} · ${g.rows.length}</span></button></div><div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, g.value))}</div></div>${rs.map(row).join('')}${g.rows.length > rs.length ? `<p class="rp-more db-gm"><button type="button" class="db-link" data-d="drill" data-k="${esc(key)}" data-i="${gi}">and ${g.rows.length - rs.length} more</button></p>` : ''}`;
     }).join('')}<div class="rp-tr db-grp db-tot" role="row"><div class="rp-td" role="rowheader">Total · ${list.length}</div><div class="rp-td num" role="cell">${esc(fmtMeasure(c, def, measureOf(c, def, list)))}</div></div></div>` };
   }
   const sorted = sortRecs(c, list, sref, sort.dir);
   const shown = sorted.slice(0, 50);
   return { caption, html: `<div class="rp-table" role="table">${head}${shown.map(row).join('')}</div>${sorted.length > shown.length ? `<p class="rp-more">Showing the first ${shown.length} of ${sorted.length}.</p>` : ''}` };
+}
+
+/* ---------- drilling down: the records behind a number ---------- */
+
+const DD_PAGE = 200;
+const SUMMABLE = new Set(['number', 'decimal', 'currency']);
+
+/** Where the donut's slices end, as fractions of the circle, so a click on the ring finds its slice. */
+function cutsOf(items) {
+  const total = items.reduce((a, b) => a + b.value, 0) || 1;
+  let acc = 0;
+  return items.map((x) => (acc += x.value / total).toFixed(5)).join(',');
+}
+
+/** 'r:<reportId>' in the report editor, 'd:<dashboardId>' on a dashboard. */
+const whereOfKey = (key) => (key.startsWith('r:') ? key : 'd:' + key.split(':')[1]);
+const whereOfView = (v) => (v && v.name === 'report' ? 'r:' + v.reportId : v && v.name === 'dashboard' ? 'd:' + v.dashboardId : '');
+
+/** Leaving for anywhere but a record (opened from the list) closes the pop-up. */
+export function drillNav(v) { if (D.drill && v.name !== 'record' && whereOfView(v) !== D.drill.where) D.drill = null; }
+
+function reportNameOf(key) {
+  if (key.startsWith('r:')) return D.draft?.name || 'Report';
+  const [, did, tid] = key.split(':');
+  const x = D.edit && D.did === did ? D.edit : dashById(did);
+  const t = (x?.tiles || []).find((y) => y.id === tid);
+  return reportById(t?.report)?.name || 'Report';
+}
+
+/** Work out which records a click stands for: { def, extra, filters } or null. */
+function drillPick(data) {
+  const key = String(data.k || ''), reg = DRAWN.get(key);
+  if (!reg) return null;
+  const c = ctx(), def = reg.def;
+  const ex = reg.extra;
+  const list = () => rowsFor(c, def, ex);
+  const has = (k) => data[k] != null && data[k] !== '';
+  const filters = [];
+  if (def.type === 'bar' || def.type === 'donut') {
+    let items = slicesOf(c, def, list());
+    if (def.type === 'donut') items = items.filter((x) => x.value > 0);
+    const it = items[+data.i];
+    if (!it) return null;
+    filters.push({ ref: def.group, keys: it.keys, title: it.key });
+  } else if (def.type === 'line' || def.type === 'area') {
+    const b = bucketsOf(c, def, list(), Date.now(), ex?.range)[+data.i];
+    if (!b) return null;
+    const k = bucketOf(b.start, def.interval || 'month').k;
+    filters.push({ ref: def.time, from: b.start, to: b.end, text: k.startsWith('Week') ? 'the w' + k.slice(1) : k, title: k });
+  } else if (def.type === 'pivot') {
+    const p = pivotOf(c, def, list());
+    if (!p) return null;
+    if (has('r') && p.rows[+data.r]) filters.push({ ref: def.group, keys: [p.rows[+data.r].key], title: p.rows[+data.r].key });
+    if (has('c') && p.cols[+data.c] != null) filters.push({ ref: def.col, keys: [p.cols[+data.c]], title: p.cols[+data.c] });
+  } else if (def.type === 'grouped' && has('i')) {
+    const g = groupRows(c, def, def.group, list())[+data.i];
+    if (!g) return null;
+    filters.push({ ref: def.group, keys: [g.key], title: g.key });
+  }
+  return { where: whereOfKey(key), def: clone(def), extra: clone(ex), filters, name: reportNameOf(key), q: '', sort: null, shown: DD_PAGE };
+}
+
+function openDrill(data) {
+  if (D.edit && String(data.k).startsWith('t:')) return; // arranging the dashboard, not reading it
+  const dd = drillPick(data);
+  if (!dd) return;
+  D.drill = dd;
+  repaint(() => document.querySelector('#db-dd .db-dd-x')?.focus());
+}
+
+function drillTitle(c, dd) {
+  if (dd.filters.length) return dd.filters.map((f) => f.title).join(' · ');
+  const form = c.formById(dd.def.form);
+  return 'All ' + (form ? form.name.toLowerCase() : 'records');
+}
+
+/** Columns for the list: the report's own when it's a table, else the form's list columns. */
+function drillCols(c, def) {
+  const form = c.formById(def.form);
+  const t = form && titleFieldOf(form);
+  const notTitle = (r) => !(t && r.form === def.form && r.id === t.id);
+  if (['table', 'grouped'].includes(def.type) && (def.columns || []).length) return def.columns.filter((r) => fieldOf(c, r) && notTitle(r));
+  const out = [];
+  const parent = parentsOf(c, def.form)[0];
+  if (parent) { const pt = titleFieldOf(c.formById(parent)); if (pt) out.push({ form: parent, id: pt.id }); }
+  const usable = (form?.fields || []).filter((f) => !['heading', 'signature', 'file', 'image'].includes(f.type) && (!t || f.id !== t.id));
+  const listed = usable.filter((f) => f.inList);
+  (listed.length ? listed : usable).slice(0, 8).forEach((f) => out.push({ form: def.form, id: f.id }));
+  return out;
+}
+
+function drillData(c, dd) {
+  const def = dd.def;
+  const cols = drillCols(c, def);
+  let rows = drillRows(c, def, dd.extra, dd.filters);
+  const all = rows.length;
+  const q = dd.q.trim().toLowerCase();
+  if (q) rows = rows.filter((rec) => [c.recTitle(rec), ...cols.map((r) => cellText(c, r, rec))].join(' ').toLowerCase().includes(q));
+  if (dd.sort) {
+    if (dd.sort.i < 0) rows = rows.slice().sort((a, b) => c.recTitle(a).localeCompare(c.recTitle(b), undefined, { numeric: true }) * dd.sort.dir);
+    else rows = sortRecs(c, rows, cols[dd.sort.i] || cols[0], dd.sort.dir);
+  }
+  return { cols, rows, all };
+}
+
+function drillHTML(where) {
+  const dd = D.drill;
+  if (!dd || dd.where !== where) return '';
+  const c = ctx(), def = dd.def, form = c.formById(def.form);
+  if (!form) return '';
+  const { cols, rows, all } = drillData(c, dd);
+  const shown = rows.slice(0, dd.shown);
+  const items = String(form.name || 'records').toLowerCase();
+  const title = titleFieldOf(form)?.label || 'Title';
+  const numCol = cols.map((r) => isNumRef(c, r));
+  const sumCol = cols.map((r) => { const f = fieldOf(c, r); return !!f && (SUMMABLE.has(f.type) || (f.type === 'formula' && SUMMABLE.has(f.format))); });
+  const totals = cols.map((r, i) => (sumCol[i] ? textOf(c, fieldOf(c, r), rows.reduce((a, rec) => a + (Number(valueOf(c, rec, r)) || 0), 0)) : ''));
+  const arrow = (i) => (dd.sort && dd.sort.i === i ? (dd.sort.dir > 0 ? ' ↑' : ' ↓') : '');
+  const aria = (i) => (dd.sort && dd.sort.i === i ? (dd.sort.dir > 0 ? 'ascending' : 'descending') : 'none');
+  // what else narrows these records, shown so the count matches what was clicked
+  const ctxChips = [];
+  if (dd.extra?.range && dd.extra.periodKey) ctxChips.push('Dashboard: ' + ((PERIODS.find((p) => p[0] === dd.extra.periodKey) || [])[1] || 'period'));
+  else if (def.type === 'kpi' && def.compare) ctxChips.push('This month');
+  (dd.extra?.fields || []).forEach((ff) => { if (ff.values?.length && filterReaches(c, def, ff.ref)) ctxChips.push(`Dashboard: ${fieldOf(c, ff.ref)?.label || 'filter'} is ${ff.values[0]}`); });
+  const conds = (def.conditions || []).filter((x) => x.ref && fieldOf(c, x.ref) && x.value !== '' && x.value != null);
+  if (conds.length) ctxChips.push('Report: ' + conds.map((x) => refLabel(c, x.ref, def.form) + (x.op === 'not' ? ' is not ' : ' is ') + x.value).join(def.join === 'or' ? ' or ' : ' and '));
+  const m = def.measure || { fn: 'count' };
+  const measure = m.fn !== 'count' && m.ref && fieldOf(c, m.ref) ? `<span>${esc(measureLabel(c, def))} <b>${esc(fmtMeasure(c, def, measureOf(c, def, rows)))}</b></span>` : '';
+  const head = `<tr><th aria-sort="${aria(-1)}"><button type="button" class="db-dd-hb" data-d="ddsort" data-v="-1">${esc(title)}${arrow(-1)}</button></th>${cols.map((r, i) => `<th class="${numCol[i] ? 'num' : ''}" aria-sort="${aria(i)}"><button type="button" class="db-dd-hb" data-d="ddsort" data-v="${i}">${esc(refLabel(c, r, def.form))}${arrow(i)}</button></th>`).join('')}</tr>`;
+  const body = shown.map((rec) => `<tr data-d="ddrec" data-v="${esc(rec.id)}"><td class="title"><button type="button" class="db-dd-open" data-d="ddrec" data-v="${esc(rec.id)}">${esc(c.recTitle(rec))}</button></td>${cols.map((r, i) => { const t = cellText(c, r, rec); const f = fieldOf(c, r); return `<td class="${numCol[i] ? 'num' : f?.type === 'textarea' ? 'db-dd-long' : ''}" title="${esc(t)}">${esc(t || '')}</td>`; }).join('')}</tr>`).join('');
+  const one = String(form.itemName || form.name || 'record').toLowerCase();
+  return `<div class="db-dd-scrim" data-d="ddclose"><div class="db-dd" id="db-dd" role="dialog" aria-modal="true" aria-labelledby="db-dd-h">
+    <div class="db-dd-h">
+      <div class="db-dd-top"><div class="db-dd-tt"><h2 id="db-dd-h">${esc(drillTitle(c, dd))}</h2><span class="db-dd-from">From “${esc(dd.name)}” · ${esc(form.name)}</span></div>
+        <button type="button" class="ibtn db-dd-x" data-d="ddclose" aria-label="Close">✕</button></div>
+      ${dd.filters.length || ctxChips.length ? `<div class="db-dd-chips">${dd.filters.map((f, i) => `<span class="db-dd-chip">${esc(drillLabel(c, f))}<button type="button" data-d="ddchip" data-v="${i}" aria-label="Remove ${esc(drillLabel(c, f))}">×</button></span>`).join('')}${ctxChips.map((t) => `<span class="db-dd-chip fixed">${esc(t)}</span>`).join('')}</div>` : ''}
+      <div class="db-dd-sum"><span><b>${rows.length.toLocaleString()}</b> ${esc(rows.length === 1 ? one : items)}${rows.length !== all ? ` of ${all.toLocaleString()}` : ''}</span>${measure}</div>
+    </div>
+    <div class="db-dd-tools"><input id="dd-q" class="in" type="search" placeholder="Search these ${esc(items)}" aria-label="Search these ${esc(items)}" value="${esc(dd.q)}"><span class="grow"></span><button type="button" class="btn" data-d="ddcsv"${rows.length ? '' : ' disabled'}>Export CSV</button></div>
+    <div class="db-dd-body">${rows.length ? `<table class="tbl db-dd-tbl"><thead>${head}</thead><tbody>${body}</tbody>${sumCol.some(Boolean) ? `<tfoot><tr><td>Total · ${rows.length.toLocaleString()}</td>${totals.map((t, i) => `<td class="${numCol[i] ? 'num' : ''}">${esc(t)}</td>`).join('')}</tr></tfoot>` : ''}</table>
+      ${rows.length > shown.length ? `<div class="db-dd-more"><button type="button" class="btn sm" data-d="ddmore">Show ${Math.min(DD_PAGE, rows.length - shown.length)} more</button><span class="help">${(rows.length - shown.length).toLocaleString()} more</span></div>` : ''}`
+      : `<p class="db-dd-none">${dd.q ? 'Nothing matches your search.' : 'No records here.'}</p>`}</div>
+    <div class="db-dd-foot"><span class="help">Click a record to open it. Back brings you here.</span><span class="grow"></span><button type="button" class="btn primary" data-d="ddclose">Done</button></div>
+  </div></div>`;
+}
+
+/** CSV of exactly what the pop-up lists. Text a spreadsheet would run as a formula is defused. */
+function drillCsv() {
+  const dd = D.drill; if (!dd) return;
+  const c = ctx(), form = c.formById(dd.def.form);
+  const { cols, rows } = drillData(c, dd);
+  const q = (v) => { let t = String(v ?? ''); if (/^[=+\-@\t\r]/.test(t) && !/^-?\d+(\.\d+)?$/.test(t)) t = "'" + t; return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const lines = [[titleFieldOf(form)?.label || 'Title', ...cols.map((r) => refLabel(c, r, dd.def.form))].map(q).join(',')];
+  rows.forEach((rec) => lines.push([c.recTitle(rec), ...cols.map((r) => { const f = fieldOf(c, r); const v = valueOf(c, rec, r); return f && kindOf(f) === 'num' && typeof v === 'number' ? v : cellText(c, r, rec); })].map(q).join(',')));
+  const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = (drillTitle(c, dd) + '.csv').replace(/[\\/:*?"<>|]+/g, ' ');
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast(`Downloaded ${rows.length} ${rows.length === 1 ? 'record' : 'records'}`);
+}
+
+/** Which slice of a donut a click landed on (-1 for the hole in the middle). */
+function ringSlice(el, e) {
+  const r = el.getBoundingClientRect();
+  const x = e.clientX - r.left - r.width / 2, y = e.clientY - r.top - r.height / 2;
+  if (Math.hypot(x, y) < r.width * 0.3) return -1;
+  const turn = ((Math.atan2(x, -y) + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI);
+  return String(el.dataset.cuts || '').split(',').map(Number).findIndex((cut) => turn <= cut);
 }
 
 /* ---------- the Reports list ---------- */
@@ -282,6 +459,7 @@ export function viewReport(id) {
   const def = d.def;
   const on = usedOn(dashesVisible(), d.id);
   const { html, caption } = bodyHTML(c, def, {}, 'r:' + d.id);
+  const drillPop = drillHTML('r:' + d.id);
   const typeBtns = TYPES.map(([k, l]) => `<button type="button" class="db-ty${def.type === k ? ' on' : ''}" aria-pressed="${def.type === k}" data-d="type" data-v="${k}"${ro ? ' disabled' : ''}>${l}</button>`).join('');
   return `<div id="dbx" class="db-ed">
   <div class="db-head">
@@ -298,7 +476,7 @@ export function viewReport(id) {
   <div class="db-body">
     <section class="panel db-prev" aria-label="Preview"><div class="db-ph"><h2>${esc(d.name)}</h2><span class="rp-cap">${esc(caption)}</span></div><div class="db-pb db-t-${def.type}">${html}</div></section>
     <aside class="db-side"><fieldset class="fset"${ro ? ' disabled' : ''}>${settingsHTML(c, d)}</fieldset></aside>
-  </div></div>`;
+  </div></div>${drillPop}`;
 }
 
 function addToHTML(d) {
@@ -331,7 +509,10 @@ function settingsHTML(c, d) {
   if (t === 'pivot') h += `<div class="db-sec"><label class="db-lab">Columns</label>${sel('col', groupable.filter((x) => refKey(x.ref) !== refKey(def.group && { form: def.group.form, id: def.group.id }) || x.kind === 'date').map((x) => opt(refKey(x.ref), lab(x), refKey(def.col && { form: def.col.form, id: def.col.id }))).join(''), '')}${bySel('colby', def.col, 'Split by')}</div>`;
   if (t === 'line' || t === 'area') {
     h += `<div class="db-sec"><label class="db-lab">Over time, by</label>${sel('time', dates.map((x) => opt(refKey(x.ref), lab(x), refKey(def.time))).join(''), '')}
-      <div class="db-seg" role="group" aria-label="Interval">${[['week', 'Weeks'], ['month', 'Months']].map(([k, l]) => `<button type="button" class="${(def.interval || 'month') === k ? 'on' : ''}" aria-pressed="${(def.interval || 'month') === k}" data-d="interval" data-v="${k}">${l}</button>`).join('')}</div></div>`;
+      <div class="db-seg" role="group" aria-label="Interval">${[['week', 'Weeks'], ['month', 'Months'], ['quarter', 'Quarters'], ['year', 'Years']].map(([k, l]) => `<button type="button" class="${(def.interval || 'month') === k ? 'on' : ''}" aria-pressed="${(def.interval || 'month') === k}" data-d="interval" data-v="${k}">${l}</button>`).join('')}</div></div>
+      <div class="db-sec"><label class="db-lab" for="db-span">Dates shown</label>${sel('span', [['fit', 'From the first record to the last'], ['last', 'The last ' + ({ week: '26 weeks', month: '12 months', quarter: '8 quarters', year: '5 years' })[def.interval || 'month']], ['custom', 'Choose dates']].map(([k, l]) => opt(k, l, def.span || 'fit')).join(''), '', ' id="db-span"')}
+        ${def.span === 'custom' ? `<div class="db-dates"><label><span class="db-lab">From</span><input class="in" type="date" data-dv="tfrom" value="${esc(def.from || '')}"></label><label><span class="db-lab">To</span><input class="in" type="date" data-dv="tto" value="${esc(def.to || '')}"></label></div><p class="help">Leave one blank to start or end with your records.</p>` : ''}
+        <p class="help">On a dashboard with a period picked (This year, say), the chart shows that period instead.</p></div>`;
   }
   if (t === 'table' || t === 'grouped') {
     const cols = def.columns || [];
@@ -494,8 +675,8 @@ export function viewDashboard(id) {
     ${edit ? `<span class="help">The period you pick here is saved as the dashboard’s starting period.</span>` : ''}
   </div>
   ${edit ? `<div class="db-cvbar"><label class="switch db-float"><input type="checkbox" data-dv="float"${floatUp ? ' checked' : ''}><span class="tr"></span><span>Float items up</span></label><p class="help db-cvhelp">Drag an item by its handle to move it, or drag its bottom-right corner to resize it. Items in the way move down. With a handle focused, arrow keys move the item and Shift + arrow keys resize it.</p></div>` : ''}
-  ${placed.length ? `<div class="db-cv${edit ? ' edit' : ''}" id="db-cv" style="height:${cvH}px"><div class="db-ghost" id="db-ghost" hidden></div>${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
-  </div>`;
+  ${placed.length ? `<div class="db-cv${edit ? ' edit' : ''}${edit ? '' : ' can-drill'}" id="db-cv" style="height:${cvH}px"><div class="db-ghost" id="db-ghost" hidden></div>${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
+  </div>${edit ? '' : drillHTML('d:' + x.id)}`;
 }
 
 function pickerHTML(x) {
@@ -554,7 +735,7 @@ async function newDashboard() {
 /** True while typing in a report or dashboard field, so live data doesn't redraw under the cursor. */
 export function reportBusy() {
   const a = document.activeElement;
-  return !!drag || !!(a && a.closest && a.closest('#dbx') && /^(INPUT|TEXTAREA)$/.test(a.tagName) && a.type !== 'checkbox');
+  return !!drag || !!(a && a.closest && (a.closest('#dbx') || a.closest('#db-dd')) && /^(INPUT|TEXTAREA)$/.test(a.tagName) && a.type !== 'checkbox');
 }
 export function leaveReport() { /* reports save explicitly; app.js guards unsaved changes */ }
 export function forgetDrafts() { D.draft = null; D.rid = null; D.edit = null; D.did = null; D.picker = false; D.confirm = null; }
@@ -573,6 +754,14 @@ document.addEventListener('click', async (e) => {
     case 'openrep': H.go({ name: 'report', reportId: v }); break;
     case 'opendash': H.go({ name: 'dashboard', dashboardId: v }); break;
     case 'openrec': if (!e.target.closest('button')) H.openRecord?.(v); break;
+    case 'drill': openDrill(el.dataset); break;
+    case 'drillring': { const i = ringSlice(el, e); if (i >= 0) openDrill({ k: el.dataset.k, i }); break; }
+    case 'ddclose': if (el.classList.contains('db-dd-scrim') && e.target !== el) return; D.drill = null; repaint(); break;
+    case 'ddchip': if (D.drill) { D.drill.filters.splice(+v, 1); D.drill.shown = DD_PAGE; repaint(); } break;
+    case 'ddsort': if (D.drill) { const i = +v, s0 = D.drill.sort; D.drill.sort = { i, dir: s0 && s0.i === i ? -s0.dir : 1 }; repaint(() => document.querySelector(`#db-dd [data-d="ddsort"][data-v="${i}"]`)?.focus()); } break;
+    case 'ddmore': if (D.drill) { D.drill.shown += DD_PAGE; repaint(); } break;
+    case 'ddcsv': drillCsv(); break;
+    case 'ddrec': H.openRecord?.(v); break;
     case 'newrep': startNewReport(); break;
     case 'tsort': { e.stopPropagation(); const k = el.dataset.k, i = +v; const s = D.sorts[k] || { i: 0, dir: 1 }; D.sorts[k] = { i, dir: s.i === i ? -s.dir : 1 }; repaint(); break; }
     case 'type': changeDef((def) => { def.type = v; }); break;
@@ -641,6 +830,9 @@ document.addEventListener('change', (e) => {
     case 'groupby': changeDef((def) => { if (def.group) def.group = { ...def.group, by: t.value }; }); break;
     case 'colby': changeDef((def) => { if (def.col) def.col = { ...def.col, by: t.value }; }); break;
     case 'time': changeDef((def) => { def.time = refOf(t.value); }); break;
+    case 'span': changeDef((def) => { def.span = t.value; }); break;
+    case 'tfrom': changeDef((def) => { if (t.value) def.from = t.value; else delete def.from; }); break;
+    case 'tto': changeDef((def) => { if (t.value) def.to = t.value; else delete def.to; }); break;
     case 'dateRef': changeDef((def) => { def.dateRef = refOf(t.value); }); break;
     case 'addcol': if (t.value) changeDef((def) => { def.columns = (def.columns || []).concat(refOf(t.value)); }); break;
     case 'compare': changeDef((def) => { def.compare = t.checked; }); break;
@@ -658,6 +850,12 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'dd-q' && D.drill) {
+    D.drill.q = e.target.value; D.drill.shown = DD_PAGE;
+    const at = e.target.selectionStart;
+    repaint(() => { const q = document.getElementById('dd-q'); if (q) { q.focus(); try { q.setSelectionRange(at, at); } catch (err) { /* search inputs */ } } });
+    return;
+  }
   const t = e.target;
   if (t.id === 'db-name' && t.dataset.dv === 'name' && D.draft) { D.draft.name = t.value.slice(0, 120); if (!D.draft.dirty) { D.draft.dirty = true; const b = document.querySelector('[data-d="saverep"]'); if (b) { b.disabled = false; b.textContent = 'Save report'; } } }
 });
@@ -712,6 +910,7 @@ window.addEventListener('pointerup', endDrag);
 window.addEventListener('pointercancel', endDrag);
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && D.drill && document.getElementById('db-dd')) { D.drill = null; repaint(); return; }
   const h = e.target.closest && e.target.closest('#db-cv [data-cv="move"]');
   if (!h || !D.edit || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
   e.preventDefault();

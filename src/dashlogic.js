@@ -60,6 +60,8 @@ export function condHit(ctx, rec, cond) {
 
 /** The date field the dashboard's period applies to. */
 export function dateRefOf(ctx, def) {
+  // a chart over time follows its own date axis
+  if (['line', 'area'].includes(def.type) && def.time && fieldOf(ctx, def.time)) return def.time;
   if (def.dateRef && fieldOf(ctx, def.dateRef)) return def.dateRef;
   if (def.time && fieldOf(ctx, def.time)) return def.time;
   const form = ctx.formById(def.form);
@@ -201,16 +203,60 @@ export function groupRows(ctx, def, ref, list) {
   return ordered.map((k) => ({ key: k, rows: m.get(k), value: totals.get(k) }));
 }
 
-/** Bar and donut: at most `max` groups, the rest folded into "Other". */
+/**
+ * Bar and donut: [{ key, value, keys }]. At most `max` groups, the rest folded into "Other",
+ * whose value is worked out from all of its records (an average of averages would be wrong).
+ * A bar chart split by a number or a date keeps up to 60 bars in order instead of folding.
+ * keys: the group keys a slice stands for (several for "Other"), for drilling into it.
+ */
 export function slicesOf(ctx, def, list, max = 8) {
-  let items = groupRows(ctx, def, def.group, list).map(({ key, value }) => ({ key, value }));
+  const f = fieldOf(ctx, def.group);
+  const ordered = !!f && (kindOf(f) === 'num' || isDateField(f));
+  let items = groupRows(ctx, def, def.group, list).map(({ key, value, rows }) => ({ key, value, rows, keys: [key] }));
   const notOne = (def.conditions || []).filter((c) => c.op === 'not' && sameRef(c.ref, def.group)).map((c) => String(c.value));
   if (notOne.length) items = items.filter((x) => !notOne.includes(x.key));
-  if (items.length > max) {
-    const rest = items.slice(max - 1);
-    items = items.slice(0, max - 1).concat([{ key: 'Other (' + rest.length + ')', value: rest.reduce((a, b) => a + b.value, 0), other: true }]);
+  const cap = ordered && def.type === 'bar' ? Math.max(max, 60) : max;
+  if (items.length > cap) {
+    const rest = items.slice(cap - 1);
+    const rows = [...new Set(rest.flatMap((x) => x.rows))];
+    items = items.slice(0, cap - 1).concat([{ key: 'Other (' + rest.length + ')', value: measureOf(ctx, def, rows) || 0, rows, keys: rest.map((x) => x.key), other: true }]);
   }
-  return items;
+  return items.map(({ rows, ...x }) => x);
+}
+
+/* ---------- drilling into a number ---------- */
+
+/** The records a report's number is worked out from (a KPI compared with last month uses this month). */
+export function baseRows(ctx, def, extra = {}, now = Date.now()) {
+  if (def.type === 'kpi' && def.compare && !extra.range) {
+    const r = periodRange('month', now);
+    return rowsFor(ctx, def, { ...extra, range: { from: r.from, to: r.to } });
+  }
+  return rowsFor(ctx, def, extra);
+}
+
+/** Does a record fall under a drill filter? { ref, keys } (a group, or several) or { ref, from, to } (a stretch of time). */
+export function drillHit(ctx, rec, flt) {
+  const f = fieldOf(ctx, flt.ref);
+  if (!f) return true;
+  const v = valueOf(ctx, rec, flt.ref);
+  if (flt.from != null) { const t = timeOf(v); return t != null && t >= flt.from && t < flt.to; }
+  return groupKeys(ctx, f, v, flt.ref).some(({ k }) => flt.keys.includes(k));
+}
+
+/** The records behind one bar, slice, point, pivot cell or KPI. */
+export function drillRows(ctx, def, extra, filters, now = Date.now()) {
+  return baseRows(ctx, def, extra, now).filter((r) => filters.every((flt) => drillHit(ctx, r, flt)));
+}
+
+/** "Stage is Done", "Date in Oct 2026", "Invoice # is one of 5" */
+export function drillLabel(ctx, flt) {
+  const f = fieldOf(ctx, flt.ref);
+  const name = f ? f.label : 'Value';
+  if (flt.from != null) return `${name} in ${flt.text}`;
+  const keys = flt.keys || [];
+  if (keys.length > 1) return `${name} is one of ${keys.length}`;
+  return (f && isDateField(f) ? `${name} in ` : `${name} is `) + (keys[0] ?? '');
 }
 
 /** Pivot: rows × columns of the measure, with totals. */
@@ -282,7 +328,9 @@ export function normalizeDef(ctx, def0) {
   }
   if (['line', 'area'].includes(t)) {
     if (!fieldOf(ctx, def.time)) { const own = fields.find((x) => x.kind === 'date' && !x.f.system && x.ref.form === def.form); def.time = own ? own.ref : { form: def.form, id: '_created' }; }
-    def.interval = def.interval === 'week' ? 'week' : 'month';
+    def.interval = ['week', 'month', 'quarter', 'year'].includes(def.interval) ? def.interval : 'month';
+    def.span = ['fit', 'last', 'custom'].includes(def.span) ? def.span : 'fit';
+    ['from', 'to'].forEach((k) => { if (!(typeof def[k] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(def[k]))) delete def[k]; });
   }
   if (['table', 'grouped'].includes(t)) { def.columns = (def.columns || []).filter((r) => fieldOf(ctx, r)); if (!def.columns.length) def.columns = defaultColumns(ctx, def.form); }
   return def;

@@ -6,7 +6,7 @@ import './grids.css';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
-import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts } from './dash.js';
+import { initReports, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts, drillNav } from './dash.js';
 import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey } from './tasks.js';
@@ -139,6 +139,7 @@ export function go(v,push=true){
   if(view.name==='report')leaveReport();
   if((view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId)))forgetDrafts();
   if(v.name==='record'||v.name==='records')cdraft=null;
+  drillNav(v);
   if(push&&view.name!=='loading')hist.push(view);
   view=v;closeMenu();syncHash();
   if(v.name==='records'){ui.search='';}

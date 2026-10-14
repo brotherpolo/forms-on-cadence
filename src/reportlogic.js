@@ -184,23 +184,58 @@ export function groupsOf(ctx, w, list) {
 }
 
 /** Buckets ending at `now`: the last 26 weeks (Monday starts) or 12 months. */
-export function bucketsOf(ctx, w, list, now) {
-  const weeks = (w.interval || 'week') === 'week';
-  const n = weeks ? 26 : 12;
-  const end = new Date(now);
-  const out = [];
-  for (let i = n - 1; i >= 0; i--) {
-    let a, b, d;
-    if (weeks) {
-      d = new Date(end); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - i * 7);
-      a = d.getTime(); const e = new Date(d); e.setDate(e.getDate() + 7); b = e.getTime();
-    } else {
-      d = new Date(end.getFullYear(), end.getMonth() - i, 1); a = d.getTime(); b = new Date(end.getFullYear(), end.getMonth() - i + 1, 1).getTime();
-    }
-    const rs = list.filter((r) => { const t = timeOf(valueOf(ctx, r, w.time)); return t !== null && t >= a && t < b; });
-    out.push({ start: a, date: d, value: measureOf(ctx, w, rs) || 0 });
-  }
-  return out;
+export const INTERVALS = ['week', 'month', 'quarter', 'year'];
+export const MAX_BUCKETS = 400;
+const LAST_N = { week: 26, month: 12, quarter: 8, year: 5 };
+
+/** The start of the week (Monday), month, quarter or year a moment falls in, and the next one. */
+export function periodStart(t, iv) {
+  const d = new Date(t), y = d.getFullYear(), m = d.getMonth();
+  if (iv === 'week') return new Date(y, m, d.getDate() - ((d.getDay() + 6) % 7)).getTime();
+  if (iv === 'quarter') return new Date(y, m - (m % 3), 1).getTime();
+  if (iv === 'year') return new Date(y, 0, 1).getTime();
+  return new Date(y, m, 1).getTime();
+}
+export function periodNext(t, iv, k = 1) {
+  const d = new Date(t), y = d.getFullYear(), m = d.getMonth();
+  if (iv === 'week') return new Date(y, m, d.getDate() + 7 * k).getTime();
+  if (iv === 'quarter') return new Date(y, m + 3 * k, 1).getTime();
+  if (iv === 'year') return new Date(y + k, 0, 1).getTime();
+  return new Date(y, m + k, 1).getTime();
+}
+
+/**
+ * A chart over time: one bucket per week, month, quarter or year, with the measure of the
+ * records in it: [{ start, end, date, value }].
+ * Which stretch of time it covers:
+ *   range given (a dashboard's period) -> that period
+ *   w.span 'custom'                    -> w.from .. w.to (either may be blank: the records' first or last date)
+ *   w.span 'fit'                       -> the first to the last date in the records
+ *   otherwise ('last')                 -> the last 26 weeks, 12 months, 8 quarters or 5 years
+ * At most MAX_BUCKETS, keeping the most recent.
+ */
+export function bucketsOf(ctx, w, list, now, range) {
+  const iv = INTERVALS.includes(w.interval) ? w.interval : 'week';
+  const times = list.map((r) => timeOf(valueOf(ctx, r, w.time)));
+  const known = times.filter((t) => t != null);
+  const lo = known.length ? Math.min(...known) : null, hi = known.length ? Math.max(...known) : null;
+  let from = null, to = null;
+  if (range) { from = range.from; to = Math.min(range.to - 1, Math.max(now, range.from)); }
+  else if (w.span === 'custom') { from = w.from ? timeOf(w.from) : lo; to = w.to ? timeOf(w.to) + 864e5 - 1 : hi; }
+  else if (w.span === 'fit') { from = lo; to = hi; }
+  if (from == null || to == null || from > to) { to = now; from = periodNext(periodStart(now, iv), iv, -(LAST_N[iv] - 1)); }
+  const starts = [];
+  for (let s = periodStart(from, iv); s <= to && starts.length < 20000; s = periodNext(s, iv)) starts.push(s);
+  const keep = starts.slice(-MAX_BUCKETS);
+  const out = keep.map((s) => ({ start: s, end: periodNext(s, iv), date: new Date(s), rows: [] }));
+  list.forEach((r, i) => {
+    const t = times[i];
+    if (t == null || !out.length || t < out[0].start || t >= out[out.length - 1].end) return;
+    let a = 0, b = out.length - 1;
+    while (a < b) { const mid = (a + b + 1) >> 1; if (out[mid].start <= t) a = mid; else b = mid - 1; }
+    out[a].rows.push(r);
+  });
+  return out.map(({ rows, ...x }) => ({ ...x, value: measureOf(ctx, w, rows) || 0 }));
 }
 
 /** A round step for axis gridlines. */
