@@ -41,6 +41,7 @@ export const store = {
   dashReady: false,
   listViewsReady: false,
   imports: [], // admins: past imports, newest first
+  automations: [], automationsError: null, // admins: Administration → Automations
   recordsLoading: new Set(),
   onChange: () => {},
   onError: () => {},
@@ -201,6 +202,17 @@ function syncAdminSubs() {
     );
     adminUnsubs.push(
       onSnapshot(
+        collection(db, 'automations'),
+        (s) => {
+          store.automations = s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          store.automationsError = null;
+          changed();
+        },
+        (err) => { store.automationsError = err?.code || 'error'; changed(); } // e.g. the security rules aren't deployed yet
+      )
+    );
+    adminUnsubs.push(
+      onSnapshot(
         collection(db, 'users'),
         (s) => {
           store.users = s.docs.map((d) => ({ ...d.data(), id: d.id }));
@@ -215,6 +227,7 @@ function syncAdminSubs() {
     store.groups = [];
     store.users = [];
     store.imports = [];
+    store.automations = [];
   }
 }
 
@@ -525,6 +538,24 @@ export async function autoCounter(formId, fieldId) {
 export async function emailRecord(mail) {
   return (await httpsCallable(fns(), 'emailRecord')(mail)).data;
 }
+/* ---------- Automations (admins) ---------- */
+export async function saveAutomation(id, data) {
+  const me = store.user.uid, now = Date.now();
+  const old = store.automations.find((a) => a.id === id);
+  await setDoc(doc(db, 'automations', id), plain({ ...data, createdBy: old?.createdBy || me, createdAt: old?.createdAt || now, updatedAt: now, updatedBy: me }));
+}
+export async function setAutomationOn(id, on) { await updateDoc(doc(db, 'automations', id), { on: !!on, updatedAt: Date.now(), updatedBy: store.user.uid }); }
+export async function deleteAutomation(id) { await deleteDoc(doc(db, 'automations', id)); }
+/** The latest runs of one automation, newest first. */
+export async function loadRuns(id, n = 25) {
+  const s = await getDocs(query(collection(db, 'automations', id, 'runs'), orderBy('at', 'desc'), limit(n)));
+  return s.docs.map((d) => ({ ...d.data(), id: d.id }));
+}
+/** Test run: what an automation would do to one record (nothing is changed). */
+export async function testAutomation(automation, recordId) {
+  return (await httpsCallable(fns(), 'automationTest')({ automation, recordId })).data;
+}
+
 /** Live list of what's been emailed from a record, newest first. Returns an unsubscribe function. */
 export function watchEmails(recordId, onNext, onError) {
   return onSnapshot(collection(db, 'records', recordId, 'emails'), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.at || 0) - (a.at || 0))), onError || (() => onNext([])));

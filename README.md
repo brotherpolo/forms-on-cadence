@@ -86,7 +86,11 @@ src/
   exportset.js             Administration → PDF exports: company name and logo
   duplogic.js              Duplicate: which values a copy keeps (pure, unit-tested)
   rules.js                 Show/hide rules: conditions, what's hidden, required or cleared, clashes, effect on saved records (pure, unit-tested)
-  rulesui.js               Form designer → Rules tab: building rules with clicks
+  rulesui.js               Form designer → Rules tab: building rules with clicks (its condition builder is reused by automations)
+  autologic.js             Automations: wording and checks (pure, unit-tested)
+  autos.js                 Administration → Automations: list, editor, Test run, run history
+  server/recordkit.js      What the server needs to read records like the app: field text, calculations, rules, the PDF model (pure, unit-tested)
+  server/entry.js          Bundled with pdfdraw.js, rules.js and emaillogic.js into the Cadence functions as fwkit.cjs
   photo.js                 Smaller photos: turns photos upright and scales them down before upload
   app.js                   Navigation, record screens, form designer
   admin.js                 Security groups and users screens (admins only)
@@ -99,6 +103,7 @@ firebase.json, .firebaserc Firebase CLI config: Hosting only, project tasks-2ae9
 .env.example               Web app settings to copy into .env.local
 tests/unit/                Formula and permission tests (node --test)
 scripts/make-admin.mjs     Promote a user to administrator
+scripts/build-fwkit.mjs    Rebuild the Cadence functions' copy of the record kit: node scripts/build-fwkit.mjs ../cadence/functions/fwkit.cjs
 .github/workflows/deploy.yml  Test on every PR; deploy Hosting on push to main
 
 Security rules, Storage rules, indexes and their tests live in the Cadence folder.
@@ -238,6 +243,25 @@ Each form's list can be set up from the list itself.
 - **Phones:** the list shows cards with tick boxes, and menus open as a sheet at the bottom.
 
 A view only decides how the list looks. It never shows anyone records they couldn't already see.
+
+## Automations (administrators)
+
+**Administration → Automations**: "when this happens, do that", for one form each. They run on the server (Cadence `functions/automate.js`), so they work whatever changed a record (the app on any device, an import, Set field, another automation) and on dates when nobody is signed in. Stored in `automations/{id}`; admins only (security rules).
+
+- **When:** a record is **created**; **changes** (any field, a chosen field, or a field *becoming* a value: "Status becomes Approved", which fires only when it wasn't before); **reaches a date** (on a date field, or N days before or after it, checked at 7:00 a.m. Toronto time, once per record per day); or is **emailed** with Email PDF.
+- **Only if:** conditions built with the same click builder as show/hide rules, including the parent record's fields. None means always.
+- **Then** (up to 10 actions, in order):
+  - **Set fields** on the record or its parent: a value, today, a copy of another field, or empty. Fields already as wanted aren't written (so nothing loops).
+  - **Create a Cadence task** linked to the record: title and notes with `{Field}` placeholders, for the record's owner, whoever made the change, or a chosen person, due in N days. The admin who made the automation owns it; the assignee needs Cadence switched on to see it.
+  - **Send an email** from the company Gmail (the Email PDF setup): to email fields on the record or its parent, the owner, chosen people and typed addresses; subject and message with placeholders; optionally **with the record's PDF**, made on the server with each section's standard columns. Listed under the record's Sent emails and in the audit trail.
+  - **Create a child record** under the record, copying matching fields if wanted, plus chosen values.
+- **Placeholders:** `{Field name}`, a parent's field as `{Client › Name}`, and `{Title}`, `{Item}`, `{Company}`, `{Date}`.
+- **Safety:** an automation never reacts to its own change; changes made by automations can set off others up to 3 in a row, then it stops and the run log says so. Each automation has an On/Off switch, a **Test run** on a chosen record (what it would do, nothing changed or sent), and a **Run history** (each run, what it did, errors). Everything it changes is in the audit trail as "Automation: name"; records show "edited by an automation".
+- **Imports and Set field** count as changes; the import check step says how many automations may run.
+- **Not covered by automations:** show/hide rules aren't applied to values an automation sets (the record follows its rules next time it's saved), and calculations are worked out when the record is shown.
+- **Server code from Formwright:** the functions use `fwkit.cjs`, a bundle of `src/server/`, `formulas.js`, `rules.js`, `pdfdoc.js`/`pdfdraw.js` and `emaillogic.js`, plus `functions/vendor/pdf-lib.min.js`. After changing those, run `node scripts/build-fwkit.mjs ../cadence/functions/fwkit.cjs` and deploy the functions.
+
+**Email PDF** also has an **Attach the PDF** switch (on by default); off sends just the message.
 
 ## Show and hide rules
 

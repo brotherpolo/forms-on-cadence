@@ -145,3 +145,38 @@ body.pd-on .pgrip{cursor:grabbing}
 .ra-dlg p{margin:0}
 .ra-list{margin:0;padding-left:20px}
 .ra-sub{margin:4px 0 0!important}
+/* Administration → Automations (autos.js) */
+.am-card.off{opacity:.65}
+.am-say{display:block;margin:2px 0 4px;font-size:13px;overflow-wrap:anywhere}
+.am-warn{padding:10px 14px;font-size:14px;border-color:var(--warn,#a15c00)}
+.am-warn ul{margin:4px 0 0;padding-left:18px}
+.am-sentence{margin:-4px 0 12px;color:var(--muted);font-style:italic;font-size:14px;overflow-wrap:anywhere}
+.am-cols{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.am-main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px}
+.am-side{flex:1 1 300px;min-width:0;max-width:100%;display:flex;flex-direction:column;gap:12px;position:sticky;top:12px}
+.am-sec{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.am-sec .dz-h{margin:0}
+.am-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.am-lab{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.am-sel{width:auto;max-width:100%;min-height:36px}
+.am-num{width:90px}
+.am-v{width:auto;min-width:140px;min-height:36px}
+.am-acts{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.am-act{padding:12px 14px;display:flex;flex-direction:column;gap:8px;width:100%;box-sizing:border-box}
+.am-acth{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.am-acth .grow{flex:1}
+.am-set{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.am-f{display:flex;flex-direction:column;gap:4px}
+.am-people summary{cursor:pointer;font-size:13px;color:var(--muted);margin:4px 0}
+.am-tips code{font-size:12px;background:var(--sunk);padding:1px 4px;border-radius:4px}
+.am-out{font-size:14px}
+.am-out p{margin:4px 0}
+.am-out ul{margin:0;padding-left:18px}
+.am-out .muted{color:var(--muted)}
+.am-runs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:13px;max-height:420px;overflow:auto}
+.am-runs > li{border-left:3px solid var(--ok,#1f8a4c);padding-left:8px}
+.am-runs > li.bad{border-left-color:var(--danger)}
+.am-runs ul{margin:2px 0 0;padding-left:16px}
+.am-runs .err{color:var(--danger)}
+.am-rw{color:var(--muted)}
+@media (max-width:640px){.am-side{position:static}.am-v,.am-sel{flex:1 1 100%}}

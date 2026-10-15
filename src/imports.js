@@ -289,6 +289,7 @@ function stepCheck(form) {
       <div class="im-foot">
         <label class="im-chk"><input type="checkbox" data-imc="skip"${IM.skip ? ' checked' : ''}>Skip rows that still have problems</label>
         ${(() => { const fx = rulesEffect(form); if (!fx) return ''; const labels = new Map((form.fields || []).map((x) => [x.id, x.label])); return `<p class="help im-rulesnote"><span class="im-tag rule">Rules</span> The form’s show and hide rules empty ${fx.vals.toLocaleString()} value${fx.vals === 1 ? '' : 's'} on ${fx.rows.toLocaleString()} row${fx.rows === 1 ? '' : 's'} as they’re saved: ${esc([...fx.per].map(([id, n]) => `${labels.get(id) || 'Field'} (${n})`).join(', '))}. Undoing the import puts them back too.</p>`; })()}
+        ${(() => { const n = (store.automations || []).filter((a) => a.on && a.formId === form.id && ['created', 'changed'].includes(a.trigger?.type)).length; return n ? `<p class="help im-rulesnote"><span class="im-tag rule">Automations</span> ${n} automation${n === 1 ? '' : 's'} on ${esc(lower(form.name))} may run for the imported rows, as if they’d been saved by hand.</p>` : ''; })()}
         <span class="help im-foothelp">${s.same ? `${s.same} row${s.same === 1 ? ' has' : 's have'} no changes and will be left alone. ` : ''}Skipped rows can be downloaded afterwards to fix and import again.</span>
         <div class="im-acts im-right"><button type="button" class="btn" data-im="back-map">Back</button>
         <button type="button" class="btn primary" data-im="run"${blocked ? ' disabled' : ''}>${esc(goText)}</button></div>

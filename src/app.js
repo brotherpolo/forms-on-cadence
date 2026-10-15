@@ -31,13 +31,14 @@ import { fieldItem, fileName as pdfFileName } from './pdfdoc.js';
 import { copyValues, relinkRow } from './duplogic.js';
 import { shrinkPhoto } from './photo.js';
 import { evaluate as evalRules, toClear, withoutCleared, NO_RULES, holdsValue, pruneRules, impactOf, sameRules } from './rules.js';
+import { initAutos } from './autos.js';
 import { initRules, viewRules, rulesClick, rulesChange, parentUse, rulesCtx } from './rulesui.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
 import { signOutUser } from './auth.js';
 import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
 import examples from './examples.json';
 
-const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'import', 'imports', 'exports', 'audit']);
+const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'import', 'imports', 'exports', 'audit', 'automations', 'automation']);
 
 // other words people search field types by
 const TYPE_WORDS={text:'short single line string name title',textarea:'long paragraph notes description multi line memo comments',email:'mail address',phone:'telephone mobile cell number',url:'website link web address',location:'address map gps place',number:'integer whole count quantity',decimal:'float number fraction',currency:'money price cost dollar amount',percent:'percentage rate',rating:'stars score',range:'slider scale',formula:'calculation calculated computed formula sum total',autonumber:'auto number automatic sequence serial counter invoice id reference numbering',date:'day calendar',time:'clock hour',datetime:'timestamp date time when',checkbox:'yes no toggle boolean switch tick check',select:'dropdown choice pick list menu options',radio:'single choice option buttons one of',multiselect:'multiple choice checkboxes tags many',file:'upload attachment document pdf',image:'photo picture camera',signature:'sign autograph',color:'colour',relation:'link to record lookup reference relationship connect',heading:'section heading title divider group fold'};
@@ -387,6 +388,7 @@ function renderSide(){
     <button class="nav${view.name==='users'?' on':''}" data-act="nav-users"><span class="glyph navg">☺</span><span class="t">Users</span><span class="n">${store.users.length}</span></button>
     <button class="nav${view.name==='imports'?' on':''}" data-act="nav-imports"><span class="glyph navg">⇪</span><span class="t">Import history</span><span class="n">${store.imports.length}</span></button>
     <button class="nav${view.name==='exports'?' on':''}" data-act="nav-exports"><span class="glyph navg">⇩</span><span class="t">PDF exports</span></button>
+    <button class="nav${view.name==='automations'||view.name==='automation'?' on':''}" data-act="nav-automations"><span class="glyph navg">↯</span><span class="t">Automations</span><span class="n">${store.automations.filter(a=>a.on).length||''}</span></button>
     <button class="nav${view.name==='audit'?' on':''}" data-act="nav-audit"><span class="glyph navg">⌕</span><span class="t">Audit trail</span></button>`:''}
     <div class="side-foot"><div class="who"><b>${esc(name)}</b><span>${adm?'Administrator':'Member'}</span></div>${themeButton()}<button class="btn sm ghost" data-act="sign-out">Sign out</button></div>`;
   if(fsFocus!=null){const q=$('#fs-q');if(q){q.focus({preventScroll:true});try{q.setSelectionRange(fsFocus,fsFocus)}catch(e){}paintFormResults();}}
@@ -576,7 +578,7 @@ function viewRecord(form){
   ${cellPopup()}${ui.mail&&ui.mail.rec===rec?.id?mailDialog(form,rec):''}${ui.cascade&&ui.cascade.parentId===rec?.id?cascadeDialog():''}`;
 }
 
-const personName=id=>store.profiles[id]?.displayName||(id===store.user?.uid?'you':'someone');
+const personName=id=>String(id||'').startsWith('auto:')?'an automation':store.profiles[id]?.displayName||(id===store.user?.uid?'you':'someone');
 const when=t=>new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
 function recordMeta(rec){
   const by=rec.ownerId===store.user?.uid?'you':personName(rec.ownerId);
@@ -616,7 +618,7 @@ async function openMail(){
   const brand=await getExportSettings();
   const ctx={field:l=>fieldTextByLabel(form,rec,l),title:recTitle(rec,form),form:form.name,item:itemName(form),company:brand.companyName||'',sender:realName(store.user?.uid),date:longDate(Date.now())};
   const sugg=emailSuggestions(rec,{formById,recById,records:store.records,recTitle});
-  ui.mail={rec:rec.id,sugg,to:new Set(sugg.slice(0,1).map(x=>x.email)),extra:'',cc:'',copyMe:true,
+  ui.mail={rec:rec.id,sugg,to:new Set(sugg.slice(0,1).map(x=>x.email)),extra:'',cc:'',copyMe:true,attach:true,
     subject:fillTemplate((form.emailSubject||'').trim()||(ctx.company?DEFAULT_SUBJECT:'{Item} {Title}'),ctx).trim(),
     message:fillTemplate((form.emailMessage||'').trim()||(ctx.company?DEFAULT_MESSAGE:DEFAULT_MESSAGE.replace('\n{Company}','')),ctx),busy:false,company:ctx.company};
   renderMain();
@@ -636,7 +638,8 @@ function mailDialog(form,rec){
     <label class="switch mail-copy"><input type="checkbox" data-mail="copyMe"${m.copyMe?' checked':''}><span class="tr"></span><span>Send me a copy${me?' ('+esc(me)+')':''}</span></label>
     <label class="mail-l"><span class="mlab">Subject</span><input class="in" data-mail="subject" value="${esc(m.subject)}" maxlength="200"></label>
     <label class="mail-l"><span class="mlab">Message</span><textarea class="in" data-mail="message" rows="8" maxlength="10000">${esc(m.message)}</textarea></label>
-    <p class="mail-att"><span aria-hidden="true">📎</span> ${esc(file)}</p>
+    <label class="switch mail-copy"><input type="checkbox" data-mail="attach"${m.attach?' checked':''}><span class="tr"></span><span>Attach the PDF</span></label>
+    ${m.attach?`<p class="mail-att"><span aria-hidden="true">📎</span> ${esc(file)}</p>`:''}
     <p class="help">Sent from your Gmail${m.company?' as '+esc(m.company):''}. Replies come to you, and it’s listed under Sent emails on this ${esc(itemName(form).toLowerCase())}.</p>
     </fieldset>
     <div class="lv-dlgacts"><button type="button" class="btn ghost" data-act="mail-cancel"${m.busy?' disabled':''}>Cancel</button><button type="button" class="btn primary" data-act="mail-send"${m.busy?' disabled':''}>${m.busy?'Sending…':'Send'}</button></div>
@@ -654,10 +657,14 @@ async function sendMail(){
   if(!m.subject.trim()){toast('Add a subject.');return;}
   m.busy=true;renderMain();
   try{
-    const {makeRecordPdf,toBase64}=await import('./pdfexport.js');
-    const pdf=await makeRecordPdf(pdfModel(form,rec));
-    if(pdf.bytes.length>8*1024*1024)throw Object.assign(new Error('The PDF is over 8 MB, too big to email.'),{code:'local'});
-    await emailRecord({recordId:rec.id,to,cc:cc.ok,copyMe:m.copyMe,subject:m.subject.trim(),message:m.message,pdf:toBase64(pdf.bytes),fileName:pdf.name});
+    let pdf={missing:0};
+    if(m.attach){
+      const {makeRecordPdf,toBase64}=await import('./pdfexport.js');
+      pdf=await makeRecordPdf(pdfModel(form,rec));
+      if(pdf.bytes.length>8*1024*1024)throw Object.assign(new Error('The PDF is over 8 MB, too big to email.'),{code:'local'});
+      pdf.b64=toBase64(pdf.bytes);
+    }
+    await emailRecord(m.attach?{recordId:rec.id,to,cc:cc.ok,copyMe:m.copyMe,subject:m.subject.trim(),message:m.message,pdf:pdf.b64,fileName:pdf.name}:{recordId:rec.id,to,cc:cc.ok,copyMe:m.copyMe,subject:m.subject.trim(),message:m.message,attach:false});
     ui.mail=null;
     toast(`Emailed to ${to.join(', ')}${pdf.missing?` (${pdf.missing} picture${pdf.missing>1?'s':''} couldn’t be included)`:''}`);
   }catch(e){
@@ -1686,6 +1693,7 @@ document.addEventListener('click',async e=>{
     case 'nav-users':go({name:'users'});break;
     case 'nav-imports':go({name:'imports'});break;
     case 'nav-audit':go({name:'audit'});break;
+    case 'nav-automations':go({name:'automations'});break;
     case 'rec-duplicate':{
       const rec=view.recordId?recById(view.recordId):null,form=rec?formById(rec.formId):null;
       if(!rec||!form||!canCreate(store.me,form.id))return;
@@ -1867,6 +1875,7 @@ document.addEventListener('input',e=>{
 document.addEventListener('change',async e=>{
   if(ui.mail&&e.target.dataset?.mailto){const v=e.target.dataset.mailto;if(e.target.checked)ui.mail.to.add(v);else ui.mail.to.delete(v);return;}
   if(ui.mail&&e.target.dataset?.mail==='copyMe'){ui.mail.copyMe=e.target.checked;return;}
+  if(ui.mail&&e.target.dataset?.mail==='attach'){ui.mail.attach=e.target.checked;renderMain();return;}
   {const t0=e.target,fid=rdraft?.formId;
    if(fid&&t0.dataset?.subcol){const k=t0.dataset.subcol,c=subCols(fid,k);if(c){saveSub(fid,k,{cols:subToggle(c.cur,t0.dataset.v,{min:c.min})});renderMain();document.querySelector(`[data-subcol="${CSS.escape(k)}"][data-v="${CSS.escape(t0.dataset.v)}"]`)?.focus({preventScroll:true});}return;}
    if(fid&&t0.dataset?.subshow){const v=t0.value==='all'?'all':Number(t0.value);saveSub(fid,t0.dataset.subshow,{show:v});renderMain();document.querySelector(`[data-subshow="${CSS.escape(t0.dataset.subshow)}"]`)?.focus({preventScroll:true});return;}
@@ -2101,6 +2110,7 @@ export function startApp(){
   initLists({ruleImpact,applyRuleChange,fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,withFormulas,search:()=>ui.search});
   initAudit({fmt,formById,recById,recTitle:(r,f)=>recTitle(r,f),go,renderMain});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
+  initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});
   initRules({formById,recById,parentsOf,recordsOf,recTitle,setFdirty,renderMain,ui:()=>ui});
   initImports({ruleClears:(form,r)=>toClear(form,r.values,rulesOf(form,r,r.parentId?recById(r.parentId):null)),fmt,recTitle,formById,go,renderMain,computeFormulas:(form,rec)=>{const out={};(form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,rec);out[f.id]=r.e?null:r.v;});return out;}});
   Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false,dzq:''});

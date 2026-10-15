@@ -79,14 +79,21 @@ function actRow(ctx, a, ri, ai) {
     <span class="rl-tgts">${chips}${more}</span><button type="button" class="ibtn rl-x" data-rl="dela" ${at} aria-label="Remove this action">✕</button></div>`;
 }
 
-function ruleCard(ctx, r, ri, n, msgs) {
-  const mine = msgs.filter((m) => m.ruleId === r.id);
+/** The "when" part of a rule: conditions, groups and the buttons to add them (also used by automations). */
+export function condsHTML(ctx, r, ri, { label = 'When', words = ['all of these are true', 'any of these is true'], empty = 'Add a condition: which field, and what it should be.' } = {}) {
   const conds = (r.conds || []).map((c, ci) => {
     if (!c.group) return condRow(ctx, c, ri, ci);
     return `<div class="rl-group"><div class="rl-gh">${joinPick(c.join, `data-r="${ri}" data-c="${ci}" data-rlj="g"`, ['All of these', 'Any of these'])}<button type="button" class="btn sm ghost" data-rl="addc" data-r="${ri}" data-c="${ci}">+ Condition</button><button type="button" class="ibtn rl-x" data-rl="delc" data-r="${ri}" data-c="${ci}" aria-label="Remove this group">✕</button></div>
       ${(c.conds || []).map((x, gi) => condRow(ctx, x, ri, ci, gi)).join('') || '<p class="help">Add a condition to this group.</p>'}</div>`;
   }).join('');
   const nc = (r.conds || []).reduce((s, c) => s + (c.group ? (c.conds || []).length : 1), 0);
+  return `<div class="rl-when"><span class="rl-lab">${esc(label)}</span>${(r.conds || []).length > 1 ? joinPick(r.join, `data-r="${ri}" data-rlj="r"`, words) : ''}</div>
+    <div class="rl-conds">${conds || `<p class="help">${esc(empty)}</p>`}</div>
+    <div class="rl-adds">${nc < MAX_CONDS ? `<button type="button" class="btn sm" data-rl="addc" data-r="${ri}">+ Condition</button><button type="button" class="btn sm ghost" data-rl="addg" data-r="${ri}" title="Several conditions together, like (A and B) or C">+ Group</button>` : ''}</div>`;
+}
+
+function ruleCard(ctx, r, ri, n, msgs) {
+  const mine = msgs.filter((m) => m.ruleId === r.id);
   return `<article class="panel rl-card${r.off ? ' off' : ''}" data-rlid="${esc(r.id)}">
     <header class="rl-h"><b>Rule ${ri + 1}</b><span class="rl-fire" data-rlfire="${esc(r.id)}" hidden>Applies now</span><span class="grow"></span>
       <label class="switch rl-on"><input type="checkbox" data-rl="toggle" data-r="${ri}"${r.off ? '' : ' checked'}><span class="tr"></span><span>${r.off ? 'Off' : 'On'}</span></label>
@@ -94,9 +101,7 @@ function ruleCard(ctx, r, ri, n, msgs) {
       <button type="button" class="ibtn" data-rl="move" data-r="${ri}" data-dir="1" aria-label="Move rule ${ri + 1} down"${ri === n - 1 ? ' disabled' : ''}>↓</button>
       <button type="button" class="btn sm ghost" data-rl="dup" data-r="${ri}">Duplicate</button>
       <button type="button" class="btn sm danger${H.ui().confirm === 'rl-' + r.id ? ' armed' : ''}" data-rl="del" data-r="${ri}">${H.ui().confirm === 'rl-' + r.id ? 'Tap again to delete' : 'Delete'}</button></header>
-    <div class="rl-when"><span class="rl-lab">When</span>${(r.conds || []).length > 1 ? joinPick(r.join, `data-r="${ri}" data-rlj="r"`, ['all of these are true', 'any of these is true']) : ''}</div>
-    <div class="rl-conds">${conds || '<p class="help">Add a condition: which field, and what it should be.</p>'}</div>
-    <div class="rl-adds">${nc < MAX_CONDS ? `<button type="button" class="btn sm" data-rl="addc" data-r="${ri}">+ Condition</button><button type="button" class="btn sm ghost" data-rl="addg" data-r="${ri}" title="Several conditions together, like (A and B) or C">+ Group</button>` : ''}</div>
+    ${condsHTML(ctx, r, ri)}
     <div class="rl-when"><span class="rl-lab">Then</span></div>
     <div class="rl-acts">${(r.acts || []).map((a, ai) => actRow(ctx, a, ri, ai)).join('')}</div>
     <div class="rl-adds"><button type="button" class="btn sm" data-rl="adda" data-r="${ri}">+ Action</button></div>
@@ -135,12 +140,14 @@ function condAt(f, el) {
   if (el.dataset.g != null && c.group) return { r, c: c.conds?.[+el.dataset.g], list: c.conds, i: +el.dataset.g };
   return { r, c, list: r.conds, i: +el.dataset.c };
 }
+let onDirty = null; // who to tell about a change: the form designer, or the automation editor
 function changed(focusSel) {
-  H.setFdirty(); H.renderMain();
+  (onDirty || H.setFdirty)(); H.renderMain();
   if (focusSel) setTimeout(() => document.querySelector(focusSel)?.focus({ preventScroll: true }), 0);
 }
 
-export function rulesClick(f, el) {
+export function rulesClick(f, el, dirty = null) {
+  onDirty = dirty;
   const a = el.dataset.rl, rules = (f.rules = f.rules || []);
   const ri = +el.dataset.r, r = rules[ri];
   const ui = H.ui();
@@ -167,7 +174,8 @@ export function rulesClick(f, el) {
   }
 }
 
-export function rulesChange(f, el) {
+export function rulesChange(f, el, dirty = null) {
+  onDirty = dirty;
   const rules = f.rules || [], ri = +el.dataset.r, r = rules[ri];
   if (!r) return;
   if (el.dataset.rl === 'toggle') { r.off = !el.checked; if (!r.off) delete r.off; changed(); return; }
