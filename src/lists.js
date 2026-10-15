@@ -15,7 +15,7 @@ import {
   FILTERABLE, SETTABLE, MAX_COLS,
 } from './listlogic.js';
 
-let H = { fmt: null, valOf: null, recTitle: null, titleFieldOf: null, parentsOf: null, formById: null, recById: null, recordsOf: null, renderMain: null, withFormulas: (f, r, ch) => ch, search: () => '' };
+let H = { ruleImpact: null, applyRuleChange: null, fmt: null, valOf: null, recTitle: null, titleFieldOf: null, parentsOf: null, formById: null, recById: null, recordsOf: null, renderMain: null, withFormulas: (f, r, ch) => ch, search: () => '' };
 export function initLists(helpers) { H = { ...H, ...helpers }; }
 
 const UNDO_MS = 6000;
@@ -152,7 +152,7 @@ export function viewRecords(form) {
     </div>
     ${LV.sel.size ? bulkBar(form, selRecs, editable, selHidden, settable) : ''}
     ${rows.length ? table(form, c, shown, rows, allOn, someOn, cfg) + cards(form, shown, rows, allOn) : `<div class="panel empty"><p>No ${esc(form.name.toLowerCase())} match ${H.search().trim() ? `“${esc(H.search())}”` : 'these filters'}.</p>${filterCount(cfg) ? '<button class="btn" data-lv="filter-clear">Clear filters</button>' : ''}</div>`}
-    ${LV.confirm ? confirmDialog(form, selRecs, editable) : ''}
+    ${LV.confirm ? confirmDialog(form, selRecs, editable) : ''}${LV.setAsk && LV.setAsk.form.id === form.id ? setAskDialog() : ''}
   </div>`;
 }
 
@@ -422,10 +422,35 @@ async function setField(fid, opt) {
   const { form, recs } = selectedEditable(); if (!form || !recs.length) return;
   const f = (form.fields || []).find((x) => x.id === fid); if (!f) return;
   const value = f.type === 'checkbox' ? opt === 'Yes' : opt;
+  // the form's rules: would the new value hide or clear fields on these records?
+  const im = form.rules?.length && H.ruleImpact ? H.ruleImpact(form, recs.map((r) => ({ ...r, values: { ...(r.values || {}), [fid]: value } }))) : { rows: [] };
+  if (im.rows.length) { LV.pop = null; LV.setAsk = { form, recs, f, opt, value, im, busy: false }; repaint(); setTimeout(() => $('#lv-set-go')?.focus(), 0); return; }
   LV.pop = null; LV.busy = true; repaint();
   try { await setRecordsValue(recs, fid, value); toast(`Set ${f.label} to ${opt} on ${plural(recs.length, form)}`); }
   catch (e) { console.error('[formwright] bulk set', e); toast('Couldn’t change those records. Nothing was changed.'); }
   LV.busy = false; repaint();
+}
+
+/** Set field when the form's rules would empty other fields: say which, then do both together. */
+function setAskDialog() {
+  const a = LV.setAsk, form = a.form, labels = new Map((form.fields || []).map((x) => [x.id, x.label]));
+  const n = [...a.im.perField.values()].reduce((x, y) => x + y, 0);
+  return `<div class="lv-scrim" data-lv="set-cancel"><div class="lv-dlg" role="dialog" aria-modal="true" aria-labelledby="lv-set-h">
+    <h2 id="lv-set-h">Set ${esc(a.f.label)} to ${esc(a.opt)} on ${plural(a.recs.length, form)}?</h2>
+    <p>The form’s rules then hide or clear these, so ${n === 1 ? 'one value is' : `${n} values are`} emptied on ${plural(a.im.rows.length, form)}:</p>
+    <ul>${[...a.im.perField].map(([fid, k]) => `<li><b>${esc(labels.get(fid) || 'Field')}</b>: ${k}</li>`).join('')}</ul>
+    <div class="lv-facts"><p class="lv-fact">${isAdmin(store.me) ? 'It’s listed in Import history, where you can undo it for 7 days. ' : ''}Every change is in the audit trail.</p></div>
+    <div class="lv-dlgacts"><button class="btn" type="button" data-lv="set-cancel"${a.busy ? ' disabled' : ''}>Cancel</button><button class="btn primary" type="button" data-lv="set-go" id="lv-set-go"${a.busy ? ' disabled' : ''}>${a.busy ? 'Saving…' : `Set and empty ${n}`}</button></div>
+  </div></div>`;
+}
+async function setAskGo() {
+  const a = LV.setAsk; if (!a || a.busy) return;
+  a.busy = true; repaint();
+  const clear = new Map(a.im.rows.map((r) => [r.id, r.clear]));
+  const rows = a.recs.map((r) => ({ id: r.id, set: { [a.f.id]: a.value }, clear: clear.get(r.id) || [] }));
+  try { await H.applyRuleChange(a.form, rows, `Set field: ${a.f.label} → ${a.opt}`); toast(`Set ${a.f.label} to ${a.opt} on ${plural(a.recs.length, a.form)}`); LV.setAsk = null; }
+  catch (e) { console.error('[formwright] bulk set', e); a.busy = false; toast('Couldn’t change those records. Check your connection and try again.'); }
+  repaint();
 }
 
 /** Attach the ticked records to one parent record (moving any that are on another). */
@@ -556,6 +581,8 @@ document.addEventListener('click', (e) => {
     case 'name-cancel': LV.naming = null; repaint(); break;
     case 'name-save': saveNamed(); break;
     case 'set': setField(el.dataset.f, v); break;
+    case 'set-cancel': if (el.classList.contains('lv-scrim') && e.target !== el) return; if (LV.setAsk && !LV.setAsk.busy) { LV.setAsk = null; repaint(); } break;
+    case 'set-go': setAskGo(); break;
     case 'owner': setOwnerOf(v); break;
     case 'attach-to': attachTo(); break;
     case 'export': exportCsv(); break;

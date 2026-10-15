@@ -85,6 +85,8 @@ src/
   pdfexport.js             Export PDF: fetches photos, loads pdf-lib on first use, downloads the file
   exportset.js             Administration → PDF exports: company name and logo
   duplogic.js              Duplicate: which values a copy keeps (pure, unit-tested)
+  rules.js                 Show/hide rules: conditions, what's hidden, required or cleared, clashes, effect on saved records (pure, unit-tested)
+  rulesui.js               Form designer → Rules tab: building rules with clicks
   photo.js                 Smaller photos: turns photos upright and scales them down before upload
   app.js                   Navigation, record screens, form designer
   admin.js                 Security groups and users screens (admins only)
@@ -236,6 +238,24 @@ Each form's list can be set up from the list itself.
 - **Phones:** the list shows cards with tick boxes, and menus open as a sheet at the bottom.
 
 A view only decides how the list looks. It never shows anyone records they couldn't already see.
+
+## Show and hide rules
+
+Each form can have rules (form designer → **Rules** tab) that change the record page as people fill it in. A rule reads like a sentence and is built from menus, never formulas:
+
+> **When** Stage **is any of** Review, Done **and** (Clients › Status **is** Paused **or** Budget **more than** 1000) **then** hide Tasks, Estimated hours; set required Due date
+
+- **Conditions** look at the record's own fields or its **parent** record's fields (a site visit can look at its project). Comparisons suit the field: is / is not / is any of / is none of (choices), includes (multiple choice), is Yes / is No, = ≠ more than / less than (numbers and calculations), before / after (dates), contains (text), and is empty / is not empty for everything. Join them with **all** or **any**, with one level of **groups**: (A and B) or C.
+- **Actions:** **Hide**, **Show**, **Set required**, **Set not required**, **Clear value**. Several per rule, each on several things: fields, a **Section Heading** (hides every field under it), a sub-form grid, a child section, or Tasks.
+- **How they combine:** Show means hidden the rest of the time; Set required means not required the rest of the time. Hide beats Show and Set required beats Set not required; a hidden field is never required. **Clear value** empties the field and locks it ("Cleared by a rule") while the rule applies. A hidden or cleared field counts as empty for other rules, so chains settle the way the record will be saved.
+- **Saving:** hidden and cleared fields are emptied when the record is saved (switching back before saving brings typed values back). Hidden grids, child sections and Tasks are only hidden: nothing is deleted. Sub-form rules work per grid row (a hidden or cleared cell shows "—"), with the record on screen as the row's parent.
+- **PDF exports and emails** leave out whatever the rules hide.
+- **Not a permission:** hiding is layout. Lists, reports and CSV still see the data; use Security groups to restrict access.
+- **Imports** apply the rules to each row as it's saved; the check step says how many values the rules will empty, on which fields. Undoing the import puts them back.
+- **List "Set field":** when the new value would make rules empty fields on the selected records, it asks first ("Set Stage to Done on 2 projects? … Estimated hours: 2, Progress: 2") and does both together. For admins it's logged in Import history (**Set field: Stage → Done**) with Undo; for others it's an ordinary edit. Both are in the audit trail.
+- **A parent changing:** saving a record checks its child records (separate records; grid rows are saved with the parent anyway) whose rules look at its fields. If any would change, it asks "Also update 1 site visit?" with the fields listed. **Update** empties them now (admins: logged in Import history as "Project changed (…)" with Undo); **Not now** leaves them until each is saved.
+- **In the designer:** each rule shows as a sentence, with **Applies now** while it applies in **Try it** (fill in sample values, including pretend parent values, and watch fields and sections show and hide; nothing is saved). Problems are listed under the rule (a deleted field, an option that no longer exists, a rule that hides the field it looks at) and clashes at the top. Fields a rule changes are tagged "rule" on the Fields tab. Rules can be switched off, reordered and duplicated; rules about deleted fields are tidied on save. Stored as `form.rules` (see `rules.js` for the shape).
+- **Changing rules on a form with saved records:** Save form works out which saved records the new rules would empty fields on and asks: **Apply to all N** empties them now, **Leave them** saves the rules and each record follows them on its next save, or **Cancel**. Applying is written like an import, so it's listed in **Import history** as a **Rule change** (filter: All / Imports / Rule changes) with **Undo** for 7 days, and every record change is in the audit trail. Undo skips records edited since. Rule edits themselves show in the audit trail as "Show and hide rules".
 
 ## Duplicating a record
 

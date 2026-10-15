@@ -378,6 +378,12 @@ export async function setRecordsValue(recs, fieldId, value) {
   );
 }
 
+/** Replace records' values (rules emptying fields, a bulk set): changes [{ id, values }]. Auto numbers are untouched. */
+export async function rewriteValues(changes) {
+  const me = store.user.uid, now = Date.now();
+  await commitOps(changes.map((c) => (b) => b.update(doc(db, 'records', c.id), { values: plain(c.values || {}), updatedAt: now, updatedBy: me })));
+}
+
 /**
  * Attach records to a parent, or detach them (parentId null). changes: [{ id, parentId,
  * parentFormId, set: { fieldId: value } }]. Only the parent link and the listed fields change.

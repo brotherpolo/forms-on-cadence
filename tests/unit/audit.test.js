@@ -45,3 +45,9 @@ test('day range and CSV', () => {
   assert.deepEqual(rows[0], ['T100', 'Adam', 'changed', 'Invoices', 'Invoices · INV-0058', 'Status', 'Draft', 'Sent', '']);
   assert.deepEqual(rows[1].slice(0, 6), ['T50', 'Jane', 'changed', 'group', 'security group Office', '']);
 });
+
+test('form rule changes get a readable label', async () => {
+  const { changeLabel } = await import('../../src/auditlogic.js');
+  assert.equal(changeLabel({ key: 'prop:rules', label: 'rules' }), 'Show and hide rules');
+  assert.equal(changeLabel({ key: 'st', label: 'Status' }), 'Status');
+});

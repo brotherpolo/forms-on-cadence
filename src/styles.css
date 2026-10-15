@@ -152,7 +152,7 @@ textarea.in{min-height:96px;resize:vertical;line-height:1.45}
 .stars button{border:0;background:none;font-size:26px;line-height:1;cursor:pointer;color:var(--line-strong);padding:4px;min-width:40px;min-height:40px}
 .stars button.on{color:#e0a100}
 .rangew{display:flex;align-items:center;gap:14px}
-.rangew input{flex:1;accent-color:var(--accent);min-height:32px}
+.rangew input{flex:1;min-width:0;accent-color:var(--accent);min-height:32px}
 .rangew output{font-family:var(--mono);min-width:3.5ch;text-align:right;font-variant-numeric:tabular-nums}
 .colorw{display:flex;align-items:center;gap:10px}
 .colorw input[type=color]{width:52px;height:44px;border:1px solid var(--line-strong);border-radius:8px;padding:3px;background:var(--surface);cursor:pointer}
@@ -479,3 +479,8 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 @media (max-width:640px){.au-e{flex-direction:column;gap:4px}.au-t{width:auto}.au-l{min-width:0;width:100%}.au-f{flex:1 1 140px}.au-f .in{min-width:0;width:100%}}
 .dupnote b{color:var(--fg)}
 .pick[data-busy]::after{content:attr(data-busy);margin-left:8px;color:var(--muted);font-size:13px}
+/* show/hide rules (rules.js): what a rule hides is gone from the page; a cleared field is locked and empty */
+.rule-off{display:none!important}
+.fld.locked .lockw{opacity:.55;pointer-events:none}
+.fld.locked .rule-note{margin-top:4px;font-style:italic}
+.gcalc.rule-na{color:var(--muted);opacity:.7}

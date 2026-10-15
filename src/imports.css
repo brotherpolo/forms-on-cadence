@@ -110,3 +110,5 @@
 .im-note h3{font-size:15px}
 .im-scrim{position:fixed;inset:0;background:rgba(10,12,20,.45);display:grid;place-items:center;z-index:60;padding:16px}
 .im-dlg{background:var(--surface);border-radius:14px;max-width:520px;width:100%;padding:22px;display:flex;flex-direction:column;gap:14px;max-height:90vh;overflow:auto}
+.im-tag.rule{background:var(--accent-soft);color:var(--accent)}
+.im-rulesnote{flex-basis:100%;margin:0}

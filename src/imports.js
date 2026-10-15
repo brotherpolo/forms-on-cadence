@@ -11,7 +11,7 @@ import {
 } from './importlogic.js';
 import { writeXlsx, readSheets, sheetName } from './xlsx.js';
 
-let H = { fmt: null, recTitle: null, formById: null, go: null, renderMain: null, computeFormulas: null };
+let H = { ruleClears: null, fmt: null, recTitle: null, formById: null, go: null, renderMain: null, computeFormulas: null };
 export function initImports(helpers) { H = { ...H, ...helpers }; }
 
 const PAGE = 100;
@@ -288,6 +288,7 @@ function stepCheck(form) {
       ${list.length > page.length ? `<div class="im-more"><button type="button" class="btn sm" data-im="more">Show ${Math.min(PAGE, list.length - page.length)} more</button><span class="help">${(list.length - page.length).toLocaleString()} more rows</span></div>` : ''}
       <div class="im-foot">
         <label class="im-chk"><input type="checkbox" data-imc="skip"${IM.skip ? ' checked' : ''}>Skip rows that still have problems</label>
+        ${(() => { const fx = rulesEffect(form); if (!fx) return ''; const labels = new Map((form.fields || []).map((x) => [x.id, x.label])); return `<p class="help im-rulesnote"><span class="im-tag rule">Rules</span> The form’s show and hide rules empty ${fx.vals.toLocaleString()} value${fx.vals === 1 ? '' : 's'} on ${fx.rows.toLocaleString()} row${fx.rows === 1 ? '' : 's'} as they’re saved: ${esc([...fx.per].map(([id, n]) => `${labels.get(id) || 'Field'} (${n})`).join(', '))}. Undoing the import puts them back too.</p>`; })()}
         <span class="help im-foothelp">${s.same ? `${s.same} row${s.same === 1 ? ' has' : 's have'} no changes and will be left alone. ` : ''}Skipped rows can be downloaded afterwards to fix and import again.</span>
         <div class="im-acts im-right"><button type="button" class="btn" data-im="back-map">Back</button>
         <button type="button" class="btn primary" data-im="run"${blocked ? ' disabled' : ''}>${esc(goText)}</button></div>
@@ -362,6 +363,30 @@ function useSheet(i, form) {
   return '';
 }
 
+/* ---------- the form's show/hide rules ----------
+   A row whose values a rule hides or clears is saved with those fields empty, the same as
+   saving the record by hand. The check step says how many. */
+const rowRec = (form, r) => ({ id: r.action === 'update' ? r.id : null, formId: form.id, values: r.values, parentId: r.parentId || null, parentFormId: r.parentFormId || null });
+function rulesEffect(form) {
+  if (!form?.rules?.length || !H.ruleClears || !IM.results) return null;
+  const per = new Map(); let rows = 0, vals = 0;
+  IM.results.forEach((r) => {
+    if (r.action !== 'new' && r.action !== 'update') return;
+    const ids = H.ruleClears(form, rowRec(form, r));
+    if (!ids.length) return;
+    rows++; vals += ids.length; ids.forEach((id) => per.set(id, (per.get(id) || 0) + 1));
+  });
+  return rows ? { rows, vals, per } : null;
+}
+function ruleValues(form, r) {
+  if (!form?.rules?.length || !H.ruleClears) return r.values;
+  const ids = H.ruleClears(form, rowRec(form, r));
+  if (!ids.length) return r.values;
+  const v = { ...r.values }; ids.forEach((id) => { delete v[id]; });
+  if (H.computeFormulas) Object.assign(v, H.computeFormulas(form, { ...rowRec(form, r), values: v }));
+  return v;
+}
+
 /* ---------- saving ---------- */
 
 async function start() {
@@ -371,8 +396,8 @@ async function start() {
   const skipped = IM.results.filter((r) => r.action === 'problem');
   if (!go.length || (!IM.skip && skipped.length)) return;
   const id = uid('imp');
-  const creates = go.filter((r) => r.action === 'new').map((r) => ({ id: uid('r'), values: r.values, parentId: r.parentId, parentFormId: r.parentFormId }));
-  const updates = go.filter((r) => r.action === 'update').map((r) => ({ id: r.id, values: r.values, parentId: r.parentId, parentFormId: r.parentFormId }));
+  const creates = go.filter((r) => r.action === 'new').map((r) => ({ id: uid('r'), values: ruleValues(form, r), parentId: r.parentId, parentFormId: r.parentFormId }));
+  const updates = go.filter((r) => r.action === 'update').map((r) => ({ id: r.id, values: ruleValues(form, r), parentId: r.parentId, parentFormId: r.parentFormId }));
   const counts = { added: creates.length, updated: updates.length, same: IM.results.filter((r) => r.action === 'same').length, skipped: skipped.length };
   IM.step = 'run'; IM.progress = { done: 0, total: go.length };
   H.renderMain();
@@ -419,8 +444,8 @@ async function askUndo(importId) {
     const titles = (ids) => ids.map((id) => store.records.find((r) => r.id === id)).filter(Boolean).map((r) => H.recTitle(r));
     const lines = [];
     if (plan.del.length) lines.push(`Removes ${the(plan.del.length)} it added${plan.under.length ? `, and the ${plan.under.length.toLocaleString()} record${plan.under.length === 1 ? '' : 's'} added under ${plan.del.length === 1 ? 'it' : 'them'} since` : ''}.`);
-    if (plan.restore.length) lines.push(`Puts ${the(plan.restore.length)} it updated back the way ${plan.restore.length === 1 ? 'it was' : 'they were'} before the import.`);
-    if (plan.kept.length) { const t = titles(plan.kept); lines.push(`${many(plan.kept.length)} ${plan.kept.length === 1 ? 'was' : 'were'} edited after the import, so ${plan.kept.length === 1 ? 'it’s' : 'they’re'} left as ${plan.kept.length === 1 ? 'it is' : 'they are'}: ${t.slice(0, 5).join(', ')}${t.length > 5 ? ` and ${t.length - 5} more` : ''}.`); }
+    if (plan.restore.length) lines.push(isRules(imp) ? `Puts back the values the rule change emptied on ${the(plan.restore.length)}.` : `Puts ${the(plan.restore.length)} it updated back the way ${plan.restore.length === 1 ? 'it was' : 'they were'} before the import.`);
+    if (plan.kept.length) { const t = titles(plan.kept); lines.push(`${many(plan.kept.length)} ${plan.kept.length === 1 ? 'was' : 'were'} edited after the ${isRules(imp) ? 'change' : 'import'}, so ${plan.kept.length === 1 ? 'it’s' : 'they’re'} left as ${plan.kept.length === 1 ? 'it is' : 'they are'}: ${t.slice(0, 5).join(', ')}${t.length > 5 ? ` and ${t.length - 5} more` : ''}.`); }
     if (plan.gone) lines.push(`${plan.gone} record${plan.gone === 1 ? '' : 's'} it touched ${plan.gone === 1 ? 'has' : 'have'} since been deleted.`);
     if (!plan.del.length && !plan.restore.length) lines.push('There’s nothing left to change. Undoing just marks the import as undone.');
     ask = { imp, plan, lines, busy: false };
@@ -435,10 +460,10 @@ async function askUndo(importId) {
 
 function undoDialog() {
   return `<div class="im-scrim" data-im="undo-cancel"><div class="im-dlg" role="dialog" aria-modal="true" aria-labelledby="im-dlg-h">
-    <h3 id="im-dlg-h">Undo “${esc(ask.imp.fileName || 'this import')}”?</h3>
+    <h3 id="im-dlg-h">${isRules(ask.imp) ? 'Undo this rule change?' : `Undo “${esc(ask.imp.fileName || 'this import')}”?`}</h3>
     <ul class="im-list">${ask.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
-    <p class="help">This can’t itself be undone, but you can import the file again.</p>
-    <div class="im-acts end"><button type="button" class="btn" data-im="undo-cancel">Keep the import</button><button type="button" class="btn im-dfill" id="im-undo-go" data-im="undo-go"${ask.busy ? ' disabled' : ''}>${ask.busy ? 'Undoing…' : 'Undo import'}</button></div>
+    <p class="help">${isRules(ask.imp) ? 'The rules stay as they are, so these fields empty again the next time each record is saved. To keep the values, change the rules too.' : 'This can’t itself be undone, but you can import the file again.'}</p>
+    <div class="im-acts end"><button type="button" class="btn" data-im="undo-cancel">Keep the import</button><button type="button" class="btn im-dfill" id="im-undo-go" data-im="undo-go"${ask.busy ? ' disabled' : ''}>${ask.busy ? 'Undoing…' : isRules(ask.imp) ? 'Undo rule change' : 'Undo import'}</button></div>
   </div></div>`;
 }
 
@@ -447,7 +472,7 @@ async function doUndo() {
   ask.busy = true; H.renderMain();
   try {
     await undoImport(ask.imp, ask.plan);
-    toast(`Undid ${ask.imp.fileName || 'the import'}`);
+    toast(isRules(ask.imp) ? 'Undid the rule change' : `Undid ${ask.imp.fileName || 'the import'}`);
   } catch (e) {
     console.error(e);
     toast(e?.code === 'permission-denied' ? 'Firestore refused the undo. Check that the latest security rules are deployed.' : 'The undo didn’t finish. Check your connection and try again.');
@@ -458,12 +483,14 @@ async function doUndo() {
 
 /* ---------- Import history ---------- */
 
-let histForm = '';
+let histForm = '', histKind = '';
+const isRules = (i) => i?.counts?.kind === 'rules';
 export function viewImports() {
   if (!isAdmin(store.me)) return '<div class="panel empty"><p>Only admins can see imports.</p></div>';
   const now = Date.now();
   const formsUsed = [...new Set(store.imports.map((i) => i.formId))].map((id) => ({ id, name: formOf(id)?.name || store.imports.find((i) => i.formId === id)?.formName || 'Deleted form' }));
-  const list = store.imports.filter((i) => !histForm || i.formId === histForm);
+  const anyRules = store.imports.some(isRules);
+  const list = store.imports.filter((i) => (!histForm || i.formId === histForm) && (!histKind || (histKind === 'rules') === isRules(i)));
   const rows = list.map((i) => {
     const c = i.counts || {};
     const by = store.profiles[i.ownerId]?.displayName || (i.ownerId === me() ? 'You' : 'An admin');
@@ -474,13 +501,14 @@ export function viewImports() {
     else undo = '<span class="im-tag off">Undo expired</span>';
     const status = i.status === 'failed' || (i.status === 'running' && now - i.createdAt > 36e5) ? ' <span class="im-tag bad">Stopped part way</span>' : '';
     return `<tr class="${i.status === 'undone' ? 'im-gone' : ''}"><td>${esc(when(i.createdAt))}<small>${esc(whenTime(i.createdAt))}</small></td>
-      <td>${esc(formOf(i.formId)?.name || i.formName || 'Deleted form')}</td><td class="im-mono im-fname" title="${esc(i.fileName || '')}">${esc(i.fileName || '')}${status}</td>
+      <td>${esc(formOf(i.formId)?.name || i.formName || 'Deleted form')}</td><td class="${isRules(i) ? 'im-fname' : 'im-mono im-fname'}" title="${esc(i.fileName || '')}">${isRules(i) ? `<span class="im-tag rule">${esc(i.counts.what || 'Rule change')}</span> ${esc(Object.entries(i.counts.fields || {}).map(([l, n]) => `${l} (${n})`).join(', ') || 'Fields emptied')}` : esc(i.fileName || '')}${status}</td>
       <td>${esc(by)}</td><td class="num">${(c.added || 0).toLocaleString()}</td><td class="num">${(c.updated || 0).toLocaleString()}</td><td class="num">${(c.skipped || 0).toLocaleString()}</td><td class="im-undo">${undo}</td></tr>`;
   }).join('');
   return `<div class="im" id="im">
-    <div class="head"><div class="ttl"><div><h1>Import history</h1><p class="sub">Imports by every admin. Undo one within ${UNDO_DAYS} days.</p></div></div>
+    <div class="head"><div class="ttl"><div><h1>Import history</h1><p class="sub">Imports, and rule changes applied to saved records, by every admin. Undo one within ${UNDO_DAYS} days.</p></div></div>
+      ${anyRules ? `<div class="actions"><div class="segs im-kind" role="group" aria-label="Show">${[['', 'All'], ['imports', 'Imports'], ['rules', 'Rule changes']].map(([k, l]) => `<button type="button" class="${histKind === k ? 'on' : ''}" aria-pressed="${histKind === k}" data-im="kind" data-v="${k}">${l}</button>`).join('')}</div></div>` : ''}
       ${formsUsed.length > 1 ? `<div class="actions"><label class="help" for="im-hform">Form</label><select class="in im-auto" id="im-hform" data-imc="hform"><option value="">All forms</option>${formsUsed.map((f) => `<option value="${esc(f.id)}"${f.id === histForm ? ' selected' : ''}>${esc(f.name)}</option>`).join('')}</select></div>` : ''}</div>
-    ${list.length ? `<section class="panel"><div class="im-wrap"><table class="tbl im-hist"><thead><tr><th>When</th><th>Form</th><th>File</th><th>By</th><th class="num">Added</th><th class="num">Updated</th><th class="num">Skipped</th><th>Undo</th></tr></thead><tbody>${rows}</tbody></table></div></section>`
+    ${list.length ? `<section class="panel"><div class="im-wrap"><table class="tbl im-hist"><thead><tr><th>When</th><th>Form</th><th>File or change</th><th>By</th><th class="num">Added</th><th class="num">Updated</th><th class="num">Skipped</th><th>Undo</th></tr></thead><tbody>${rows}</tbody></table></div></section>`
       : `<div class="panel empty"><h2>No imports yet</h2><p>Import from a form’s list: Import and templates › Import a filled-in file.</p></div>`}
     <div class="im-cards">
       <div class="panel im-note"><h3>Admins only</h3><p class="help">Only admins see Import, the templates and this page. Imported records belong to the admin who imported them.</p></div>
@@ -492,7 +520,7 @@ export function viewImports() {
 }
 
 /** Forget everything on sign-out. */
-export function resetImports() { IM = fresh(null); menuFor = null; ask = null; asking = null; histForm = ''; }
+export function resetImports() { IM = fresh(null); menuFor = null; ask = null; asking = null; histForm = ''; histKind = ''; }
 
 /* ---------- events ---------- */
 
@@ -508,6 +536,7 @@ document.addEventListener('click', (e) => {
     case 'tpl': menuFor = null; H.renderMain(); downloadTemplate(id, el.dataset.v); break;
     case 'go': openImport(id); break;
     case 'history': menuFor = null; H.go({ name: 'imports' }); break;
+    case 'kind': histKind = el.dataset.v || ''; H.renderMain(); break;
     case 'list': H.go({ name: 'records', formId: id }); break;
     case 'restart': Object.assign(IM, fresh(IM.formId)); H.renderMain(); break;
     case 'check': IM.results = null; IM.overrides = new Map(); IM.filter = 'all'; IM.shown = PAGE; IM.step = 'check'; H.renderMain(); window.scrollTo(0, 0); break;

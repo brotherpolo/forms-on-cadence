@@ -4,7 +4,7 @@
 import { store, loadAudit, restoreDeleted, setRecordsValue, attachRecords, setOwner, setAutoNumber } from './store.js';
 import { esc, toast, badge } from './ui.js';
 import { toCsv } from './listlogic.js';
-import { KINDS, serverFilter, matches, verb, targetText, canPutBack, dayRange, csvRows } from './auditlogic.js';
+import { KINDS, serverFilter, matches, verb, targetText, canPutBack, dayRange, csvRows, changeLabel } from './auditlogic.js';
 
 let H = { fmt: null, formById: null, recById: null, recTitle: null, go: null, renderMain: null };
 export function initAudit(helpers) { H = { ...H, ...helpers }; }
@@ -108,7 +108,7 @@ function entryHTML(e) {
   const changes = (e.changes || []).length ? `<ul class="au-changes">${e.changes.map((c, i) => {
     const from = show(e, c, 'from'), to = show(e, c, 'to');
     const pb = canPutBack(e, c) && rec ? putBackBtn(e, c, i, rec) : '';
-    return `<li><span class="au-l">${esc(c.label)}</span><span class="au-v">${from ? `<s>${esc(from)}</s>` : '<i>empty</i>'} <span aria-hidden="true">→</span><span class="sr"> to </span> ${to ? `<b>${esc(to)}</b>` : '<i>empty</i>'}</span>${pb}</li>`;
+    return `<li><span class="au-l">${esc(changeLabel(c))}</span><span class="au-v">${from ? `<s>${esc(from)}</s>` : '<i>empty</i>'} <span aria-hidden="true">→</span><span class="sr"> to </span> ${to ? `<b>${esc(to)}</b>` : '<i>empty</i>'}</span>${pb}</li>`;
   }).join('')}</ul>` : '';
   let action = '';
   if (e.area === 'record' && e.kind === 'deleted') {

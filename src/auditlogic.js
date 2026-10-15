@@ -41,6 +41,9 @@ export function matches(e, f, text) {
   return true;
 }
 
+/** A change's label for people: form settings the server names by their key get a proper name. */
+export const changeLabel = (c) => (c.key === 'prop:rules' ? 'Show and hide rules' : c.label);
+
 /** "changed", "deleted"… as a verb for the sentence "Adam changed Invoice INV-0058". */
 export function verb(e) {
   const v = {
@@ -82,7 +85,7 @@ export function csvRows(entries, show, when) {
   entries.forEach((e) => {
     const base = [when(e.at), e.byName || '', verb(e), e.area === 'record' ? e.formName || '' : e.area, targetText(e)];
     const cs = e.changes && e.changes.length ? e.changes : [null];
-    cs.forEach((c) => rows.push([...base, c ? c.label : '', c ? show(e, c, 'from') : '', c ? show(e, c, 'to') : '', e.note || '']));
+    cs.forEach((c) => rows.push([...base, c ? changeLabel(c) : '', c ? show(e, c, 'from') : '', c ? show(e, c, 'to') : '', e.note || '']));
   });
   return { headers: ['When', 'Who', 'What', 'Form or area', 'Record or item', 'Field', 'Was', 'Now', 'Note'], rows };
 }

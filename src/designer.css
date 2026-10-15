@@ -82,3 +82,66 @@
 .pd-line{position:fixed;z-index:31;height:4px;border-radius:2px;background:var(--accent);pointer-events:none}
 body.pd-on{cursor:grabbing;-webkit-user-select:none;user-select:none}
 body.pd-on .pgrip{cursor:grabbing}
+/* Rules tab (rulesui.js): the rules on the left, Try it on the right */
+.rl-wrap{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.rl-list{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px}
+.rl-try{flex:1 1 320px;min-width:0;max-width:100%;padding:14px 16px;display:flex;flex-direction:column;gap:10px;position:sticky;top:12px;max-height:calc(100dvh - 24px);overflow:auto;box-sizing:border-box}
+.rl-try .fgrid{margin:0}
+.rl-top{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-start;justify-content:space-between}
+.rl-top > div{flex:1 1 320px;min-width:0}
+.rl-top .help{margin:4px 0 0}
+.rl-card{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.rl-card.off{opacity:.6}
+.rl-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.rl-h .grow{flex:1}
+.rl-fire{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:2px 8px}
+.rl-on{margin-right:4px}
+.rl-when{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rl-lab{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.rl-join,.rl-op,.rl-do{width:auto;min-height:36px;padding:0 8px}
+.rl-conds,.rl-acts{display:flex;flex-direction:column;gap:6px}
+.rl-cond,.rl-act{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.rl-cond .rl-f{width:auto;min-width:150px;max-width:100%;min-height:36px}
+.rl-cond .rl-v{width:auto;min-width:120px;min-height:36px}
+.rl-cond .rl-num{width:110px;min-width:0}
+.rl-many{display:flex;flex-wrap:wrap;gap:4px}
+.rl-chk{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:13px;cursor:pointer}
+.rl-chk input{accent-color:var(--accent)}
+.rl-group{border:1px dashed var(--line-strong);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--sunk)}
+.rl-gh{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.rl-adds{display:flex;flex-wrap:wrap;gap:6px}
+.rl-tgts{display:flex;flex-wrap:wrap;align-items:center;gap:4px;flex:1;min-width:0}
+.rl-tgt{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--fg);border-radius:8px;padding:2px 4px 2px 8px;font-size:13px;max-width:100%}
+.rl-tgt small{color:var(--muted);font-size:11px}
+.rl-tgt.bad{background:var(--sunk);text-decoration:line-through}
+.rl-tx{border:0;background:none;color:var(--muted);cursor:pointer;width:24px;height:24px;border-radius:6px;font-size:12px}
+.rl-tx:hover{background:var(--surface);color:var(--fg)}
+.rl-add{width:auto;min-height:32px;padding:0 6px;font-size:13px}
+.rl-x{flex:none}
+.rl-say{margin:2px 0 0;font-size:13px;color:var(--muted);font-style:italic;overflow-wrap:anywhere}
+.rl-msgs{margin:0;padding-left:18px;font-size:13px;color:var(--warn,#a15c00)}
+.rl-clash{padding:10px 14px;font-size:13px}
+.rl-clash ul{margin:4px 0 0;padding-left:18px}
+.rl-empty{padding:16px;display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+.rl-empty p{margin:0}
+.rl-how{font-size:13px}
+.rl-how summary{cursor:pointer;color:var(--muted);font-weight:600}
+.rl-how ul{margin:6px 0 0;padding-left:18px}
+.rl-par{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--sunk)}
+.rl-par .help{margin:0}
+.rl-pform{width:auto;min-height:30px;display:inline-block}
+.rl-pv{display:grid;grid-template-columns:minmax(80px,auto) minmax(0,1fr);gap:8px;align-items:center;font-size:13px}
+.rl-secs{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.rl-secs .help{flex-basis:100%;margin:0}
+.rl-sec{font-size:13px;border:1px solid var(--line);border-radius:8px;padding:3px 8px;background:var(--surface)}
+.rl-sec b{font-weight:600;color:var(--accent)}
+.rl-sec.off{opacity:.6}
+.rl-sec.off b{color:var(--muted)}
+.rl-tag{color:var(--accent);font-weight:600}
+.rl-tag.soft{color:var(--muted);font-weight:500}
+@media (max-width:640px){.rl-try{position:static;max-height:none}.rl-cond .rl-f,.rl-cond .rl-v{flex:1 1 100%}}
+.ra-dlg{max-width:560px;display:flex;flex-direction:column;gap:10px}
+.ra-dlg h2{margin:0;font-size:1.15rem}
+.ra-dlg p{margin:0}
+.ra-list{margin:0;padding-left:20px}
+.ra-sub{margin:4px 0 0!important}
