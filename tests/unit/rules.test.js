@@ -120,7 +120,9 @@ test('designer checks, sentences and pruning', () => {
   assert.ok(msgs.some((m) => /“Gone” is no longer an option/.test(m)));
   assert.ok(msgs.some((m) => /hides Status, which its own condition looks at/.test(m)));
   assert.ok(msgs.some((m) => /Set required” doesn’t work on Tasks/.test(m)));
-  assert.ok(msgs.some((m) => /Notes has both Show and Hide rules/.test(m)));
+  assert.ok(msgs.some((m) => m === 'Notes: Rule 3 hides it, Rule 2 shows it. When both apply, Hide wins.'), msgs.join(' | '));
+  const cl = checkRules(fm, { targets, parentFields: pf }).find((m) => m.target === 'Notes');
+  assert.deepEqual(cl.rules.map((x) => [x.id, x.d]), [[fm.rules[2].id, 'hide'], [fm.rules[1].id, 'show']]);
   assert.ok(msgs.some((m) => /Rule 4 has no conditions/.test(m)) && msgs.some((m) => /Rule 4 doesn’t do anything/.test(m)));
   assert.equal(ruleText(fm.rules[2], { form: fm, targets, parentFields: pf }), 'When Clients › Kind is Retail: hide Notes');
   const g = { id: 'g', group: true, join: 'any', conds: [C('type', 'is', 'Repair'), C('hours', 'gt', 5)] };
@@ -139,4 +141,18 @@ test('impact on saved records', () => {
   const out = impactOf(fm, recs, (r) => getter(r.values));
   assert.deepEqual(out.rows, [{ id: 'a', clear: ['warranty', 'wend'] }]);
   assert.deepEqual([...out.perField], [['warranty', 1], ['wend', 1]]);
+});
+
+test('rule names, labels, and what counts as a change', async () => {
+  const { ruleLabel, changedRuleLabels, sameRules } = await import('../../src/rules.js');
+  const a = { id: 'a', name: 'Empty type', conds: [{ src: 'self', field: 'x', op: 'empty' }], acts: [{ do: 'hide', targets: ['f:y'] }] };
+  const b = { id: 'b', conds: [{ src: 'self', field: 'x', op: 'is', value: 'A' }], acts: [{ do: 'show', targets: ['f:y'] }] };
+  const f1 = { rules: [a, b] };
+  assert.equal(ruleLabel(f1, a), 'Rule 1 · Empty type');
+  assert.equal(ruleLabel(f1, b), 'Rule 2');
+  assert.ok(sameRules([a, b], [b, a]), 'reordering changes nothing');
+  assert.ok(sameRules([a], [{ ...a, name: 'Renamed' }]), 'renaming changes nothing');
+  assert.ok(!sameRules([a], [{ ...a, off: true }]));
+  const f2 = { rules: [{ ...b, acts: [{ do: 'hide', targets: ['f:y'] }] }, { id: 'c', name: 'New', conds: [], acts: [] }] };
+  assert.deepEqual(changedRuleLabels(f1, f2), ['Rule 1', 'Rule 2 · New', 'removed Rule 1 · Empty type']);
 });

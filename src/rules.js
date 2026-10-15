@@ -238,6 +238,23 @@ export function actionFits(d, t) {
  * Problems and clashes to show in the designer: [{ ruleId, text }].
  * ctx: { targets (targetsOf), parentFields: Map(formId → { name, fields }) }
  */
+const VERB = { hide: 'hides it', show: 'shows it', require: 'makes it required', optional: 'makes it not required', clear: 'clears it' };
+/** “Rule 3” or “Rule 3 · Name”: rules are numbered by their place in the list. */
+export function ruleLabel(form, r) {
+  const n = (form?.rules || []).indexOf(r) + 1;
+  const name = String(r?.name || '').trim();
+  return `Rule ${n || '?'}${name ? ' · ' + name : ''}`;
+}
+/** The rules a save changes (new or different), and ones it removes, by label: for Import history. */
+export function changedRuleLabels(before, after) {
+  const key = (r) => sameKey([r]);
+  const old = new Map((before?.rules || []).map((r) => [r.id, key(r)]));
+  const now = new Set((after?.rules || []).map((r) => r.id));
+  const out = (after?.rules || []).filter((r) => old.get(r.id) !== key(r)).map((r) => ruleLabel(after, r));
+  (before?.rules || []).filter((r) => !now.has(r.id)).forEach((r) => out.push('removed ' + ruleLabel(before, r)));
+  return out;
+}
+
 export function checkRules(form, ctx) {
   const out = [];
   const tmap = new Map((ctx.targets || []).map((t) => [t.key, t]));
@@ -246,7 +263,7 @@ export function checkRules(form, ctx) {
   const rules = (form?.rules || []).filter((r) => r && !r.off);
   const flat = (r) => (r.conds || []).flatMap((c) => (c && c.group ? c.conds || [] : [c])).filter(Boolean);
   rules.forEach((r, i) => {
-    const n = `Rule ${(form.rules || []).indexOf(r) + 1}`;
+    const n = ruleLabel(form, r);
     const cs = flat(r);
     if (!cs.some((c) => c.field)) out.push({ ruleId: r.id, text: `${n} has no conditions yet, so it never applies.` });
     if (!actPairs(r).length) out.push({ ruleId: r.id, text: `${n} doesn’t do anything yet: add what it hides, shows or sets.` });
@@ -273,11 +290,16 @@ export function checkRules(form, ctx) {
   });
   // clashes between rules
   const by = new Map();
-  rules.forEach((r) => actPairs(r).forEach(([d, k]) => { if (!by.has(k)) by.set(k, new Set()); by.get(k).add(d); }));
-  by.forEach((ds, k) => {
-    if (ds.has('show') && ds.has('hide')) out.push({ ruleId: null, text: `${name(k)} has both Show and Hide rules. When both apply, Hide wins.` });
-    if (ds.has('require') && ds.has('optional')) out.push({ ruleId: null, text: `${name(k)} has both Set required and Set not required rules. When both apply, Set required wins.` });
-    if (ds.has('clear') && ds.has('require')) out.push({ ruleId: null, text: `${name(k)} can be cleared and set required. While it’s cleared it isn’t required.` });
+  rules.forEach((r) => actPairs(r).forEach(([d, k]) => { if (!by.has(k)) by.set(k, new Map()); const m = by.get(k); if (!m.has(d)) m.set(d, []); if (!m.get(d).includes(r)) m.get(d).push(r); }));
+  // a clash names the rules on each side, so the designer can link to them
+  const clash = (k, m, a, b, text) => {
+    const who = [...m.get(a).map((r) => ({ id: r.id, label: ruleLabel(form, r), d: a, verb: VERB[a] })), ...m.get(b).map((r) => ({ id: r.id, label: ruleLabel(form, r), d: b, verb: VERB[b] }))];
+    out.push({ ruleId: null, target: name(k), rules: who, tail: text, text: `${name(k)}: ${who.map((x) => `${x.label} ${x.verb}`).join(', ')}. ${text}` });
+  };
+  by.forEach((m, k) => {
+    if (m.has('show') && m.has('hide')) clash(k, m, 'hide', 'show', 'When both apply, Hide wins.');
+    if (m.has('require') && m.has('optional')) clash(k, m, 'require', 'optional', 'When both apply, Set required wins.');
+    if (m.has('clear') && m.has('require')) clash(k, m, 'clear', 'require', 'While it’s cleared it isn’t required.');
   });
   return out;
 }
@@ -312,6 +334,7 @@ export function pruneRules(form, { targets, parentFields } = {}) {
   const okCond = (c) => !c.field || ((!c.src || c.src === 'self') ? fids.has(c.field) : !!parentFields?.get(c.src)?.fields?.some((f) => f.id === c.field));
   return (form?.rules || []).map((r) => ({
     ...r,
+    name: String(r.name || '').trim().slice(0, 60) || undefined,
     conds: (r.conds || []).map((c) => (c.group ? { ...c, conds: (c.conds || []).filter(okCond) } : c)).filter((c) => (c.group ? c.conds.length : okCond(c))),
     acts: (r.acts || []).map((a) => ({ ...a, targets: (a.targets || []).filter((k) => actionFits(a.do, tmap.get(k))) })).filter((a) => a.targets.length),
   }));
@@ -334,7 +357,8 @@ export function impactOf(form, records, getFor) {
 }
 
 /** Whether two rule lists behave the same (ignoring ids of conditions and order of keys). */
+// What a rule does, ignoring its name and its place in the list (neither changes what it does).
+const sameKey = (rs) => (rs || []).map((r) => JSON.stringify({ off: !!r.off, join: r.join || 'all', conds: (r.conds || []).map((c) => (c.group ? { g: 1, join: c.join || 'all', conds: (c.conds || []).map(({ src, field, op, value }) => ({ src: src || 'self', field, op, value })) } : { src: c.src || 'self', field: c.field, op: c.op, value: c.value })), acts: r.acts || [] })).sort().join('\n');
 export function sameRules(a, b) {
-  const norm = (rs) => JSON.stringify((rs || []).map((r) => ({ off: !!r.off, join: r.join || 'all', conds: (r.conds || []).map((c) => (c.group ? { g: 1, join: c.join || 'all', conds: (c.conds || []).map(({ src, field, op, value }) => ({ src: src || 'self', field, op, value })) } : { src: c.src || 'self', field: c.field, op: c.op, value: c.value })), acts: r.acts || [] })));
-  return norm(a) === norm(b);
+  return sameKey(a) === sameKey(b);
 }

@@ -30,13 +30,13 @@ import { initAudit } from './audit.js';
 import { fieldItem, fileName as pdfFileName } from './pdfdoc.js';
 import { copyValues, relinkRow } from './duplogic.js';
 import { shrinkPhoto } from './photo.js';
-import { evaluate as evalRules, toClear, withoutCleared, NO_RULES, holdsValue, pruneRules, impactOf, sameRules } from './rules.js';
+import { evaluate as evalRules, toClear, withoutCleared, NO_RULES, holdsValue, pruneRules, impactOf, sameRules, changedRuleLabels } from './rules.js';
 import { initAutos } from './autos.js';
 import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesign.js';
 import { checkWorkflow } from './workflow.js';
 import * as fv from './formver.js';
 import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageName, stageView, withStageField, canWork, assigneeFor, movesOf, missingToMove, waited } from './workflow.js';
-import { initRules, viewRules, rulesClick, rulesChange, parentUse, rulesCtx } from './rulesui.js';
+import { initRules, viewRules, rulesClick, rulesChange, rulesInput, rulesListHTML, parentUse, rulesCtx } from './rulesui.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
 import { signOutUser } from './auth.js';
 import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
@@ -1655,7 +1655,7 @@ function viewFormEdit(){
   }else if(ui.tab==='workflow'){
     body=viewWorkflow(f);
   }else if(ui.tab==='rules'){
-    body=`<div class="rl-wrap">${viewRules(f)}<aside class="panel rl-try" aria-label="Try the rules">${tryPanel(f)}</aside></div>`;
+    body=`<div class="rl-wrap">${viewRules(f)}<aside class="rl-side">${rulesListHTML(f)}<div class="panel rl-try" role="region" aria-label="Try the rules">${tryPanel(f)}</div></aside></div>`;
   }else if(ui.tab==='settings'){
     const tfs=f.fields.filter(x=>['text','email','phone','url','number','select','date','autonumber'].includes(x.type));
     body=`<div class="panel"><div class="settings">
@@ -1840,7 +1840,7 @@ async function saveForm(meta){
     try{await recomputeAllAccess(formsAfter);}catch(e){toast('Form saved, but people’s access wasn’t updated. Use Recalculate access in Security groups.');f.dirty=false;f.isNew=false;render();return;}
   }
   if(applyRows){
-    try{const n=await applyRuleChange(out,applyRows);f.dirty=false;f.isNew=false;toast(`${savedMsg}. Emptied fields on ${n} ${n===1?itemName(out).toLowerCase():out.name.toLowerCase()}. Undo is in Import history.`);render();}
+    try{const n=await applyRuleChange(out,applyRows,('Rule change: '+changedRuleLabels(before,out).join(', ')).slice(0,80));f.dirty=false;f.isNew=false;toast(`${savedMsg}. Emptied fields on ${n} ${n===1?itemName(out).toLowerCase():out.name.toLowerCase()}. Undo is in Import history.`);render();}
     catch(e){console.error(e);f.dirty=false;toast(e?.code==='permission-denied'?'Form saved, but Firestore refused to change the records.':'Form saved, but changing the records stopped part way. Undo what was done from Import history, or try Save form again.');render();}
     return;
   }
@@ -1903,6 +1903,7 @@ function editForm(id){
 document.addEventListener('click',e=>{const el=e.target.closest?.('[data-rl]');if(!el||el.dataset.rl==='toggle'||view.name!=='formEdit'||!fdraft)return;rulesClick(fdraft,el);});
 document.addEventListener('click',e=>{const el=e.target.closest?.('[data-fv]');if(!el||view.name!=='formEdit'||!fdraft)return;fv.onClick(el);});
 document.addEventListener('input',e=>{if(view.name==='formEdit'&&fdraft)fv.onInput(e.target);});
+document.addEventListener('input',e=>{if(view.name==='formEdit'&&fdraft&&ui.tab==='rules')rulesInput(fdraft,e.target);});
 document.addEventListener('change',e=>{if(view.name==='formEdit'&&fdraft)fv.onChange(e.target);});
 document.addEventListener('click',e=>{const el=e.target.closest?.('[data-wfa]');if(!el||view.name!=='formEdit'||!fdraft)return;wfClick(fdraft,el);});
 document.addEventListener('input',e=>{const el=e.target;if(view.name==='formEdit'&&fdraft&&el.dataset?.wfd)wfInput(fdraft,el);});
@@ -2391,7 +2392,7 @@ export function startApp(){
   fv.initFormVer({fdraft:()=>fdraft,setFdraft:f=>{fdraft=f;pdraft=null;},setFdirty,renderMain,saveForm,formById,recordsOf,isEmpty,toast,when,forms:()=>store.forms,newId:()=>uid('x'),me:()=>store.user?.uid,personName:id=>realName(id),closeField:()=>{ui.openField=null;}});
   initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
   initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});
-  initRules({formById,recById,parentsOf,recordsOf,recTitle,setFdirty,renderMain,ui:()=>ui});
+  initRules({fdraft:()=>fdraft,formById,recById,parentsOf,recordsOf,recTitle,setFdirty,renderMain,ui:()=>ui});
   initImports({ruleClears:(form,r)=>toClear(form,r.values,rulesOf(form,r,r.parentId?recById(r.parentId):null)),fmt,recTitle,formById,go,renderMain,computeFormulas:(form,rec)=>{const out={};(form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,rec);out[f.id]=r.e?null:r.v;});return out;}});
   Object.assign(ui,{search:'',openField:null,tab:'fields',palette:false,confirm:null,leaveOk:false,dzq:''});
   store.onChange=onData;

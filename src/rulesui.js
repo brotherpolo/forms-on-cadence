@@ -3,11 +3,20 @@
 //   Then [Hide ▾] [Tasks ✕] [Notes ✕] [+ add ▾]  (+ action)
 // The logic lives in rules.js; this file draws the editor and handles its clicks.
 import { esc, uid } from './ui.js';
-import { ACTIONS, opsFor, opOf, kindOf, targetsOf, actionFits, checkRules, ruleText } from './rules.js';
+import { ACTIONS, opsFor, opOf, kindOf, targetsOf, actionFits, checkRules, ruleText, ruleLabel } from './rules.js';
 import { withStageField } from './workflow.js';
 
-let H = { formById: null, recById: null, parentsOf: null, recordsOf: null, recTitle: null, setFdirty: null, renderMain: null, ui: () => ({}), canSeeTasks: () => true };
-export function initRules(helpers) { H = { ...H, ...helpers }; }
+let H = { fdraft: () => null, formById: null, recById: null, parentsOf: null, recordsOf: null, recTitle: null, setFdirty: null, renderMain: null, ui: () => ({}), canSeeTasks: () => true };
+export function initRules(helpers) { H = { ...H, ...helpers }; initDrag(); }
+
+/* The designer shows one rule at a time; the list beside it picks which. */
+const S = { sel: new Map(), q: '', drag: null };
+function selIndex(f) {
+  const rules = f.rules || [], id = S.sel.get(f.id);
+  const i = rules.findIndex((r) => r.id === id);
+  return i < 0 ? 0 : i;
+}
+const select = (f, id) => { if (id) S.sel.set(f.id, id); };
 
 const MAX_RULES = 100, MAX_CONDS = 12, MAX_TARGETS = 40;
 
@@ -96,7 +105,7 @@ export function condsHTML(ctx, r, ri, { label = 'When', words = ['all of these a
 function ruleCard(ctx, r, ri, n, msgs) {
   const mine = msgs.filter((m) => m.ruleId === r.id);
   return `<article class="panel rl-card${r.off ? ' off' : ''}" data-rlid="${esc(r.id)}">
-    <header class="rl-h"><b>Rule ${ri + 1}</b><span class="rl-fire" data-rlfire="${esc(r.id)}" hidden>Applies now</span><span class="grow"></span>
+    <header class="rl-h"><b class="rl-num">Rule ${ri + 1}</b><label class="rl-namel"><span class="sr">Rule ${ri + 1} name</span><input class="in rl-name" data-rlname="1" data-r="${ri}" value="${esc(r.name || '')}" maxlength="60" placeholder="Name this rule (optional)" autocomplete="off"></label><span class="rl-fire" data-rlfire="${esc(r.id)}" hidden>Applies now</span>
       <label class="switch rl-on"><input type="checkbox" data-rl="toggle" data-r="${ri}"${r.off ? '' : ' checked'}><span class="tr"></span><span>${r.off ? 'Off' : 'On'}</span></label>
       <button type="button" class="ibtn" data-rl="move" data-r="${ri}" data-dir="-1" aria-label="Move rule ${ri + 1} up"${ri === 0 ? ' disabled' : ''}>↑</button>
       <button type="button" class="ibtn" data-rl="move" data-r="${ri}" data-dir="1" aria-label="Move rule ${ri + 1} down"${ri === n - 1 ? ' disabled' : ''}>↓</button>
@@ -111,25 +120,116 @@ function ruleCard(ctx, r, ri, n, msgs) {
   </article>`;
 }
 
-/** The left side of the Rules tab: the rules, and problems found in them. */
+/** The left side of the Rules tab: the rule being edited, and problems found in the rules. */
 export function viewRules(f) {
   const ctx = rulesCtx(f);
   const rules = f.rules || [];
   const msgs = checkRules(withStageField(f), ctx);
   const clashes = msgs.filter((m) => !m.ruleId);
+  const ri = selIndex(f), r = rules[ri];
+  const clashLine = (m) => (m.rules
+    ? `<li><b>${esc(m.target)}</b>: ${m.rules.map((x) => `<button type="button" class="linkbtn" data-rl="pick" data-id="${esc(x.id)}">${esc(x.label)}</button> ${esc(x.verb)}`).join(', ')}. ${esc(m.tail)}</li>`
+    : `<li>${esc(m.text)}</li>`);
   return `<section class="rl-list" aria-label="Rules">
-    <div class="rl-top"><div><h2 class="dz-h">Show and hide rules</h2><p class="help">Rules decide what shows on a ${esc((f.itemName || f.name || 'record').toLowerCase())} as people fill it in. A hidden field, or one a rule clears, is emptied when the record is saved. Hiding isn’t a permission: lists, reports and exports still show the data.</p></div>
-      ${rules.length < MAX_RULES ? '<button type="button" class="btn primary" data-rl="add">+ Add rule</button>' : ''}</div>
-    ${clashes.length ? `<div class="panel rl-clash" role="note"><b>Rules that overlap</b><ul>${clashes.map((m) => `<li>${esc(m.text)}</li>`).join('')}</ul></div>` : ''}
-    ${rules.length ? rules.map((r, i) => ruleCard(ctx, r, i, rules.length, msgs)).join('') : `<div class="panel rl-empty"><p><b>No rules yet.</b> For example: when <i>Type</i> is <i>Repair</i>, show <i>Warranty details</i>; or when <i>Status</i> is <i>Closed</i>, hide <i>Tasks</i>.</p></div>`}
+    <div class="rl-top"><div><h2 class="dz-h">Show and hide rules</h2><p class="help">Rules decide what shows on a ${esc((f.itemName || f.name || 'record').toLowerCase())} as people fill it in. A hidden field, or one a rule clears, is emptied when the record is saved. Hiding isn’t a permission: lists, reports and exports still show the data.</p></div></div>
+    ${clashes.length ? `<div class="panel rl-clash" role="note"><b>Rules that overlap</b><ul>${clashes.map(clashLine).join('')}</ul></div>` : ''}
+    ${r ? `${rules.length > 1 ? `<div class="panel rl-nav"><b>Rule ${ri + 1} of ${rules.length}</b><span class="grow"></span><button type="button" class="btn sm" data-rl="prev"${ri === 0 ? ' disabled' : ''}>‹ Prev</button><button type="button" class="btn sm" data-rl="next"${ri === rules.length - 1 ? ' disabled' : ''}>Next ›</button></div>` : ''}
+      ${ruleCard(ctx, r, ri, rules.length, msgs)}`
+    : `<div class="panel rl-empty"><p><b>No rules yet.</b> For example: when <i>Type</i> is <i>Repair</i>, show <i>Warranty details</i>; or when <i>Status</i> is <i>Closed</i>, hide <i>Tasks</i>.</p>${rules.length < MAX_RULES ? '<button type="button" class="btn primary" data-rl="add">+ Add rule</button>' : ''}</div>`}
     <details class="rl-how"><summary>How rules work together</summary><ul class="help">
       <li><b>Show</b> means hidden the rest of the time. <b>Set required</b> means not required the rest of the time.</li>
       <li>When rules disagree, <b>Hide</b> wins over Show and <b>Set required</b> wins over Set not required. A hidden field is never required.</li>
       <li><b>Clear value</b> empties the field and locks it while the rule applies.</li>
       <li>Hiding a <b>section heading</b> hides every field under it. Hiding a grid, child section or Tasks never deletes anything.</li>
       <li>Conditions can look at the <b>parent</b> record (for example the client a job belongs to).</li>
+      <li>The order of the rules doesn’t change what they do; drag them in the list to keep related rules together.</li>
     </ul></details>
   </section>`;
+}
+
+/** The right side's list of every rule: pick one to edit, search, drag to reorder. */
+export function rulesListHTML(f) {
+  const rules = f.rules || [];
+  if (!rules.length) return '';
+  const ctx = rulesCtx(f);
+  const msgs = checkRules(withStageField(f), ctx);
+  const overlap = new Set(msgs.filter((m) => m.rules).flatMap((m) => m.rules.map((x) => x.id)));
+  const bad = new Set(msgs.filter((m) => m.ruleId).map((m) => m.ruleId));
+  const cur = rules[selIndex(f)]?.id;
+  const q = S.q.trim().toLowerCase();
+  let shown = 0;
+  const items = rules.map((r, i) => {
+    const say = ruleText(r, ctx), title = String(r.name || '').trim() || `Rule ${i + 1}`;
+    const hay = `${ruleLabel(f, r)} ${say}`.toLowerCase();
+    const hit = !q || hay.includes(q); if (hit) shown++;
+    return `<li class="rl-li${r.off ? ' off' : ''}" data-rldrag="${esc(r.id)}" data-rltext="${esc(hay)}"${q ? '' : ' draggable="true"'}${hit ? '' : ' hidden'}>
+      <span class="rl-grip" aria-hidden="true" title="Drag to change the order">⋮⋮</span>
+      <button type="button" class="rl-pick${r.id === cur ? ' on' : ''}" data-rl="pick" data-id="${esc(r.id)}"${r.id === cur ? ' aria-current="true"' : ''}>
+        <span class="rl-n">${i + 1}</span>
+        <span class="rl-pm"><b data-rltitle="${esc(r.id)}">${esc(title)}</b><span class="rl-ps">${esc(say)}</span>
+          <span class="rl-tags"><span class="rl-fire" data-rlfire="${esc(r.id)}" hidden>Applies now</span>${overlap.has(r.id) ? '<span class="rl-tag warn">Overlaps</span>' : ''}${bad.has(r.id) ? '<span class="rl-tag warn">Needs attention</span>' : ''}${r.off ? '<span class="rl-tag">Off</span>' : ''}</span></span>
+      </button></li>`;
+  }).join('');
+  return `<section class="panel rl-index" aria-label="All rules">
+    <div class="rl-ih"><h2 class="dz-h">Rules <span class="count">${rules.length}</span></h2>${rules.length < MAX_RULES ? '<button type="button" class="btn sm primary" data-rl="add">+ Add rule</button>' : ''}</div>
+    ${rules.length > 3 ? `<label class="rl-q"><span class="sr">Find a rule</span><input type="search" class="in" data-rlq="1" value="${esc(S.q)}" placeholder="Find a rule: name, field or section" autocomplete="off"></label>` : ''}
+    <ol class="rl-ol">${items}</ol>
+    <p class="help rl-none"${q && !shown ? '' : ' hidden'}>No rule mentions “${esc(S.q)}”.</p>
+    <p class="help rl-ihelp">${q ? 'Clear the search to drag rules into a new order.' : 'Click a rule to edit it. Drag ⋮⋮ to change the order.'}</p>
+  </section>`;
+}
+
+/** Typing in the Rules tab: a rule's name (the list follows as you type), and the list's search. */
+export function rulesInput(f, el) {
+  if (el.dataset?.rlname) {
+    const r = (f.rules || [])[+el.dataset.r]; if (!r) return false;
+    r.name = el.value.slice(0, 60);
+    H.setFdirty();
+    const t = document.querySelector(`[data-rltitle="${CSS.escape(r.id)}"]`); if (t) t.textContent = r.name.trim() || `Rule ${+el.dataset.r + 1}`;
+    return true;
+  }
+  if (el.dataset?.rlq) {
+    S.q = el.value;
+    const q = S.q.trim().toLowerCase();
+    let shown = 0;
+    document.querySelectorAll('.rl-ol [data-rldrag]').forEach((li) => {
+      const hit = !q || li.dataset.rltext.includes(q); li.hidden = !hit; if (hit) shown++;
+      if (q) li.removeAttribute('draggable'); else li.setAttribute('draggable', 'true');
+    });
+    const none = document.querySelector('.rl-none'); if (none) { none.hidden = !(q && !shown); none.textContent = `No rule mentions “${S.q}”.`; }
+    const help = document.querySelector('.rl-ihelp'); if (help) help.textContent = q ? 'Clear the search to drag rules into a new order.' : 'Click a rule to edit it. Drag ⋮⋮ to change the order.';
+    return true;
+  }
+  return false;
+}
+
+/* Dragging rules in the list into a new order. */
+let dragReady = false;
+function initDrag() {
+  if (dragReady || typeof document === 'undefined') return; dragReady = true;
+  const liOf = (e) => e.target?.closest?.('.rl-ol [data-rldrag]');
+  const clear = () => document.querySelectorAll('.rl-ol .over, .rl-ol .dragging').forEach((x) => x.classList.remove('over', 'dragging'));
+  document.addEventListener('dragstart', (e) => {
+    const li = liOf(e); if (!li || S.q.trim()) return;
+    S.drag = li.dataset.rldrag; li.classList.add('dragging');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', S.drag); } catch (x) { /* some browsers */ }
+  });
+  document.addEventListener('dragover', (e) => {
+    const li = liOf(e); if (!li || !S.drag) return;
+    e.preventDefault();
+    if (!li.classList.contains('over')) { document.querySelectorAll('.rl-ol .over').forEach((x) => x.classList.remove('over')); if (li.dataset.rldrag !== S.drag) li.classList.add('over'); }
+  });
+  document.addEventListener('drop', (e) => {
+    const li = liOf(e); if (!li || !S.drag) return;
+    e.preventDefault();
+    const f = H.fdraft(), rules = f?.rules || [];
+    const from = rules.findIndex((r) => r.id === S.drag), to = rules.findIndex((r) => r.id === li.dataset.rldrag);
+    S.drag = null; clear();
+    if (from < 0 || to < 0 || from === to) return;
+    const [m] = rules.splice(from, 1); rules.splice(to, 0, m);
+    changed();
+  });
+  document.addEventListener('dragend', () => { S.drag = null; clear(); });
 }
 
 /* ---------- editing ---------- */
@@ -154,13 +254,15 @@ export function rulesClick(f, el, dirty = null) {
   const ui = H.ui();
   if (a !== 'del') ui.confirm = null;
   switch (a) {
-    case 'add': { if (rules.length >= MAX_RULES) return; const nr = blankRule(); rules.push(nr); changed(`[data-rlid="${nr.id}"] .rl-f`); return; }
+    case 'pick': { select(f, el.dataset.id); H.renderMain(); setTimeout(() => { const c = document.querySelector('.rl-card'); if (c && c.getBoundingClientRect().top < 0) c.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 0); return; }
+    case 'prev': case 'next': { const i = selIndex(f) + (a === 'next' ? 1 : -1); if (rules[i]) { select(f, rules[i].id); H.renderMain(); } return; }
+    case 'add': { if (rules.length >= MAX_RULES) return; const nr = blankRule(); rules.push(nr); select(f, nr.id); S.q = ''; changed(`[data-rlid="${nr.id}"] .rl-f`); return; }
     case 'del': {
       if (!r) return;
       if (ui.confirm !== 'rl-' + r.id) { ui.confirm = 'rl-' + r.id; H.renderMain(); setTimeout(() => { if (ui.confirm === 'rl-' + r.id) { ui.confirm = null; H.renderMain(); } }, 5000); return; }
-      ui.confirm = null; rules.splice(ri, 1); changed(); return;
+      ui.confirm = null; rules.splice(ri, 1); select(f, (rules[ri] || rules[ri - 1])?.id); changed(); return;
     }
-    case 'dup': { if (!r || rules.length >= MAX_RULES) return; const c = JSON.parse(JSON.stringify(r)); c.id = uid('rl'); rules.splice(ri + 1, 0, c); changed(`[data-rlid="${c.id}"] .rl-f`); return; }
+    case 'dup': { if (!r || rules.length >= MAX_RULES) return; const c = JSON.parse(JSON.stringify(r)); c.id = uid('rl'); if (c.name) c.name = (c.name + ' (copy)').slice(0, 60); rules.splice(ri + 1, 0, c); select(f, c.id); changed(`[data-rlid="${c.id}"] .rl-f`); return; }
     case 'move': { const j = ri + +el.dataset.dir; if (!r || j < 0 || j >= rules.length) return; [rules[ri], rules[j]] = [rules[j], rules[ri]]; changed(`[data-rl="move"][data-r="${j}"][data-dir="${el.dataset.dir}"]:not(:disabled)`); return; }
     case 'addc': {
       if (!r) return;
