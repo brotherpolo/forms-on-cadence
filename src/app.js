@@ -4,7 +4,8 @@ import './grids.css';
 import { readTheme, applyTheme, nextTheme, themeLabel } from './theme.js';
 // Admin screens (users and groups) live in admin.js; data access in store.js.
 
-import { fillAutoNumbers, setAutoNumber, autoCounter } from './store.js';
+import { fillAutoNumbers, setAutoNumber, autoCounter, emailRecord, watchEmails, getExportSettings } from './store.js';
+import { DEFAULT_SUBJECT, DEFAULT_MESSAGE, fillTemplate, parseEmails, emailSuggestions } from './emaillogic.js';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
@@ -24,7 +25,7 @@ import { FX } from './formulas.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
 import * as admin from './admin.js';
 import { leave as exportLeave } from './exportset.js';
-import { fieldItem } from './pdfdoc.js';
+import { fieldItem, fileName as pdfFileName } from './pdfdoc.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
 import { signOutUser } from './auth.js';
 import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
@@ -147,7 +148,7 @@ const ui={search:'',openField:null,tab:'fields',palette:false,confirm:null,leave
 function dirty(){return (view.name==='record'&&rdraft?.dirty)||(view.name==='formEdit'&&fdraft?.dirty)||(view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId))||admin.isDirty(view)}
 function guard(){if(importRunning()){toast('The import is still running. Wait for it to finish.');return false;}if(dirty()&&!ui.leaveOk){ui.leaveOk=true;toast('You have unsaved changes. Tap again to leave without saving.');setTimeout(()=>ui.leaveOk=false,4000);return false;}ui.leaveOk=true;return true;}
 export function goRec(draft,v){if(!guard())return;rdraft=draft;go(v);}
-export function go(v,push=true){ui.subPop=null;ui.anEdit=null;
+export function go(v,push=true){ui.subPop=null;ui.anEdit=null;if(!ui.mail?.busy)ui.mail=null;
   if(ADMIN_VIEWS.has(v.name)&&!isAdmin(store.me)){toast('Only administrators can open that.');return false;}
   if((v.name==='records'||v.name==='record')&&!canViewForm(store.me,v.formId)){toast('You don’t have access to that form.');return false;}
   if(!guard())return false;
@@ -405,7 +406,7 @@ function renderMain(){
   if(view.name==='records')afterRecords();
   if(view.name==='formEdit')applyDzq();
   if(view.name==='dashboard')fitTiles();
-  syncTaskWatch();
+  syncTaskWatch();syncEmailWatch();
 }
 
 /* ---------- Cadence tasks linked to the open record ---------- */
@@ -546,6 +547,7 @@ function viewRecord(form){
   <div class="recbar" role="toolbar" aria-label="${esc(itemName(form))} actions">
     ${rec&&!ro?`<button class="btn danger${ui.confirm===delKey?' armed':''}" data-act="del-record">${ui.confirm===delKey?(kids?`Tap again to delete (${kids} child record${kids>1?'s':''} stay)`:'Tap again to delete'):'Delete'}</button>`:''}
     <span class="grow" id="dirtynote" role="status">${rdraft.dirty?'Unsaved changes':ro?'Read only':''}</span>
+    ${rec&&isAdmin(store.me)?`<button class="btn" data-act="email-pdf" title="Email this ${esc(itemName(form).toLowerCase())} as a PDF">Email PDF</button>`:''}
     ${rec?`<button class="btn" data-act="export-pdf" id="pdf-btn"${ui.pdfBusy?' disabled':''} title="Download this ${esc(itemName(form).toLowerCase())} as a PDF">${ui.pdfBusy?'Making PDF…':'Export PDF'}</button>`:''}
     <button class="btn ghost" data-act="back">${rdraft.dirty?'Discard':'Back'}</button>
     ${ro?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
@@ -556,9 +558,9 @@ function viewRecord(form){
   <div class="panel">
     <fieldset class="fset"${ro?' disabled':''}>${formFieldsHTML(form,rdraft,'record')}</fieldset>
   </div>
-  ${sectionsHTML}${backHTML}
+  ${sectionsHTML}${backHTML}${rec?`<div id="rec-emails">${sentEmailsHTML()}</div>`:''}
   ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}
-  ${cellPopup()}`;
+  ${cellPopup()}${ui.mail&&ui.mail.rec===rec?.id?mailDialog(form,rec):''}`;
 }
 
 const personName=id=>store.profiles[id]?.displayName||(id===store.user?.uid?'you':'someone');
@@ -568,6 +570,92 @@ function recordMeta(rec){
   let s=`Created by ${esc(by)}`;
   if(rec.updatedAt)s+=` · edited ${esc(when(rec.updatedAt))}`+(rec.updatedBy&&rec.updatedBy!==rec.ownerId?` by ${esc(personName(rec.updatedBy))}`:'');
   return s;
+}
+
+/* ---------- Email PDF (administrators) ----------
+   Email PDF opens a short form: who to send to (addresses found on this record and the
+   records around it, or typed), Cc, a copy to yourself, and the subject and message from the
+   form's template. Sending makes the same PDF as Export PDF and hands it to the server
+   (emailRecord), which sends it through Gmail and notes it under "Sent emails". */
+const ew={recordId:null,unsub:null,list:[]};
+function syncEmailWatch(){
+  const want=view.name==='record'&&view.recordId?view.recordId:null;
+  if(want===ew.recordId)return;
+  if(ew.unsub){ew.unsub();ew.unsub=null;}
+  Object.assign(ew,{recordId:want,list:[]});
+  if(want)ew.unsub=watchEmails(want,list=>{ew.list=list;const el=$('#rec-emails');if(el)el.innerHTML=sentEmailsHTML();});
+}
+function sentEmailsHTML(){
+  if(!ew.list.length||ew.recordId!==view.recordId)return '';
+  const row=m=>`<div class="mail-row"><div class="grow"><b>${esc(m.subject||'(no subject)')}</b><span>To ${esc((m.to||[]).join(', '))}${(m.cc||[]).length?' · Cc '+esc(m.cc.join(', ')):''}</span></div><small>${esc(when(m.at))}<br>${esc(m.byName||'')}</small></div>`;
+  return `<section class="section"><div class="section-h"><h2>Sent emails <span class="count">${ew.list.length}</span></h2></div><div class="panel mail-list">${ew.list.slice(0,20).map(row).join('')}</div></section>`;
+}
+function fieldTextByLabel(form,rec,label){
+  const n=String(label).trim().toLowerCase();
+  const f=(form.fields||[]).find(x=>x.type!=='heading'&&String(x.label||'').trim().toLowerCase()===n);
+  if(!f)return undefined;
+  return pdfText(f,valOf(f,rec,form));
+}
+async function openMail(){
+  const rec=view.recordId?recById(view.recordId):null,form=rec?formById(rec.formId):null;
+  if(!rec||!form||!isAdmin(store.me))return;
+  if(rdraft?.dirty){toast('Save your changes first, so the PDF matches what’s saved.');return;}
+  const brand=await getExportSettings();
+  const ctx={field:l=>fieldTextByLabel(form,rec,l),title:recTitle(rec,form),form:form.name,item:itemName(form),company:brand.companyName||'',sender:realName(store.user?.uid),date:longDate(Date.now())};
+  const sugg=emailSuggestions(rec,{formById,recById,records:store.records,recTitle});
+  ui.mail={rec:rec.id,sugg,to:new Set(sugg.slice(0,1).map(x=>x.email)),extra:'',cc:'',copyMe:true,
+    subject:fillTemplate((form.emailSubject||'').trim()||(ctx.company?DEFAULT_SUBJECT:'{Item} {Title}'),ctx).trim(),
+    message:fillTemplate((form.emailMessage||'').trim()||(ctx.company?DEFAULT_MESSAGE:DEFAULT_MESSAGE.replace('\n{Company}','')),ctx),busy:false,company:ctx.company};
+  renderMain();
+  setTimeout(()=>{(document.querySelector('.mail-dlg input[data-mailto]')||document.querySelector('.mail-dlg [data-mail="extra"]'))?.focus();},0);
+}
+function mailDialog(form,rec){
+  const m=ui.mail,me=String(store.me?.email||store.user?.email||'');
+  const file=fileNameOf(form,rec);
+  return `<div class="lv-scrim mail-scrim" data-act="mail-scrim"><div class="lv-dlg mail-dlg" role="dialog" aria-modal="true" aria-labelledby="mail-h" data-stop-scrim="1">
+    <h2 id="mail-h">Email ${esc(itemName(form).toLowerCase())} ${esc(recTitle(rec,form))}</h2>
+    <fieldset class="mail-f"${m.busy?' disabled':''}>
+    <div class="mail-to"><span class="mlab" id="mail-to-l">To</span>
+      ${m.sugg.length?`<div class="mail-sugg" role="group" aria-labelledby="mail-to-l">${m.sugg.map(x=>`<label class="mail-opt"><input type="checkbox" data-mailto="${esc(x.email)}"${m.to.has(x.email)?' checked':''}><span><b>${esc(x.email)}</b><small>${esc(x.who)} · ${esc(x.where)}</small></span></label>`).join('')}</div>`:'<p class="help">No email addresses on this record or the records around it. Type one below.</p>'}
+      <input class="in" data-mail="extra" value="${esc(m.extra)}" placeholder="${m.sugg.length?'Other addresses, separated by commas':'name@example.com'}" aria-label="Other addresses to send to" autocomplete="off">
+    </div>
+    <label class="mail-l"><span class="mlab">Cc</span><input class="in" data-mail="cc" value="${esc(m.cc)}" placeholder="Optional" autocomplete="off"></label>
+    <label class="switch mail-copy"><input type="checkbox" data-mail="copyMe"${m.copyMe?' checked':''}><span class="tr"></span><span>Send me a copy${me?' ('+esc(me)+')':''}</span></label>
+    <label class="mail-l"><span class="mlab">Subject</span><input class="in" data-mail="subject" value="${esc(m.subject)}" maxlength="200"></label>
+    <label class="mail-l"><span class="mlab">Message</span><textarea class="in" data-mail="message" rows="8" maxlength="10000">${esc(m.message)}</textarea></label>
+    <p class="mail-att"><span aria-hidden="true">📎</span> ${esc(file)}</p>
+    <p class="help">Sent from your Gmail${m.company?' as '+esc(m.company):''}. Replies come to you, and it’s listed under Sent emails on this ${esc(itemName(form).toLowerCase())}.</p>
+    </fieldset>
+    <div class="lv-dlgacts"><button type="button" class="btn ghost" data-act="mail-cancel"${m.busy?' disabled':''}>Cancel</button><button type="button" class="btn primary" data-act="mail-send"${m.busy?' disabled':''}>${m.busy?'Sending…':'Send'}</button></div>
+  </div></div>`;
+}
+const fileNameOf=(form,rec)=>pdfFileName(form.name,recTitle(rec,form));
+async function sendMail(){
+  const m=ui.mail;if(!m||m.busy)return;
+  const rec=recById(m.rec),form=rec?formById(rec.formId):null;if(!rec||!form)return;
+  const extra=parseEmails(m.extra),cc=parseEmails(m.cc);
+  if(extra.bad.length||cc.bad.length){toast(`“${[...extra.bad,...cc.bad][0]}” isn’t an email address.`);return;}
+  const to=[...new Set([...m.to,...extra.ok])];
+  if(!to.length){toast('Pick or type at least one address.');return;}
+  if(to.length+cc.ok.length>10){toast('Send to 10 addresses at most.');return;}
+  if(!m.subject.trim()){toast('Add a subject.');return;}
+  m.busy=true;renderMain();
+  try{
+    const {makeRecordPdf,toBase64}=await import('./pdfexport.js');
+    const pdf=await makeRecordPdf(pdfModel(form,rec));
+    if(pdf.bytes.length>8*1024*1024)throw Object.assign(new Error('The PDF is over 8 MB, too big to email.'),{code:'local'});
+    await emailRecord({recordId:rec.id,to,cc:cc.ok,copyMe:m.copyMe,subject:m.subject.trim(),message:m.message,pdf:toBase64(pdf.bytes),fileName:pdf.name});
+    ui.mail=null;
+    toast(`Emailed to ${to.join(', ')}${pdf.missing?` (${pdf.missing} picture${pdf.missing>1?'s':''} couldn’t be included)`:''}`);
+  }catch(e){
+    console.error('[formwright] email',e);
+    if(ui.mail)ui.mail.busy=false;
+    const code=String(e?.code||'');
+    toast(code==='functions/not-found'||/not.?found|404/i.test(code)&&!/record/i.test(e?.message||'')?'The email service isn’t set up yet. Deploy the Cadence functions first (see the install steps).'
+      :code==='local'||/invalid-argument|failed-precondition|resource-exhausted|unavailable|permission-denied/.test(code)?e.message
+      :'The email didn’t go. Check your connection and try again.');
+  }
+  renderMain();
 }
 
 /* ---------- Export PDF ----------
@@ -1173,6 +1261,8 @@ function viewFormEdit(){
       <label class="prop"><span>Record title comes from</span><select class="in" data-fprop="titleField"><option value="">First text field</option>${tfs.map(x=>`<option value="${x.id}"${x.id===f.titleField?' selected':''}>${esc(x.label)}</option>`).join('')}</select></label>
       <label class="prop full"><span>Description</span><textarea class="in" data-fprop="description" rows="2" placeholder="What this form collects">${esc(f.description||'')}</textarea></label>
       <div class="prop"><span>Color</span><div class="swatches">${COLORS.map((c,i)=>`<button class="sw${(f.color??0)===i?' on':''}" style="background:${c}" data-act="set-color" data-i="${i}" aria-label="Color ${i+1}"></button>`).join('')}</div></div>
+      <label class="prop full"><span>Email PDF: subject</span><input class="in" data-fprop="emailSubject" value="${esc(f.emailSubject||'')}" maxlength="200" placeholder="${esc(DEFAULT_SUBJECT)}"></label>
+      <label class="prop full"><span>Email PDF: message</span><textarea class="in" data-fprop="emailMessage" rows="6" maxlength="10000" placeholder="${esc(DEFAULT_MESSAGE)}">${esc(f.emailMessage||'')}</textarea><small class="help">What <b>Email PDF</b> fills in; it can be changed before sending. Use {Field name} for any field on this form (for example {${esc((f.fields||[]).find(x=>x.type!=='heading')?.label||'Invoice #')}}), plus {Title}, {Item}, {Company}, {Sender} and {Date}. Leave empty for the standard wording shown.</small></label>
       <div class="prop"><span>Visibility</span><label class="switch"><input type="checkbox" data-fprop="showInSidebar" data-kind="bool"${f.showInSidebar?' checked':''}><span class="tr"></span><span>Show in sidebar</span></label><small class="help">Hidden forms stay in the designer and under their parent records.</small></div>
     </div></div>
     ${f.isNew?'':`<section class="section"><div class="section-h"><h2>Delete form</h2></div><div class="panel"><div class="parentcard"><p class="grow help">Deletes the form and its ${recordsOf(f.id).length} records. Child records in other forms are kept.</p><button class="btn danger${ui.confirm==='form'?' armed':''}" data-act="del-form">${ui.confirm==='form'?'Tap again to delete':'Delete form'}</button></div></div></section>`}`;
@@ -1414,6 +1504,10 @@ document.addEventListener('click',async e=>{
     case 'task-open':if(cadenceUrl)window.open(cadenceLink(cadenceUrl,{task:id}),'cadence');break;
     case 'add-task':if(cadenceUrl&&view.recordId)window.open(cadenceLink(cadenceUrl,{addTaskFor:view.recordId}),'cadence');break;
     case 'export-pdf':exportPdf();break;
+    case 'email-pdf':openMail();break;
+    case 'mail-cancel':if(ui.mail&&!ui.mail.busy){ui.mail=null;renderMain();document.querySelector('[data-act="email-pdf"]')?.focus();}break;
+    case 'mail-scrim':if(e.target===el&&ui.mail&&!ui.mail.busy){ui.mail=null;renderMain();}break;
+    case 'mail-send':sendMail();break;
     case 'an-edit':{const rid=rdraft?.recordId;const t=recById(rid)?.nums?.[el.dataset.fid]||'';ui.anEdit={rec:rid,fid:el.dataset.fid,value:t,busy:false};renderMain();const i=document.querySelector('[data-anval]');if(i){i.focus();i.select();}break;}
     case 'an-cancel':ui.anEdit=null;renderMain();break;
     case 'an-save':{const ed=ui.anEdit;if(!ed||ed.busy)return;const v=String(ed.value||'').trim();if(!v){toast('Type the new number.');return;}if(v===(recById(ed.rec)?.nums?.[ed.fid]||'')){ui.anEdit=null;renderMain();return;}
@@ -1482,6 +1576,7 @@ document.addEventListener('click',async e=>{
   }
 });
 document.addEventListener('input',e=>{
+  if(e.target.dataset?.mail&&ui.mail&&e.target.type!=='checkbox'){ui.mail[e.target.dataset.mail]=e.target.value;return;}
   if(e.target.dataset?.anval){if(ui.anEdit)ui.anEdit.value=e.target.value;return;}
   const t=e.target;
   if(t.dataset.dzq!==undefined){ui.dzq=t.value;applyDzq();return;}
@@ -1503,6 +1598,8 @@ document.addEventListener('input',e=>{
   admin.onInput(t);
 });
 document.addEventListener('change',async e=>{
+  if(ui.mail&&e.target.dataset?.mailto){const v=e.target.dataset.mailto;if(e.target.checked)ui.mail.to.add(v);else ui.mail.to.delete(v);return;}
+  if(ui.mail&&e.target.dataset?.mail==='copyMe'){ui.mail.copyMe=e.target.checked;return;}
   {const t0=e.target,fid=rdraft?.formId;
    if(fid&&t0.dataset?.subcol){const k=t0.dataset.subcol,c=subCols(fid,k);if(c){saveSub(fid,k,{cols:subToggle(c.cur,t0.dataset.v,{min:c.min})});renderMain();document.querySelector(`[data-subcol="${CSS.escape(k)}"][data-v="${CSS.escape(t0.dataset.v)}"]`)?.focus({preventScroll:true});}return;}
    if(fid&&t0.dataset?.subshow){const v=t0.value==='all'?'all':Number(t0.value);saveSub(fid,t0.dataset.subshow,{show:v});renderMain();document.querySelector(`[data-subshow="${CSS.escape(t0.dataset.subshow)}"]`)?.focus({preventScroll:true});return;}
@@ -1548,6 +1645,7 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('pointerdown',e=>{if(ui.subPop&&!e.target.closest?.('.lv-anchor')){ui.subPop=null;renderMain();}},true);
 document.addEventListener('keydown',e=>{if(e.target?.dataset?.anval&&(e.key==='Enter'||e.key==='Escape')){e.preventDefault();document.querySelector(e.key==='Enter'?'[data-act="an-save"]':'[data-act="an-cancel"]')?.click();}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ui.mail&&!ui.mail.busy){e.preventDefault();ui.mail=null;renderMain();document.querySelector('[data-act="email-pdf"]')?.focus();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ui.subPop){e.preventDefault();const k=ui.subPop;ui.subPop=null;renderMain();document.querySelector(`[data-act="sub-pop"][data-k="${CSS.escape(k)}"]`)?.focus();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cdraft){e.preventDefault();document.querySelector('[data-act="cell-close"]')?.click();}});
 function closeMenu(){$('#side').classList.remove('open');$('#scrim').classList.remove('open');}

@@ -510,6 +510,17 @@ export async function autoCounter(formId, fieldId) {
   try { const s = await getDoc(doc(db, 'counters', `${formId}__${fieldId}`)); return s.exists() ? s.data() : null; } catch (e) { return null; }
 }
 
+/* ---------- Email PDF ---------- */
+
+/** Admins: send a record's PDF. mail: { recordId, to, cc, copyMe, subject, message, pdf (base64), fileName } */
+export async function emailRecord(mail) {
+  return (await httpsCallable(fns(), 'emailRecord')(mail)).data;
+}
+/** Live list of what's been emailed from a record, newest first. Returns an unsubscribe function. */
+export function watchEmails(recordId, onNext, onError) {
+  return onSnapshot(collection(db, 'records', recordId, 'emails'), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.at || 0) - (a.at || 0))), onError || (() => onNext([])));
+}
+
 /* ---------- Writes ---------- */
 
 // A record is always written with these fields only, so the server's auto numbers (nums,

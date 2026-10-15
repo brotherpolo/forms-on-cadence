@@ -414,3 +414,26 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .anfill{background:var(--sunk);border-radius:10px;padding:10px 12px}
 .anfill p{margin:0 0 8px}
 .gauto{font-family:var(--mono)}
+
+/* Email PDF */
+.mail-dlg{max-width:620px;display:flex;flex-direction:column;gap:12px}
+.mail-dlg h2{margin:0}
+.mail-f{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;min-width:0}
+.mlab{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+.mail-l{display:block}
+.mail-sugg{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px}
+.mail-opt{display:flex;align-items:flex-start;gap:10px;padding:8px;border-radius:8px;cursor:pointer}
+.mail-opt:hover{background:var(--sunk)}
+.mail-opt input{width:18px;height:18px;margin-top:2px;accent-color:var(--accent)}
+.mail-opt span{display:flex;flex-direction:column;min-width:0}
+.mail-opt b{font-weight:600;overflow-wrap:anywhere}
+.mail-opt small{color:var(--muted);font-size:12px}
+.mail-dlg textarea{min-height:150px;resize:vertical}
+.mail-att{margin:0;font-size:13px;background:var(--sunk);border-radius:8px;padding:8px 12px;overflow-wrap:anywhere}
+.mail-list{display:flex;flex-direction:column}
+.mail-row{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);font-size:14px}
+.mail-row:last-child{border-bottom:0}
+.mail-row .grow{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.mail-row .grow span{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.mail-row small{color:var(--muted);text-align:right;white-space:nowrap;font-size:12px}
+@media (max-width:640px){.mail-scrim{place-items:end center;padding:0}.mail-dlg{border-radius:14px 14px 0 0;max-height:92dvh}}

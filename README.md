@@ -76,6 +76,7 @@ src/
   imports.js, imports.css  Import screens: templates menu, choose file, match columns, check rows, history and undo
   importlogic.js           Templates, column matching, checking rows, undo plans (pure, unit-tested)
   xlsx.js                  Reads and writes .xlsx and .csv with no extra packages (unit-tested)
+  emaillogic.js            Email PDF: templates, addresses to suggest, checking typed ones (pure, unit-tested)
   autonum.js               Auto number: how numbers look, next number, records still to number (pure, unit-tested)
   sublogic.js, subui.js    Sections under a record: columns, sort, Show menu, task cells (sublogic pure, unit-tested)
   pdfdoc.js                Export PDF: field layout, text wrapping, table columns, file names (pure, unit-tested)
@@ -242,6 +243,16 @@ A view only decides how the list looks. It never shows anyone records they could
 - **Existing records:** after saving the form, the field's settings show how many records have no number and **Number them now** (oldest first). Changing an existing text or number field's type to Auto number **keeps the numbers already typed in** and carries on after the highest one; clashing typed numbers are listed.
 - **Admins can change a number** (record → **Change…**), with a warning. It must not be in use on the same form, the change is noted on the record (`autoLog`), and the counter moves past it so it's never handed out again.
 - Works like any field elsewhere: as the record's title, list column, search, reports, CSV and PDF. Imports leave it to the server, and copying from a parent skips it.
+
+## Email PDF (administrators)
+
+**Email PDF** on a saved record sends the same PDF as Export PDF, from the company's Gmail (`GMAIL_USER` in the Cadence functions), shown with the company name from PDF exports. Replies go to the administrator who sent it.
+
+- **To:** suggests email addresses found on the record, records it links to, its parent and grandparent, and the other children of it and its parent (a client's contacts), saying where each came from. Others can be typed. Up to 10 addresses with Cc. **Send me a copy** (on by default) blind-copies the sender.
+- **Subject and message** come from the form's template (form designer → Settings → Email PDF), with `{Field name}` for any field plus `{Title}`, `{Item}`, `{Company}`, `{Sender}`, `{Date}`, and can be edited before sending. Unknown names stay as typed so a typo shows. Empty templates use standard wording.
+- **Sent emails** on the record lists what was sent, to whom, by whom and when (`records/{id}/emails`, written only by the server, readable by anyone who can see the record).
+- The server function `emailRecord` (Cadence folder, `functions/email.js`) checks the sender is an administrator, the addresses, the subject and the PDF (8 MB at most), allows 100 emails per person per day, then sends through Gmail with the app password kept in Secret Manager (`GMAIL_APP_PASSWORD`). Gmail also keeps a copy in its Sent folder.
+- `emaillogic.js` (pure, unit-tested): templates, typed addresses, suggestions.
 
 ## Sections under a record (grids, child records, Tasks)
 

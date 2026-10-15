@@ -44,12 +44,12 @@ async function photoBytes(blob) {
 }
 
 /**
- * Make and download the PDF.
+ * Make the PDF: → { bytes, name, missing }. (Export PDF downloads it; Email PDF sends it.)
  * model: as pdfdraw.js describes, except image and signature items keep `src` (a data URL,
  * or { path, url } of an upload) and brand comes from Administration → PDF exports.
  * Returns { name, missing } — missing = pictures that couldn't be included.
  */
-export async function exportRecordPdf(model) {
+export async function makeRecordPdf(model) {
   const [L, { drawPdf }, brand] = await Promise.all([import(/* @vite-ignore */ PDF_LIB), import('./pdfdraw.js'), getExportSettings()]);
   const imgs = new Map();
   let missing = 0;
@@ -76,7 +76,12 @@ export async function exportRecordPdf(model) {
   }));
 
   const bytes = await drawPdf(L, model, imgs);
-  const name = fileName(model.formName, model.title);
+  return { bytes, name: fileName(model.formName, model.title), missing, company: brand.companyName || '' };
+}
+
+/** Make the PDF and download it. → { name, missing } */
+export async function exportRecordPdf(model) {
+  const { bytes, name, missing } = await makeRecordPdf(model);
   const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
   const a = document.createElement('a');
   a.href = url;
@@ -87,4 +92,11 @@ export async function exportRecordPdf(model) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
   return { name, missing };
+}
+
+/** Bytes as base64, for sending the PDF to the server. */
+export function toBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }
