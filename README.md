@@ -60,6 +60,8 @@ src/
   store.js                 Firestore subscriptions and writes, Storage uploads, group/access writes
   access.js                Permission model (pure; mirrored by the rules)
   formulas.js              Formula parser and evaluator (no eval)
+  formtext.js              Fields as text, change summaries, version files (pure, unit-tested)
+  formver.js               Fields → Text view, History tab, drafts, Make active
   workflow.js              Workflow stages: what each shows, who works on it, checks (pure, unit-tested)
   wfdesign.js              Form designer → Workflow tab
   route.js                 Web addresses for records, form lists and reports (pure)
@@ -118,6 +120,7 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | `forms/{formId}` | `name, itemName, description, color, showInSidebar, order, titleField, fields[], children[]` | admins |
 | `records/{id}` | `formId, values{fieldId: value}, parentId, parentFormId, ownerId, createdBy, createdAt, updatedAt, updatedBy`; `nums{fieldId: number}` and `autoLog[]` from the server; `stage, assignee, assigneeGroup, stageAt` with a workflow | per access; at a workflow stage only its assignee or admins (`nums`, `autoLog`: server only) |
 | `records/{id}/stages/{id}` | `at, by, from, fromName, to, toName, label, comment, assignee, assigneeGroup`: stage history | whoever moves it, as themselves; never changed |
+| `forms/{id}/versions/{id}` | `n, at, by, kind (saved, draft, loaded, activated, baseline), note, from, fromN, summary[], form{…}`: version history; `forms/{id}.activeVersion` names the live one | admins (never changed or deleted) |
 | `groups/{id}` | `name, description, access{formId or "*": {view, edit}}` | admins |
 | `users/{uid}` | `email, displayName, role, groups[], access{…}, createdAt` | self on first sign-in; admins after |
 | `profiles/{uid}` | `displayName` (readable by everyone signed in, for "Created by") | self |
@@ -265,6 +268,27 @@ A view only decides how the list looks. It never shows anyone records they could
 - **Server code from Formwright:** the functions use `fwkit.cjs`, a bundle of `src/server/`, `formulas.js`, `rules.js`, `pdfdoc.js`/`pdfdraw.js` and `emaillogic.js`, plus `functions/vendor/pdf-lib.min.js`. After changing those, run `node scripts/build-fwkit.mjs ../cadence/functions/fwkit.cjs` and deploy the functions.
 
 **Email PDF** also has an **Attach the PDF** switch (on by default); off sends just the message.
+
+## Text view and version history (form designer)
+
+**Fields → Visual | Text.** Text shows every field and section as one line, for big changes: add many fields at once, rename, reorder by moving lines, delete lines, or paste a list. `src/formtext.js` reads and writes the format (pure, unit-tested); `src/formver.js` is the screen. The designer always opens in Visual; the switch is hidden on phone-width screens.
+
+```
+# Project details
+Project name: text, required, in list  @p_title
+Stage: dropdown [Scoping, In progress, Done], half  @p_stage
+Budget with tax: calculated, as currency = ROUND({Budget} * 1.13, 2)  @p_tax
+Client: link to Clients
+```
+
+- The `@tag` is the field's ID: words before it can change and it's the same field with the same saved values. A line without a tag is a new field. Settings the text can't express are kept.
+- **Apply changes** checks every line (mistakes listed by line, with "did you mean"), then shows what will change (added, removed with how many records have values, renamed, moved, settings) before it goes into the designer. Renaming a field updates calculations that use its old name. Nothing is live until **Save form**.
+
+**Version history** (the **History** tab, admins). Every **Save form** stores a copy of the whole form (fields, sections, relationships, rules, workflow, settings) in `forms/{id}/versions/{versionId}`: `{ n, at, by, kind, note, from, fromN, summary[], form }`, and the form records which version is live in `activeVersion`. The first save after this update also stores the form as it was ("Before version history").
+- **Save as draft** stores a version without changing the live form. Opening a form with a newer draft offers **Continue the draft** or **Start from the active version**.
+- **View** (as text), **Compare with active** (what making it active would change), **Download JSON**, and **Make active**, which saves that version as the live form through the same checks as Save form (workflow, rule-change dialog, access) and records a new version, so nothing is lost.
+- **Load from file** reads a downloaded JSON back in as a draft (a file from another form asks first).
+- Versions can't be changed or deleted (security rules). Removing a field never deletes saved values, so restoring an older version brings them back.
 
 ## Workflows (stages)
 

@@ -34,6 +34,7 @@ import { evaluate as evalRules, toClear, withoutCleared, NO_RULES, holdsValue, p
 import { initAutos } from './autos.js';
 import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesign.js';
 import { checkWorkflow } from './workflow.js';
+import * as fv from './formver.js';
 import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageName, stageView, withStageField, canWork, assigneeFor, movesOf, missingToMove, waited } from './workflow.js';
 import { initRules, viewRules, rulesClick, rulesChange, parentUse, rulesCtx } from './rulesui.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
@@ -1487,11 +1488,13 @@ function paintTryState(st){
   document.querySelectorAll('[data-rlfire]').forEach(el=>{el.hidden=!st.fired.get(el.dataset.rlfire);});
 }
 function viewFormEdit(){
-  const f=fdraft;const tabs=[['fields','Fields'],['relations','Relationships'],['rules','Rules'],['workflow','Workflow'],['settings','Settings'],['preview','Preview']];
+  const f=fdraft;const tabs=[['fields','Fields'],['relations','Relationships'],['rules','Rules'],['workflow','Workflow'],['settings','Settings'],['preview','Preview'],['history','History']];
   let body='';
-  if(ui.tab==='fields'){
+  if(ui.tab==='fields'&&fv.textMode()){
+    body=fv.switchHTML()+fv.viewText(f);
+  }else if(ui.tab==='fields'){
     const groups=[...new Set(TYPES.map(t=>t[3]))];
-    body=`<div class="dz">
+    body=fv.switchHTML()+`<div class="dz">
       <aside class="panel dz-types" aria-label="Field types">
         <h2 class="dz-h">Field types</h2>
         <input type="search" class="in dz-q" data-dzq placeholder="Search field types" aria-label="Search field types" autocomplete="off">
@@ -1544,6 +1547,8 @@ function viewFormEdit(){
       <p class="help">“Copy matching fields” fills in any child field whose label and type match a field on the parent. Sub-forms go one level deep: a form shown as a grid can’t have grids of its own.</p></section>
       <section class="section"><div class="section-h"><h2>Parents</h2></div><div class="panel"><p class="note">${par.length?`This form is a child of ${par.map(p=>`<b>${esc(p.name)}</b>`).join(', ')}. Its records can belong to one of their records.`:'No form lists this one as a child.'}</p></div></section>
       <section class="section"><div class="section-h"><h2>Linked by fields</h2></div><div class="panel"><p class="note">${linkers.length?'Link-to-record fields that point here: '+linkers.map(esc).join(', ')+'.':'Add a “Link to record” field to any form to point at records in another form, like a lookup.'}</p></div></section>`;
+  }else if(ui.tab==='history'){
+    body=fv.viewHistory(f);
   }else if(ui.tab==='workflow'){
     body=viewWorkflow(f);
   }else if(ui.tab==='rules'){
@@ -1567,10 +1572,11 @@ function viewFormEdit(){
   return `
   <div class="crumbs"><button data-act="nav-designer">Form designer</button><span>›</span><span>${f.isNew?'New form':esc(f.name)}</span></div>
   <div class="head"><div class="ttl">${badge(f.name?f:{...f,name:'?'},1)}<div style="flex:1;min-width:0"><input class="title-in" data-fprop="name" value="${esc(f.name)}" placeholder="Form name, e.g. Inspections" aria-label="Form name"></div></div></div>
+  ${fv.bannerHTML(f)}
   <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab${ui.tab===k?' on':''}" role="tab" aria-selected="${ui.tab===k}" data-act="tab" data-tab="${k}">${l}${k==='fields'?` <span class="count">${f.fields.length}</span>`:''}${k==='relations'&&(f.children||[]).length?` <span class="count">${f.children.length}</span>`:''}${k==='rules'&&(f.rules||[]).length?` <span class="count">${f.rules.length}</span>`:''}${k==='workflow'&&wfOn(f)?` <span class="count">${stagesOf(f).length}</span>`:''}</button>`).join('')}</div>
   ${body}
   ${ui.ruleApply?ruleApplyDialog():''}
-  <div class="panel savebar" style="border-radius:var(--r)"><span class="grow" id="fdirty">${f.dirty?'Unsaved changes':'All changes saved'}</span><button class="btn ghost" data-act="done-form">${f.dirty?'Discard':'Done'}</button><button class="btn primary" data-act="save-form">Save form</button></div>`;
+  <div class="panel savebar" style="border-radius:var(--r)"><span class="grow" id="fdirty">${esc(fv.saveState(f))}</span><button class="btn ghost" data-act="done-form">${f.dirty?'Discard':'Done'}</button>${f.isNew?'':'<button class="btn" data-act="save-draft" title="Keep these changes as a draft: nobody sees them until the draft is made active in History">Save as draft</button>'}<button class="btn primary" data-act="save-form">Save form</button></div>`;
 }
 /* Field options popup. Reuses fieldEditor, so every option and its handlers stay the same. */
 function fieldModal(){
@@ -1664,8 +1670,10 @@ function fxCheck(x){
 }
 function updateFxCheck(x){const el=document.getElementById('fxc-'+x.id);if(!el)return;const r=fxCheck(x);el.textContent=r.msg;el.classList.toggle('bad',!r.ok);}
 function setFdirty(){fdraft.dirty=true;const n=$('#fdirty');if(n)n.textContent='Unsaved changes';const b=document.querySelector('[data-act="done-form"]');if(b)b.textContent='Discard';}
-async function saveForm(){
+async function saveForm(meta){
   const f=fdraft;
+  if(meta)ui.saveMeta=meta;
+  if(fv.textPending()){ui.saveMeta=null;toast('Apply your text changes first (or press Reset).');return;}
   if(!f.name.trim()){toast('Give the form a name first.');$('.title-in')?.focus();return;}
   {const wp=checkWorkflow(f,{people:new Set(store.users.map(u=>u.id)),groups:new Set(store.groups.map(g=>g.id))});if(wp.length){ui.tab='workflow';renderMain();toast('Workflow: '+wp[0]);return;}}
   if(f.workflow?.stages){f.workflow.stages.forEach(x=>{x.name=String(x.name||'').trim();x.moves=(x.moves||[]).filter(m=>m.label&&m.label.trim()&&f.workflow.stages.some(y=>y.id===m.to));});}
@@ -1716,7 +1724,12 @@ async function saveForm(){
   ui.ruleApply=null;
   if(f.isNew)out.order=Math.max(0,...store.forms.map(x=>x.order||0))+1;
   out.updatedAt=Date.now();
+  const vmeta=ui.saveMeta||{kind:'saved'};ui.saveMeta=null;
+  const vid=fv.prepare(out.id);out.activeVersion=vid;
   try{await store.put('forms',out);}catch(e){toast('Saving failed. Check your connection and try again.');return;}
+  f.activeVersion=vid;
+  await fv.recordVersion(f.isNew?null:before,out,vid,vmeta);
+  const savedMsg=vmeta.kind==='activated'?`Version ${vmeta.fromN} is live again`:'Form saved';
   f._newForms=[];f._inherit={};
   if(accessMoves&&isAdmin(store.me)){
     const changed=new Map([[out.id,{...out,id:out.id}],...pending.map(nf=>[nf.id,nf]),...inheritChanges.map(([o,v])=>[o.id,{...o,inheritAccess:v}])]);
@@ -1724,11 +1737,11 @@ async function saveForm(){
     try{await recomputeAllAccess(formsAfter);}catch(e){toast('Form saved, but people’s access wasn’t updated. Use Recalculate access in Security groups.');f.dirty=false;f.isNew=false;render();return;}
   }
   if(applyRows){
-    try{const n=await applyRuleChange(out,applyRows);f.dirty=false;f.isNew=false;toast(`Form saved. Emptied fields on ${n} ${n===1?itemName(out).toLowerCase():out.name.toLowerCase()}. Undo is in Import history.`);render();}
+    try{const n=await applyRuleChange(out,applyRows);f.dirty=false;f.isNew=false;toast(`${savedMsg}. Emptied fields on ${n} ${n===1?itemName(out).toLowerCase():out.name.toLowerCase()}. Undo is in Import history.`);render();}
     catch(e){console.error(e);f.dirty=false;toast(e?.code==='permission-denied'?'Form saved, but Firestore refused to change the records.':'Form saved, but changing the records stopped part way. Undo what was done from Import history, or try Save form again.');render();}
     return;
   }
-  f.dirty=false;f.isNew=false;toast('Form saved');render();
+  f.dirty=false;f.isNew=false;toast(savedMsg);render();
 }
 /** Which saved records the form's rules would empty fields on: { rows: [{ id, clear }], perField }. */
 function ruleImpact(form,recs,parent){
@@ -1778,13 +1791,16 @@ function ruleApplyDialog(){
 }
 function editForm(id){
   const src=formById(id);if(!src||!guard())return;
-  fdraft={...clone(src),fields:clone(src.fields||[]),children:clone(src.children||[]),dirty:false,isNew:false,_labels:Object.fromEntries((src.fields||[]).map(x=>[x.id,x.label]))};pdraft=null;
+  fdraft={...clone(src),fields:clone(src.fields||[]),children:clone(src.children||[]),dirty:false,isNew:false,_labels:Object.fromEntries((src.fields||[]).map(x=>[x.id,x.label]))};pdraft=null;fv.openForm(id);ui.saveMeta=null;
   go({name:'formEdit',formId:id});
 }
 
 /* ---------- Events ---------- */
 // Rules tab: building rules, and Try it's parent values
 document.addEventListener('click',e=>{const el=e.target.closest?.('[data-rl]');if(!el||el.dataset.rl==='toggle'||view.name!=='formEdit'||!fdraft)return;rulesClick(fdraft,el);});
+document.addEventListener('click',e=>{const el=e.target.closest?.('[data-fv]');if(!el||view.name!=='formEdit'||!fdraft)return;fv.onClick(el);});
+document.addEventListener('input',e=>{if(view.name==='formEdit'&&fdraft)fv.onInput(e.target);});
+document.addEventListener('change',e=>{if(view.name==='formEdit'&&fdraft)fv.onChange(e.target);});
 document.addEventListener('click',e=>{const el=e.target.closest?.('[data-wfa]');if(!el||view.name!=='formEdit'||!fdraft)return;wfClick(fdraft,el);});
 document.addEventListener('input',e=>{const el=e.target;if(view.name==='formEdit'&&fdraft&&el.dataset?.wfd)wfInput(fdraft,el);});
 document.addEventListener('change',e=>{
@@ -1932,8 +1948,8 @@ document.addEventListener('click',async e=>{
     case 'file-clear':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);d.values[f.id]=null;markDirty(d);repaint(d,f);break;}
     case 'sig-clear':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);d.values[f.id]=null;markDirty(d);repaint(d,f);break;}
     case 'edit-form':editForm(id);break;
-    case 'new-form':if(!guard())return;fdraft={id:uid('f'),name:'',itemName:'',description:'',color:store.forms.length%COLORS.length,showInSidebar:true,titleField:'',children:[],fields:[],isNew:true,dirty:true};fdraft.fields.push({...newField('text'),label:'Name',required:true,inList:true,width:'full'});pdraft=null;go({name:'formEdit',formId:fdraft.id});setTimeout(()=>$('.title-in')?.focus(),50);break;
-    case 'tab':ui.tab=el.dataset.tab;ui.confirm=null;ui.openField=null;if(ui.tab==='preview'||ui.tab==='rules')pdraft=null;renderMain();break;
+    case 'new-form':if(!guard())return;fdraft={id:uid('f'),name:'',itemName:'',description:'',color:store.forms.length%COLORS.length,showInSidebar:true,titleField:'',children:[],fields:[],isNew:true,dirty:true};fdraft.fields.push({...newField('text'),label:'Name',required:true,inList:true,width:'full'});pdraft=null;fv.openForm(null);ui.saveMeta=null;go({name:'formEdit',formId:fdraft.id});setTimeout(()=>$('.title-in')?.focus(),50);break;
+    case 'tab':ui.tab=el.dataset.tab;ui.confirm=null;ui.openField=null;if(ui.tab==='history')fv.refresh();if(ui.tab==='preview'||ui.tab==='rules')pdraft=null;renderMain();break;
     case 'open-field':ui.openField=id;fmPos={x:0,y:0};renderMain();break;
     case 'close-field':ui.openField=null;renderMain();break;
     case 'focus-field':document.querySelector(`.crow[data-feid="${id}"]`)?.scrollIntoView({block:'center',behavior:'smooth'});break;
@@ -1964,7 +1980,8 @@ document.addEventListener('click',async e=>{
       }
       c.display=el.dataset.v;setFdirty();renderMain();break;}
     case 'set-color':fdraft.color=+el.dataset.i;setFdirty();renderMain();break;
-    case 'save-form':ui.ruleApply=null;saveForm();break;
+    case 'save-form':ui.ruleApply=null;ui.saveMeta=null;saveForm();break;
+    case 'save-draft':fv.saveAsDraft();break;
     case 'wf-move':wfMove(el.dataset.id);break;
     case 'wf-start':{const rec=recById(view.recordId),form=rec&&formById(rec.formId);if(rec&&form){if(rdraft?.dirty){await saveRecord();if(rdraft?.dirty)return;}await doWfMove(recById(rec.id)||rec,form,firstStage(form),'Started','');}break;}
     case 'wf-cancel':if(ui.wfAsk&&!ui.wfAsk.busy){ui.wfAsk=null;renderMain();}break;
@@ -1976,8 +1993,8 @@ document.addEventListener('click',async e=>{
     case 'cs-no':if(ui.cascade&&!ui.cascade.busy){ui.cascade=null;renderMain();}break;
     case 'cs-scrim':if(e.target===el&&ui.cascade&&!ui.cascade.busy){ui.cascade=null;renderMain();}break;
     case 'cs-go':runCascade();break;
-    case 'ra-cancel':if(ui.ruleApply&&!ui.ruleApply.busy){ui.ruleApply=null;renderMain();}break;
-    case 'ra-scrim':if(e.target===el&&ui.ruleApply&&!ui.ruleApply.busy){ui.ruleApply=null;renderMain();}break;
+    case 'ra-cancel':if(ui.ruleApply&&!ui.ruleApply.busy){ui.ruleApply=null;ui.saveMeta=null;renderMain();}break;
+    case 'ra-scrim':if(e.target===el&&ui.ruleApply&&!ui.ruleApply.busy){ui.ruleApply=null;ui.saveMeta=null;renderMain();}break;
     case 'ra-leave':if(ui.ruleApply&&!ui.ruleApply.busy){ui.ruleApply.choice='leave';saveForm();}break;
     case 'ra-apply':if(ui.ruleApply&&!ui.ruleApply.busy){ui.ruleApply.choice='apply';ui.ruleApply.busy=true;renderMain();saveForm();}break;
     case 'done-form':if(fdraft.dirty&&!ui.leaveOk){ui.leaveOk=true;toast('Tap Discard again to drop your changes.');setTimeout(()=>ui.leaveOk=false,4000);return;}fdraft.dirty=false;go({name:'designer'});break;
@@ -2252,6 +2269,7 @@ export function startApp(){
   initLists({ruleImpact,applyRuleChange,fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,withFormulas,search:()=>ui.search});
   initAudit({fmt,formById,recById,recTitle:(r,f)=>recTitle(r,f),go,renderMain});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
+  fv.initFormVer({fdraft:()=>fdraft,setFdraft:f=>{fdraft=f;pdraft=null;},setFdirty,renderMain,saveForm,formById,recordsOf,isEmpty,toast,when,forms:()=>store.forms,newId:()=>uid('x'),me:()=>store.user?.uid,personName:id=>realName(id),closeField:()=>{ui.openField=null;}});
   initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
   initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});
   initRules({formById,recById,parentsOf,recordsOf,recTitle,setFdirty,renderMain,ui:()=>ui});

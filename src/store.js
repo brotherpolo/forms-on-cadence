@@ -576,6 +576,21 @@ export async function loadRuns(id, n = 25) {
   const s = await getDocs(query(collection(db, 'automations', id, 'runs'), orderBy('at', 'desc'), limit(n)));
   return s.docs.map((d) => ({ ...d.data(), id: d.id }));
 }
+/* ---------- Form version history (admins) ----------
+   forms/{formId}/versions/{id}: { n, at, by, kind, note, from, fromN, summary[], form }.
+   kind: saved (Save form) · draft (Save as draft) · loaded (from a file, a draft) ·
+   activated (Make active) · baseline (the form as it was before history began). Never changed. */
+/** A new version's ID (nothing is written). */
+export const newVersionId = (formId) => doc(collection(db, 'forms', formId, 'versions')).id;
+export async function putVersion(formId, id, data) {
+  await setDoc(doc(db, 'forms', formId, 'versions', id), plain({ ...data, by: store.user.uid }));
+}
+/** A form's versions, newest first. */
+export async function loadVersions(formId, n = 200) {
+  const s = await getDocs(query(collection(db, 'forms', formId, 'versions'), orderBy('at', 'desc'), limit(n)));
+  return s.docs.map((d) => ({ ...d.data(), id: d.id }));
+}
+
 /** Test run: what an automation would do to one record (nothing is changed). */
 export async function testAutomation(automation, recordId) {
   return (await httpsCallable(fns(), 'automationTest')({ automation, recordId })).data;
