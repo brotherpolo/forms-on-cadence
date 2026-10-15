@@ -115,7 +115,7 @@ export function viewRules(f) {
     <div class="rl-top"><div><h2 class="dz-h">Show and hide rules</h2><p class="help">Rules decide what shows on a ${esc((f.itemName || f.name || 'record').toLowerCase())} as people fill it in. A hidden field, or one a rule clears, is emptied when the record is saved. Hiding isn’t a permission: lists, reports and exports still show the data.</p></div>
       ${rules.length < MAX_RULES ? '<button type="button" class="btn primary" data-rl="add">+ Add rule</button>' : ''}</div>
     ${clashes.length ? `<div class="panel rl-clash" role="note"><b>Rules that overlap</b><ul>${clashes.map((m) => `<li>${esc(m.text)}</li>`).join('')}</ul></div>` : ''}
-    ${rules.length ? rules.map((r, i) => ruleCard(ctx, r, i, rules.length, msgs)).join('') : `<div class="panel rl-empty"><p><b>No rules yet.</b> For example: when <i>Type</i> is <i>Repair</i>, show <i>Warranty details</i>; or when <i>Status</i> is <i>Closed</i>, hide <i>Tasks</i>.</p><button type="button" class="btn primary" data-rl="add">+ Add rule</button></div>`}
+    ${rules.length ? rules.map((r, i) => ruleCard(ctx, r, i, rules.length, msgs)).join('') : `<div class="panel rl-empty"><p><b>No rules yet.</b> For example: when <i>Type</i> is <i>Repair</i>, show <i>Warranty details</i>; or when <i>Status</i> is <i>Closed</i>, hide <i>Tasks</i>.</p></div>`}
     <details class="rl-how"><summary>How rules work together</summary><ul class="help">
       <li><b>Show</b> means hidden the rest of the time. <b>Set required</b> means not required the rest of the time.</li>
       <li>When rules disagree, <b>Hide</b> wins over Show and <b>Set required</b> wins over Set not required. A hidden field is never required.</li>
