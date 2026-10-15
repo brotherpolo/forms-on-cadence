@@ -22,7 +22,7 @@ import {
   canvasTiles, gridTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_COLS, GRID, MIN_W, minH,
 } from './dashlogic.js';
 
-let H = { fmt: null, valOf: null, recTitle: null, go: null, openRecord: null, renderMain: null, openLink: null, linkEnv: () => ({}) };
+let H = { fmt: null, valOf: null, recTitle: null, go: null, openRecord: null, renderMain: null, openLink: null, linkEnv: () => ({}), starterForms: () => [] };
 export function initReports(helpers) { H = { ...H, ...helpers }; }
 
 const D = {
@@ -901,6 +901,30 @@ function linkPickerHTML(x) {
 }
 const linkIcon = (i, big) => (i.form ? (i.glyph ? `<span class="db-lic plus" style="background:${esc(colorOf(i.form))}" aria-hidden="true">${esc(i.glyph)}</span>` : badge(i.form)) : `<span class="glyph navg db-lic" aria-hidden="true">${esc(i.glyph)}</span>`).replace('class="', `class="${big ? 'big ' : ''}`);
 
+/* ---------- the starter Home: for anyone with no home dashboard of their own and no default ---------- */
+/** Shortcuts to what this person can open: their sidebar forms, My work, Dashboards, Reports and (admins) two admin screens. */
+function starterTiles() {
+  const env = H.linkEnv();
+  const links = [
+    ...H.starterForms().slice(0, 12).map((f) => ({ to: 'list', form: f.id })),
+    { to: 'page', page: 'mywork' }, { to: 'page', page: 'dashboards' }, { to: 'page', page: 'reports' },
+    ...(env.isAdmin ? [{ to: 'page', page: 'designer' }, { to: 'page', page: 'users' }] : []),
+  ].filter((l) => linkInfo(l, env)?.ok);
+  const tiles = [];
+  links.forEach((link, i) => { const at = placeTile(tiles, LINK_SIZE.w, LINK_SIZE.h); tiles.push({ id: 'st' + i, link, ...LINK_SIZE, ...at }); });
+  return tiles;
+}
+/** The starter Home's page, or '' when there's nothing to put on it. */
+export function viewStarterHome() {
+  const tiles = starterTiles();
+  D.starter = tiles;
+  if (!tiles.length) return '';
+  const x = { id: 'starter', name: 'Home', tiles };
+  return `<div id="dbx" class="db-dash rp"><div class="db-head"><h1 class="db-title">Home</h1><span class="chip">Starter</span><span class="grow"></span><button type="button" class="btn primary" data-d="starterkeep">Make this my dashboard</button></div>
+    <p class="help db-starter">Shortcuts to what you can open. Make it your dashboard to rearrange it, resize tiles and add reports.</p>
+    <div class="db-cv can-drill" id="db-cv" style="--rows:${Math.max(1, canvasHeight(tiles))}">${readingOrder(tiles).map((t) => linkTileHTML(x, t, false)).join('')}</div></div>`;
+}
+
 /** A shortcut tile: icon, name and a live count; tall enough, a line saying where it goes. */
 function linkTileHTML(x, t, edit) {
   const env = H.linkEnv();
@@ -1042,7 +1066,16 @@ document.addEventListener('click', async (e) => {
     case 'picker': D.picker = D.picker === true ? false : true; repaint(); break;
     case 'linkpicker': D.picker = D.picker === 'links' ? false : 'links'; repaint(); break;
     case 'addlink': { const l = linkFromKey(v); if (l) await addTile(D.did, null, false, l); break; }
-    case 'golink': { const x = dashById(D.did); const t = (gridTiles(x?.tiles || [], x?.filters)).find((y) => y.id === v); const i = t && linkInfo(t.link, H.linkEnv()); if (i && i.ok) H.openLink(i.go); break; }
+    case 'golink': { const x = dashById(D.did); const t = (D.starter || []).find((y) => y.id === v && document.querySelector('.db-starter')) || (gridTiles(x?.tiles || [], x?.filters)).find((y) => y.id === v); const i = t && linkInfo(t.link, H.linkEnv()); if (i && i.ok) H.openLink(i.go); break; }
+    case 'starterkeep': {
+      const tiles = clone(D.starter || []); if (!tiles.length) return;
+      const id = uid('db');
+      const data = { name: 'My home', ownerId: me(), shared: false, groups: [], tiles: tiles.map((t) => ({ ...t, id: uid('t') })), filters: { period: 'all', fields: [], grid: GRID }, createdAt: Date.now(), updatedAt: Date.now() };
+      try { await saveDashboard(id, data); await setHomeDashboard(id); } catch (err) { toast('Couldn’t save it. Try again.'); return; }
+      toast('Saved as your home dashboard. Press Edit dashboard to change it.');
+      H.go({ name: 'dashboard', dashboardId: id });
+      break;
+    }
     case 'setdefhome': {
       if (!admin()) return;
       const x = dashById(v);

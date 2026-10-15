@@ -10,7 +10,7 @@ import { runImport, rewriteValues, moveStage, watchStages } from './store.js';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
-import { effectiveHome } from './dash.js';
+import { effectiveHome, viewStarterHome } from './dash.js';
 import { nounOf as nounOfForm } from './dashlogic.js';
 import { initReports, closeCatalogPop, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts, drillNav, fitTiles } from './dash.js';
 import { initLists, viewRecords, afterRecords, resetLists, useView } from './lists.js';
@@ -37,7 +37,7 @@ import { initAutos } from './autos.js';
 import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesign.js';
 import { checkWorkflow } from './workflow.js';
 import * as fv from './formver.js';
-import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageName, stageView, withStageField, canWork, assigneeFor, movesOf, missingToMove, waited } from './workflow.js';
+import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageName, stageView, withStageField, canWork, assigneeFor, movesOf, missingToMove, waited, stageDue, dueState, dayKey } from './workflow.js';
 import { initRules, viewRules, rulesClick, rulesChange, rulesInput, rulesListHTML, parentUse, rulesCtx } from './rulesui.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
 import { signOutUser } from './auth.js';
@@ -205,6 +205,7 @@ export function home(){
   ui.leaveOk=true;
   const hd=effectiveHome();
   if(hd){go({name:'dashboard',dashboardId:hd},false);return;}
+  if(fs.length||isAdmin(store.me)){go({name:'home'},false);return;} // the starter Home
   if(fs.length)go({name:'records',formId:fs[0].id},false);
   else if(isAdmin(store.me))go({name:'designer'},false);
   else go({name:'welcome'},false);
@@ -438,6 +439,7 @@ function renderMain(){
   else if(view.name==='formEdit'){title='Edit form';h=viewFormEdit();}
   else if(admin.handles(view)){const r=admin.renderView(view);title=r.title;h=r.html;}
   else if(view.name==='welcome'){title='Formwright';h=viewWelcome();}
+  else if(view.name==='home'&&(h=viewStarterHome())){title='Home';}
   else if(view.name==='home'){title='Home';h=`<div class="head"><div class="ttl"><div><h1>Home</h1><p class="sub">Home shows a dashboard: your own, or the one an administrator picked for everyone.</p></div></div></div><div class="panel empty"><h2>No home dashboard yet</h2><p>Open a dashboard and press <b>Set as my home</b>.${isAdmin(store.me)?' To give everyone a Home, share a dashboard and press <b>Make everyone’s default home</b>.':''}</p><button class="btn primary" data-act="nav-dashboards">Dashboards</button></div>`;}
   $('#topttl').textContent=title||'Formwright';
   const ae=document.activeElement,ks=ae&&ae.dataset?.ksearch?[ae.dataset.ksearch,ae.selectionStart]:null; // a redraw while searching keeps the cursor in the box
@@ -638,6 +640,15 @@ function whoHas(rec){
   if(rec.assigneeGroup){const n=groupName(rec.assigneeGroup);return n?`the ${n} group`:'a group';}
   return 'nobody yet';
 }
+/** A staged record's due date and how it stands: { due: 'YYYY-MM-DD', state, label } or null. */
+function dueOf(form,rec){
+  const st=rec?.stage&&stageById(form,rec.stage);if(!st||!rec.stageAt)return null;
+  const due=stageDue(st,dayKey(rec.stageAt));if(!due)return null;
+  const state=dueState(due,dayKey(Date.now()));
+  const d=new Date(due+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+  return {due,state,label:state==='overdue'?`Overdue · was due ${d}`:state==='today'?'Due today':`Due ${d}`};
+}
+const dueChip=(x,short)=>x?`<span class="wf-due-chip ${x.state}">${esc(short?(x.state==='overdue'?'Overdue':x.state==='today'?'Due today':x.label):x.label)}</span>`:'';
 function wfBar(form,rec){
   if(!wfOn(form))return '';
   const stages=stagesOf(form),cur=rec?.stage&&stageById(form,rec.stage)?rec.stage:null,i=cur?stageIndex(form,cur):-1;
@@ -645,13 +656,15 @@ function wfBar(form,rec){
   let line='',btns='';
   const admin=isAdmin(store.me);
   if(!rec)line=`Starts at <b>${esc(stages[0].name)}</b> when you save it.`;
-  else if(!cur){
+  else if(!cur&&Date.now()-(rec.createdAt||0)<90000){
+    line=`Starting at <b>${esc(stages[0].name)}</b>…`; // the server puts new records at the first stage
+  }else if(!cur){
     line='Not in the workflow yet.';
     if(admin||canEditRecord(store.me,rec))btns=`<button type="button" class="btn sm primary" data-act="wf-start">Start at ${esc(stages[0].name)}</button>`;
   }else{
     const mine=canWork(rec,store.me);
-    line=`<b>${esc(stageName(form,rec))}</b> · waiting on <b>${esc(whoHas(rec))}</b>${rec.stageAt?(w=>w==='today'?' since today':` for ${esc(w)}`)(waited(rec.stageAt,Date.now())):''}`;
-    if(!mine)line+=`<span class="wf-ro">Only ${esc(whoHas(rec))} or an administrator can change it at this stage.</span>`;
+    line=`<b>${esc(stageName(form,rec))}</b> · Person responsible: <b>${esc(whoHas(rec))}</b>${rec.stageAt?` · ${esc(waited(rec.stageAt,Date.now())==='today'?'since today':waited(rec.stageAt,Date.now()))}`:''} ${dueChip(dueOf(form,rec))}`;
+    if(!mine)line+=`<span class="wf-ro">Only the person responsible (${esc(whoHas(rec))}) or an administrator can change it at this stage.</span>`;
     else btns=movesOf(form,cur).map(m=>`<button type="button" class="btn sm${stageIndex(form,m.to)>i?' primary':''}" data-act="wf-move" data-id="${esc(m.id)}"${ui.wfBusy?' disabled':''}>${esc(m.label)}</button>`).join('');
     if(admin)btns+=`<label class="wf-jump"><span class="sr">Move to any stage</span><select class="in" data-wf-jump="1" aria-label="Move to any stage"><option value="">Move to…</option>${stages.filter(s=>s.id!==cur).map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select></label>`;
     if(stageView(form,cur).req.size)line+=`<span class="wf-note">Fields marked * are needed before moving on.</span>`;
@@ -703,17 +716,22 @@ async function doWfMove(rec,form,target,label,comment){
       {from:rec.stage||null,fromName:rec.stage?stageName(form,rec):null,to:target.id,toName:target.name,label:String(label||'').slice(0,80),comment:String(comment||'').slice(0,2000),assignee:next.assignee||null,assigneeGroup:next.assigneeGroup||null});
     toast(`Moved to ${target.name} · ${whoHas({...rec,...next})}`);
     if(rdraft?.errors)Object.keys(rdraft.errors).forEach(k=>{if(rdraft.errors[k]==='Needed before moving on.')delete rdraft.errors[k];});
-  }catch(e){console.error(e);toast(e?.code==='permission-denied'?'Only the person it’s waiting on, or an administrator, can move it. (Or the latest security rules aren’t deployed yet.)':'Moving it failed. Check your connection and try again.');}
+  }catch(e){console.error(e);toast(e?.code==='permission-denied'?'Only the person responsible, or an administrator, can move it. (Or the latest security rules aren’t deployed yet.)':'Moving it failed. Check your connection and try again.');}
   ui.wfBusy=false;renderMain();
 }
 /* My work: records waiting on you (or your groups) in any workflow. Admins can see everyone's. */
 function viewMyWork(){
   const me=store.user?.uid,groups=store.me?.groups||[],admin=isAdmin(store.me),who=admin?ui.wfWho||'me':'me',now=Date.now();
-  const recs=store.records.filter(r=>{const f=formById(r.formId);if(!f||!wfOn(f)||!r.stage||!stageById(f,r.stage))return false;return who==='all'||r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup));}).sort((a,b)=>(a.stageAt||0)-(b.stageAt||0));
+  const dues=new Map();
+  const recs=store.records.filter(r=>{const f=formById(r.formId);if(!f||!wfOn(f)||!r.stage||!stageById(f,r.stage))return false;return who==='all'||r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup));});
+  recs.forEach(r=>dues.set(r.id,dueOf(formById(r.formId),r)));
+  const rank=r=>{const x=dues.get(r.id);return x?{overdue:0,today:1,soon:2,later:3}[x.state]:4;};
+  recs.sort((a,b)=>rank(a)-rank(b)||String(dues.get(a.id)?.due||'').localeCompare(String(dues.get(b.id)?.due||''))||(a.stageAt||0)-(b.stageAt||0)); // overdue first, then by due date, then longest waiting
+  const nOver=recs.filter(r=>dues.get(r.id)?.state==='overdue').length;
   const byForm=new Map();recs.forEach(r=>{if(!byForm.has(r.formId))byForm.set(r.formId,[]);byForm.get(r.formId).push(r);});
   const tables=[...byForm].map(([fid,rs])=>{const f=formById(fid);return `<section class="section"><div class="section-h"><h2>${badge(f)}<span>${esc(f.name)}</span> <span class="count">${rs.length}</span></h2></div>
-    <div class="panel"><div class="tblwrap"><table class="tbl lv-tbl wf-tbl"><thead><tr><th>${esc(itemName(f))}</th><th>Stage</th>${who==='all'?'<th>Waiting on</th>':''}<th class="num">Waiting</th></tr></thead><tbody>${rs.map(r=>`<tr data-act="open-record" data-id="${esc(r.id)}"><td class="title">${esc(recTitle(r,f))}</td><td>${esc(stageName(f,r))}</td>${who==='all'?`<td>${esc(whoHas(r))}</td>`:''}<td class="num">${esc(waited(r.stageAt,now))}</td></tr>`).join('')}</tbody></table></div></div></section>`;}).join('');
-  return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">${who==='all'?'Every record waiting on someone in a workflow':'Records waiting on you, or a group you’re in'}, longest waiting first.</p></div></div>
+    <div class="panel"><div class="tblwrap"><table class="tbl lv-tbl wf-tbl"><thead><tr><th>${esc(itemName(f))}</th><th>Stage</th>${who==='all'?'<th>Person responsible</th>':''}<th>Due</th><th class="num">Waiting</th></tr></thead><tbody>${rs.map(r=>`<tr data-act="open-record" data-id="${esc(r.id)}" class="${dues.get(r.id)?.state==='overdue'?'wf-over':''}"><td class="title">${esc(recTitle(r,f))}</td><td>${esc(stageName(f,r))}</td>${who==='all'?`<td>${esc(whoHas(r))}</td>`:''}<td>${dueChip(dues.get(r.id),true)||'<span class="help">–</span>'}</td><td class="num">${esc(waited(r.stageAt,now))}</td></tr>`).join('')}</tbody></table></div></div></section>`;}).join('');
+  return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">${who==='all'?'Every record in a workflow and its person responsible':'Records you (or a group you’re in) are responsible for'}: overdue first, then by due date, then longest waiting.${nOver?` <b class="wf-overn">${nOver} overdue.</b>`:''}</p></div></div>
     ${admin?`<div class="actions"><div class="segs" role="group" aria-label="Whose work"><button type="button" class="${who==='me'?'on':''}" aria-pressed="${who==='me'}" data-act="wf-who" data-v="me">Mine</button><button type="button" class="${who==='all'?'on':''}" aria-pressed="${who==='all'}" data-act="wf-who" data-v="all">Everyone</button></div></div>`:''}</div>
     ${recs.length?tables:`<div class="panel empty"><h2>Nothing waiting${who==='all'?'':' on you'}</h2><p>When a record reaches a stage that’s yours, it shows up here.</p></div>`}`;
 }
@@ -1470,7 +1488,6 @@ async function saveRecord(){
   catch(e){console.error(e);if(!old)d.recordId=null;toast(e?.code==='permission-denied'?'You don’t have permission to save this record or one of its rows.':'Saving failed. Check your connection and try again.');return;}
   if(rowsOut.length||removed.length){const n=rowsOut.length+removed.length;setTimeout(()=>toast(`Saved with ${n} row change${n>1?'s':''}`),0);}
   d.dirty=false;d.errors={};d.recordId=id;d.copied=0;view.recordId=id;toast('Saved');render();
-  if(!old&&wfOn(form)){const fs=firstStage(form);await doWfMove({...rec,ownerId:store.user?.uid},form,fs,'Created','');}
   askChildRules(form,{...(old||{}),...rec,nums:old?.nums});
 }
 /* ---------- A parent changed: children whose rules look at it ----------
@@ -2410,7 +2427,7 @@ document.addEventListener('pointercancel',endFmDrag);
 /* ---------- Lifecycle (called from main.js) ---------- */
 export function startApp(){
   booted=false;pendingRoute=null;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
-  initReports({fmt,valOf,recTitle,go,renderMain,openLink,linkEnv,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
+  initReports({fmt,valOf,recTitle,go,renderMain,openLink,linkEnv,starterForms:()=>sidebarForms(),openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
   initLists({ruleImpact,applyRuleChange,fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,withFormulas,search:()=>ui.search});
   initAudit({fmt,formById,recById,recTitle:(r,f)=>recTitle(r,f),go,renderMain});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});

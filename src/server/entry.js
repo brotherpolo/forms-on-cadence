@@ -4,3 +4,4 @@ export { drawPdf } from '../pdfdraw.js';
 export { fileName } from '../pdfdoc.js';
 export { fillTemplate } from '../emaillogic.js';
 export { ruleFires, testCond, opOf, ACTION_LABEL } from '../rules.js';
+export { wfOn, firstStage, assigneeFor, stageDue, dayKey } from '../workflow.js';

@@ -114,3 +114,18 @@ test('server kit: stage in values and hidden from the PDF', () => {
   assert.ok(!labels.includes('Approver'), 'stage-hidden field left out of the PDF');
   assert.ok(labels.includes('Amount'));
 });
+
+test('due dates count working days (Monday to Friday)', async () => {
+  const { addWorkdays, stageDue, dueState } = await import('../../src/workflow.js');
+  assert.equal(addWorkdays('2026-10-15', 0), '2026-10-15'); // Thursday
+  assert.equal(addWorkdays('2026-10-15', 2), '2026-10-19', 'Thursday + 2 = Monday');
+  assert.equal(addWorkdays('2026-10-17', 0), '2026-10-19', 'arriving on Saturday counts from Monday');
+  assert.equal(addWorkdays('2026-10-16', 5), '2026-10-23');
+  assert.equal(stageDue({ dueDays: 3 }, '2026-10-15'), '2026-10-20');
+  assert.equal(stageDue({}, '2026-10-15'), '');
+  assert.equal(stageDue({ dueDays: '' }, '2026-10-15'), '');
+  assert.deepEqual(['2026-10-14', '2026-10-15', '2026-10-16', '2026-10-19'].map((d) => dueState(d, '2026-10-15')), ['overdue', 'today', 'soon', 'later']);
+  assert.equal(dueState('2026-10-19', '2026-10-17'), 'soon', 'on a weekend, Monday is next');
+  assert.equal(dueState('', '2026-10-15'), '');
+  assert.ok(W.checkWorkflow({ workflow: { on: true, stages: [{ id: 'a', name: 'A', dueDays: 1.5 }] } }).some((m) => /whole number/.test(m)));
+});

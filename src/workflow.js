@@ -10,6 +10,7 @@
 //   fields: { [fieldId]: 'edit' | 'req' | 'view' | 'hide' }   (missing = 'edit'; a heading: 'hide' hides its section)
 //   sections: { ['g:'|'c:'+formId | 't:tasks']: 'hide' }         (missing = shown)
 //   moves: [{ id, label, to: stageId, comment: bool }]           (the buttons)
+//   dueDays: n                                                   (optional: due within n working days, Monday to Friday)
 // }] }
 // record: stage (stage id), assignee (uid|null), assigneeGroup (group id|null), stageAt (ms)
 import { headingOf } from './foldlogic.js';
@@ -108,6 +109,7 @@ export function checkWorkflow(form, { people = new Set(), groups = new Set() } =
     if (s.assign?.type === 'person' && s.assign.person && people.size && !people.has(s.assign.person)) out.push(`${n}: that person no longer has an account.`);
     if (s.assign?.type === 'group' && !s.assign.group) out.push(`${n}: pick which security group.`);
     if (s.assign?.type === 'group' && s.assign.group && groups.size && !groups.has(s.assign.group)) out.push(`${n}: that security group no longer exists.`);
+    if (s.dueDays != null && s.dueDays !== '' && !(Number.isInteger(+s.dueDays) && +s.dueDays >= 0 && +s.dueDays <= 365)) out.push(`${n}: the working days it’s due within should be a whole number from 0 to 365.`);
     (s.moves || []).forEach((m) => { if (!m.label?.trim()) out.push(`${n}: a button needs a label.`); if (!st.some((x) => x.id === m.to)) out.push(`${n}: “${m.label || 'a button'}” goes to a stage that no longer exists.`); });
   });
   return out;
@@ -118,4 +120,34 @@ export function waited(since, now) {
   if (!since) return '';
   const d = Math.floor((now - since) / 864e5);
   return d <= 0 ? 'today' : d === 1 ? '1 day' : `${d} days`;
+}
+
+/* ---------- due dates (working days, Monday to Friday) ---------- */
+const DAY = 864e5;
+const keyOf = (d) => d.toISOString().slice(0, 10);
+const fromKey = (k) => new Date(k + 'T00:00:00Z');
+/** The date n working days after a date ('YYYY-MM-DD'). Arriving on a weekend counts from Monday; 0 = that working day. */
+export function addWorkdays(dateKey, n) {
+  let d = fromKey(dateKey);
+  while ([0, 6].includes(d.getUTCDay())) d = new Date(+d + DAY);
+  let left = Math.max(0, Math.round(Number(n) || 0));
+  while (left > 0) { d = new Date(+d + DAY); if (![0, 6].includes(d.getUTCDay())) left--; }
+  return keyOf(d);
+}
+/** A stage's due date for a record that arrived on arrivedKey, or '' when the stage has none. */
+export function stageDue(stage, arrivedKey) {
+  const n = stage?.dueDays;
+  if (n == null || n === '' || !arrivedKey) return '';
+  return addWorkdays(arrivedKey, n);
+}
+/** 'overdue' | 'today' | 'soon' (next working day) | 'later' | '' (no due date). */
+export function dueState(dueKey, todayKey) {
+  if (!dueKey) return '';
+  if (dueKey < todayKey) return 'overdue';
+  if (dueKey === todayKey) return 'today';
+  return dueKey <= addWorkdays(todayKey, 1) ? 'soon' : 'later';
+}
+/** A local date key for a moment ('YYYY-MM-DD' in the given time zone, or the browser's). */
+export function dayKey(ms, timeZone) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 }

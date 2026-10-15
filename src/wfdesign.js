@@ -36,6 +36,7 @@ function stageCard(f, s, i, n) {
     <div class="am-row"><span class="am-lab">Goes to</span><select class="in am-sel" ${at} data-wfd="atype">${ASSIGN.map((x) => `<option value="${x.key}"${x.key === a.type ? ' selected' : ''}>${esc(x.label)}</option>`).join('')}</select>
       ${a.type === 'person' ? `<select class="in am-sel" ${at} data-wfd="aperson"><option value="">Pick someone…</option>${H.people().map((p) => `<option value="${esc(p.id)}"${p.id === a.person ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}
       ${a.type === 'group' ? `<select class="in am-sel" ${at} data-wfd="agroup"><option value="">Pick a group…</option>${H.groups().map((g) => `<option value="${esc(g.id)}"${g.id === a.group ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select>` : ''}</div>
+    <div class="am-row"><label class="wf-due"><span class="am-lab">Due within</span><input class="in wf-duein" type="number" min="0" max="365" step="1" inputmode="numeric" ${at} data-wfd="due" value="${esc(s.dueDays ?? '')}" placeholder="–" aria-label="Due within how many working days"><span class="help">working days of arriving (Monday to Friday). Empty: no due date.</span></label></div>
     <div class="am-row"><label class="switch"><input type="checkbox" ${at} data-wfd="ntask"${s.notify?.task ? ' checked' : ''}><span class="tr"></span><span>Create a Cadence task for them</span></label>
       <label class="switch"><input type="checkbox" ${at} data-wfd="nemail"${s.notify?.email ? ' checked' : ''}><span class="tr"></span><span>Email them</span></label></div>
     <div class="wf-mvs"><span class="am-lab">Buttons</span>${moves || '<p class="help">No buttons: records stop here (the last stage), unless an administrator moves them.</p>'}
@@ -114,6 +115,7 @@ export function wfChange(f, el) {
     case 'atype': s.assign = { type: el.value }; changed(); return true;
     case 'aperson': s.assign = { type: 'person', person: el.value }; changed(); return true;
     case 'agroup': s.assign = { type: 'group', group: el.value }; changed(); return true;
+    case 'due': { const v = el.value.trim(); if (v === '') delete s.dueDays; else s.dueDays = Math.max(0, Math.min(365, Math.round(+v) || 0)); H.setFdirty(); return true; }
     case 'ntask': s.notify = { ...(s.notify || {}), task: el.checked }; changed(); return true;
     case 'nemail': s.notify = { ...(s.notify || {}), email: el.checked }; changed(); return true;
     case 'mto': { const m = s.moves?.[+el.dataset.mi]; if (m) m.to = el.value; changed(); return true; }

@@ -325,3 +325,4 @@ button.db-li:hover{background:var(--accent-soft)}
 .db-tile.db-t-kpi button.rp-kpi{align-self:center;text-align:center;font-size:clamp(1.2rem,min(14cqw,46cqh),4.2rem)}
 .db-t-kpi .rp-kpisub{text-align:center;max-width:100%}
 .db-t-kpi .db-kd{align-self:center}
+.db-starter{margin:-4px 0 4px}

@@ -261,3 +261,6 @@ body.pd-on .pgrip{cursor:grabbing}
 .ver-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .ver-more{margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
 .ver-pre{margin:6px 0 0;padding:10px 12px;background:var(--sunk);border-radius:8px;font-family:var(--mono,'JetBrains Mono',ui-monospace,monospace);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto}
+
+.wf-due{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wf-duein{width:76px}
