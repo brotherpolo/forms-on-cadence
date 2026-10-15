@@ -472,6 +472,14 @@ Manual deploy: `FIREBASE_HOSTING_SITE=cadence-forms npm run deploy` (with your s
 
 ---
 
+## Backups
+
+- **Automatic:** Firestore keeps a daily backup (7 days) and a weekly one (Sundays, 8 weeks). Photos and files are copied nightly to `gs://tasks-2ae9d-file-backups` (kept for good; deletions recoverable for 30 days).
+- **Before every deploy:** the deploy workflows (Formwright's and Cadence's) first export the whole database to `gs://tasks-2ae9d-db-exports/before-deploy/<date>-<app>-<commit>` with `scripts/backup-db.mjs`, and stop without deploying if that fails. Cloud Shell deploys do the same with `bash deploy.sh <what>` in the Cadence folder. These copies are deleted after 90 days by a rule on the bucket.
+- **Any time:** `gcloud firestore export gs://tasks-2ae9d-db-exports/$(date +%Y-%m-%d-%H%M) --project=tasks-2ae9d` makes a copy that's kept until you delete it.
+- **Restoring** overwrites live documents with the same IDs, so plan it first (one collection or everything, into this database or a new one).
+- The deploy account needs **Cloud Datastore Import Export Admin** on the project and **Storage Legacy Bucket Writer** on the `tasks-2ae9d-db-exports` bucket only.
+
 ## Security
 
 - **Locked libraries.** With a `package-lock.json` in the repository, every deploy installs exactly the library versions recorded there (`npm ci`), so a hijacked new release of a library can't slip into a deploy. Without one, the workflow falls back to the newest allowed versions and shows a warning. To create or refresh it (Cloud Shell or any computer with Node 22): put `package.json` in an empty folder, run `npm install --package-lock-only --no-audit --no-fund`, and upload the `package-lock.json` it makes to the top of the repository. Update libraries on purpose, then run the tests.
