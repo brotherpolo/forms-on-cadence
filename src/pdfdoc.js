@@ -112,11 +112,13 @@ export function wrapText(text, width, measure) {
       if (measure(tryLine) <= width) { line = tryLine; return; }
       if (line) lines.push(line);
       line = '';
-      // a word wider than the line: cut it up
+      // a word wider than the line: cut it up, never leaving a piece of fewer than 3 characters
       let rest = w;
       while (measure(rest) > width && rest.length > 1) {
         let n = rest.length - 1;
         while (n > 1 && measure(rest.slice(0, n)) > width) n--;
+        if (rest.length - n < 3 && rest.length > 3) n = Math.min(n, rest.length - 3);
+        if (n < 3 && rest.length >= 6) n = 3;
         lines.push(rest.slice(0, n));
         rest = rest.slice(n);
       }
@@ -192,4 +194,55 @@ export function trimBox(data, w, h, pad = 2) {
   x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad);
   x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
   return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+/**
+ * Fit a table without breaking words: each column is at least as wide as its longest word
+ * (numbers, dates and amounts keep their whole value on one line); long-text columns give
+ * up room first. Tries each text size in turn, then each page shape (portrait, then
+ * landscape). Only when nothing fits are very long words allowed to break.
+ *   cols: [{ label, num }], rows: [[text]], measure(size, bold) → (text) → width
+ *   spaces: [{ avail, landscape }]
+ * → { size, widths, landscape, broken }
+ */
+export function planTable(cols, rows, measure, { spaces, sizes = [9.5, 8.5, 7.5, 7], pad = 10, cap = 230, maxWord = 0.4, short = 20 } = {}) {
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  const tryFit = (sp, size, strict, roomy) => {
+    const mF = measure(size, false), mB = measure(size, true);
+    const minW = [], want = [];
+    cols.forEach((c, i) => {
+      const head = Math.max(0, ...String(c.label || '').split(/\s+/).map((w) => mB(w)));
+      let longest = 0, full = 0, whole = 0;
+      rows.forEach((r) => {
+        const t = String(r[i] ?? '');
+        const w = mF(t);
+        full = Math.max(full, w);
+        if (t.length <= short) whole = Math.max(whole, w); // short values (dates, codes, names) stay on one line
+        t.split(/\s+/).forEach((x) => { longest = Math.max(longest, mF(x)); });
+      });
+      let keep = c.num ? full : Math.max(strict ? whole : 0, Math.min(longest, sp.avail * maxWord)); // a giant word (a web address) may wrap
+      if (roomy && !c.num) keep = Math.max(keep, Math.min(full, sp.avail * 0.22)); // long text gets a readable width, not a sliver
+      minW[i] = Math.max(head, keep) + pad + 0.5;
+      want[i] = Math.max(minW[i], Math.min(cap, full) + pad + 0.5);
+    });
+    if (sum(minW) > sp.avail + 0.01) return null;
+    const total = sum(want);
+    if (total <= sp.avail) return want.map((w) => w + (sp.avail - total) * (w / total)); // room to spare: share it out
+    const flex = sum(want.map((w, i) => w - minW[i])) || 1, over = total - sp.avail;
+    return want.map((w, i) => w - (w - minW[i]) * (over / flex));
+  };
+  // best first: long text roomy and short values whole; then short values whole; then whole words only.
+  // At each step: portrait at each text size, then landscape.
+  // (Very small text is kept for last: a landscape page at a normal size reads better.)
+  for (const [strict, roomy, sz] of [[true, true, sizes.slice(0, 2)], [true, false, sizes.slice(0, 3)], [false, false, sizes]]) {
+    for (const sp of spaces) {
+      for (const size of sz) {
+        const widths = tryFit(sp, size, strict, roomy);
+        if (widths) return { size, widths, landscape: !!sp.landscape, broken: false };
+      }
+    }
+  }
+  const sp = spaces[spaces.length - 1], size = sizes[sizes.length - 1];
+  const widths = colWidths(cols.map((c) => ({ label: c.label })), rows, (t, b) => measure(size, b)(t), sp.avail, { min: 30, cap, pad });
+  return { size, widths, landscape: !!sp.landscape, broken: true };
 }

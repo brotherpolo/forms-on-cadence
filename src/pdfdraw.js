@@ -11,10 +11,14 @@
 // }
 // imgs: Map(key → { bytes: Uint8Array, type: 'png'|'jpg' })
 
-import { safeText, wrapText, colWidths, fieldRows, fitBox } from './pdfdoc.js';
+import { safeText, wrapText, planTable, fieldRows, fitBox } from './pdfdoc.js';
 
-const W = 612, H = 792, M = 54; // US Letter, ¾-inch margins
-const TOP = H - M, BOTTOM = M + 30, CW = W - 2 * M, GUTTER = 24;
+const M = 54, BOTTOM = M + 30, GUTTER = 24; // ¾-inch margins
+const PORTRAIT = [612, 792], LANDSCAPE = [792, 612]; // US Letter
+const CW_PORTRAIT = PORTRAIT[0] - 2 * M, CW_LANDSCAPE = LANDSCAPE[0] - 2 * M;
+// the page shape being drawn on: a table too wide for portrait gets landscape pages of its own
+let W, H, TOP, CW;
+const shape = (landscape) => { [W, H] = landscape ? LANDSCAPE : PORTRAIT; TOP = H - M; CW = W - 2 * M; };
 
 const hexRgb = (rgb, hex, fallback) => {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
@@ -25,6 +29,7 @@ const hexRgb = (rgb, hex, fallback) => {
 
 export async function drawPdf(L, model, imgs = new Map()) {
   const { PDFDocument, StandardFonts, rgb } = L;
+  shape(false);
   const pdf = await PDFDocument.create();
   const F = await pdf.embedFont(StandardFonts.Helvetica);
   const B = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -190,13 +195,18 @@ export async function drawPdf(L, model, imgs = new Map()) {
   });
 
   /* ---------- grids, child records, tasks ---------- */
+  let backToPortrait = false;
   (model.sections || []).forEach((s) => {
     const cols = s.cols || [];
     const rows = s.rows || [];
-    const size = cols.length <= 5 ? 9.5 : cols.length <= 8 ? 8.5 : 7.5;
-    const lh = size * 1.32, PX = 5, PY = 4.5;
+    const PX = 5, PY = 4.5;
     const all = rows.concat(s.total ? [s.total] : []).map((r) => r.map((c) => T(c)));
-    const widths = colWidths(cols.map((c) => ({ label: T(c.label) })), all, (str, bold) => (bold ? B : F).widthOfTextAtSize(str, size), CW, { min: 34, cap: 230, pad: PX * 2 });
+    const plan = planTable(cols.map((c) => ({ label: T(c.label), num: !!c.num })), all, (sz, bold) => widthOf(bold ? B : F, sz),
+      { spaces: [{ avail: CW_PORTRAIT }, { avail: CW_LANDSCAPE, landscape: true }], pad: PX * 2 });
+    const { size, widths } = plan;
+    const lh = size * 1.32;
+    if (plan.landscape && rows.length) { shape(true); newPage(); backToPortrait = true; }
+    else if (backToPortrait) { shape(false); newPage(); backToPortrait = false; }
     const wrapRow = (r, font) => r.map((c, i) => wrapText(c, Math.max(8, widths[i] - PX * 2), widthOf(font, size)));
     const head = wrapRow(cols.map((c) => T(c.label)), B);
     const headH = Math.max(...head.map((l) => l.length)) * lh + PY * 2;
@@ -249,10 +259,11 @@ export async function drawPdf(L, model, imgs = new Map()) {
     y -= 20;
   });
 
-  /* ---------- footers ---------- */
+  /* ---------- footers (each page its own shape) ---------- */
   const pages = pdf.getPages(), n = pages.length;
   pages.forEach((p, i) => {
     page = p;
+    shape(p.getWidth() > p.getHeight());
     rule(M + 14, RULE);
     const stamp = one(model.stamp || '', F, 8, CW - 80);
     text(stamp, M, M + 2, F, 8, MUTE);

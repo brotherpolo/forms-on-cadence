@@ -38,7 +38,7 @@ test('text the standard fonts can draw', () => {
 test('wrapping keeps words whole, keeps line breaks and cuts very long words', () => {
   assert.deepEqual(wrapText('one two three four', 9, mono), ['one two', 'three', 'four']);
   assert.deepEqual(wrapText('a\n\nb', 10, mono), ['a', '', 'b']);
-  assert.deepEqual(wrapText('abcdefghij', 4, mono), ['abcd', 'efgh', 'ij']);
+  assert.deepEqual(wrapText('abcdefghij', 4, mono), ['abcd', 'efg', 'hij'], 'no piece shorter than 3');
   assert.deepEqual(wrapText('', 10, mono), ['']);
 });
 
@@ -97,4 +97,28 @@ test('a whole record draws: letterhead, fields, a long grid over pages, page num
 test('a bare record with no company, logo or pictures still draws', async () => {
   const bytes = await drawPdf(L, { formName: 'Note', title: '', items: [], sections: [], meta: [] });
   assert.equal((await L.PDFDocument.load(bytes)).getPageCount(), 1);
+});
+
+test('tables: words stay whole; smaller text, then landscape, before anything breaks', async () => {
+  const { planTable } = await import('../../src/pdfdoc.js');
+  const m = (size) => (t) => String(t).length * size * 0.5; // each character half the text size wide
+  const measure = (size) => m(size);
+  const spaces = [{ avail: 504 }, { avail: 684, landscape: true }];
+  // 4 columns: fits at the normal size, and every column is at least its longest word
+  const cols = [{ label: 'Item' }, { label: 'Description' }, { label: 'Qty', num: true }, { label: 'Amount', num: true }];
+  const rows = [['Shingles', 'Architectural asphalt shingles, charcoal, 30-year warranty', '12', 'CA$1,234.56']];
+  const p1 = planTable(cols, rows, measure, { spaces, pad: 10 });
+  assert.deepEqual([p1.size, p1.landscape, p1.broken], [9.5, false, false]);
+  assert.ok(p1.widths[3] >= 'CA$1,234.56'.length * 9.5 * 0.5 + 10 - 0.01, 'an amount is never split');
+  assert.ok(p1.widths[1] >= 'Architectural'.length * 9.5 * 0.5 + 10 - 0.01, 'the longest word fits');
+  assert.ok(Math.abs(p1.widths.reduce((a, b) => a + b, 0) - 504) < 0.5);
+  // 12 wide columns: too much for portrait at any size → landscape
+  const wide = Array.from({ length: 12 }, (_, i) => ({ label: 'Column ' + i, num: i > 0 }));
+  const wrow = [['Description of work', ...Array.from({ length: 11 }, () => 'CA$12,345.67')]];
+  const p2 = planTable(wide, wrow, measure, { spaces, pad: 10 });
+  assert.equal(p2.landscape, true);
+  assert.equal(p2.broken, false);
+  // 20 of them: nothing fits; the smallest text on landscape, words allowed to break
+  const p3 = planTable(Array.from({ length: 20 }, () => ({ label: 'X', num: true })), [Array.from({ length: 20 }, () => 'CA$12,345.67')], measure, { spaces, pad: 10 });
+  assert.deepEqual([p3.size, p3.landscape, p3.broken], [7, true, true]);
 });

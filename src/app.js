@@ -338,7 +338,9 @@ function formResults(){
   ui.fi=Math.min(ui.fi||0,Math.max(0,res.length-1));
   if(!fsShown())return '';
   if(!res.length)return typed?`<p class="fs-none">No forms match “${esc(ui.fq)}”.</p>`:`<p class="fs-none">No forms to open yet.</p>`;
-  return res.map(({form:f,at,len},i)=>`<button type="button" class="nav fs-item${i===ui.fi?' hi':''}" id="fs-o${i}" role="option" aria-selected="${i===ui.fi}" data-act="nav-form" data-id="${f.id}" tabindex="-1">${badge(f)}<span class="t">${len?`${esc(f.name.slice(0,at))}<mark>${esc(f.name.slice(at,at+len))}</mark>${esc(f.name.slice(at+len))}`:esc(f.name)}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join('')+`<p class="fs-hint">${typed?'':'Type to narrow · '}↑ ↓ choose · Enter opens · Esc closes</p>`;
+  return res.map(({form:f,at,len},i)=>{
+    const n=recordsOf(f.id).length,add=canCreate(store.me,f.id),noun=n===1?itemName(f).toLowerCase():f.name.toLowerCase();
+    return `<div class="fs-row${i===ui.fi?' hi':''}"><button type="button" class="nav fs-item${i===ui.fi?' hi':''}" id="fs-o${i}" role="option" aria-selected="${i===ui.fi}" data-act="fs-open" data-id="${f.id}" tabindex="-1" title="${add?'New '+esc(itemName(f).toLowerCase()):'Open the list'}">${badge(f)}<span class="t">${len?`${esc(f.name.slice(0,at))}<mark>${esc(f.name.slice(at,at+len))}</mark>${esc(f.name.slice(at+len))}`:esc(f.name)}</span>${add?'<span class="fs-add" aria-hidden="true">+ New</span>':''}</button><button type="button" class="fs-count" data-act="nav-form" data-id="${f.id}" tabindex="-1" aria-label="Open the list of ${n} ${esc(noun)}" title="Open the list">${n.toLocaleString()}</button></div>`;}).join('')+`<p class="fs-hint">${typed?'':'Type to narrow · '}↑ ↓ choose · Enter: new · Shift+Enter: list · Esc closes</p>`;
 }
 function paintFormResults(){
   const box=$('#fs-res'),q=$('#fs-q');if(!box||!q)return;
@@ -1439,6 +1441,7 @@ document.addEventListener('click',async e=>{
   switch(a){
     case 'menu':$('#side').classList.add('open');$('#scrim').classList.add('open');break;
     case 'close-menu':closeMenu();break;
+    case 'fs-open':{ui.fq='';ui.fi=0;ui.fsOpen=false;if(document.activeElement?.id==='fs-q')document.activeElement.blur();const f=formById(id);if(!f)break;if(canCreate(store.me,id))goRec(newRecordDraft(f,null),{name:'record',formId:id,recordId:null});else go({name:'records',formId:id});break;}
     case 'nav-form':ui.fq='';ui.fi=0;ui.fsOpen=false;if(document.activeElement?.id==='fs-q')document.activeElement.blur();go({name:'records',formId:id});break;
     case 'nav-records':go({name:'records',formId:id});break;
     case 'nav-designer':go({name:'designer'});break;
@@ -1633,7 +1636,7 @@ document.addEventListener('keydown',e=>{
   if(e.target?.id==='fs-q'){
     const items=[...document.querySelectorAll('#fs-res .fs-item')];
     if(e.key==='ArrowDown'||e.key==='ArrowUp'){if(!items.length)return;e.preventDefault();ui.fi=((ui.fi||0)+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;paintFormResults();return;}
-    if(e.key==='Enter'){e.preventDefault();items[ui.fi||0]?.click();return;}
+    if(e.key==='Enter'){e.preventDefault();const it=items[ui.fi||0];if(e.shiftKey)it?.parentElement.querySelector('.fs-count')?.click();else it?.click();return;}
     if(e.key==='Escape'&&fsShown()){e.preventDefault();closeFormSearch();return;}
     return;
   }
