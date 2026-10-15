@@ -2,7 +2,7 @@
 // Effective access is recomputed here and written to each affected users/{uid} document,
 // where firestore.rules and storage.rules read it.
 
-import { store, saveGroup, deleteGroup, setUserGroups, setUserRole, setUserCadence, recomputeAllAccess } from './store.js';
+import { store, saveGroup, deleteGroup, setUserGroups, setUserRole, setUserCadence, recomputeAllAccess, removeAccount, setOwner } from './store.js';
 import { go, render, renderMain, byOrder } from './app.js';
 import { esc, uid, clone, toast, badge } from './ui.js';
 import { LEVELS, NONE, PRESETS, normalize, describeLevel, levelFor, isAdmin, accessParents } from './access.js';
@@ -11,6 +11,9 @@ const VIEWS = new Set(['users', 'groups', 'groupEdit']);
 let gdraft = null;
 let confirmDel = false;
 let leaveArmed = false;
+let rm = null;            // removing someone: { id, giveTo, busy }
+const give = {};          // Removed section: chosen new owner per removed person
+let reassigning = null;   // removed person whose records are being handed over
 
 const VIEW_LABEL = { none: 'Can’t see', own: 'Only their own', all: 'All records' };
 const EDIT_LABEL = { none: 'Can’t edit', own: 'Their own', all: 'All records' };
@@ -130,14 +133,76 @@ function viewUsers() {
       ${isAdmin(u) ? `<p class="help">Administrators see and edit every form and manage forms, groups and users.</p>` : gs.length ? `<div class="opts">${gs.map((g) => `<label class="opt"><input type="checkbox" data-ugroup="${u.id}" value="${g.id}"${(u.groups || []).includes(g.id) ? ' checked' : ''}>${esc(g.name || 'Untitled group')}</label>`).join('')}</div>
         <p class="help">${(u.groups || []).length ? `Can open ${formsVisible(u)} of ${store.forms.length} forms.` : 'Not in any group, so no forms are visible yet.'}</p>` : `<p class="help">Create a security group first, then add this person to it.</p>`}
       ${isAdmin(u) ? `<p class="help ucad">Cadence: administrators can always use it.</p>` : `<label class="switch ucad"><input type="checkbox" data-ucad="${u.id}"${u.cadence === true ? ' checked' : ''}><span class="tr"></span><span>Can use Cadence${u.cadence === true ? '' : ' <span class="chip">Waiting</span>'}</span></label>`}
+      ${self ? '' : removeHTML(u)}
     </div>`;
-  }).join('')}</div>` : `<div class="panel empty"><p>No one has signed in yet.</p></div>`}`;
+  }).join('')}</div>` : `<div class="panel empty"><p>No one has signed in yet.</p></div>`}
+  ${removedHTML()}`;
+}
+
+const ownedBy = (uid) => store.records.filter((r) => r.ownerId === uid);
+const others = (exclude) => sortedUsers().filter((x) => !exclude.includes(x.id));
+
+/** Remove button, and the confirmation that opens in its place */
+function removeHTML(u) {
+  if (!rm || rm.id !== u.id) return `<div class="urm-row"><button type="button" class="btn sm ghost danger" data-act="u-rm" data-id="${u.id}">Remove…</button></div>`;
+  const n = ownedBy(u.id).length;
+  return `<div class="urm" role="group" aria-label="Remove ${esc(userName(u))}">
+    <p><b>Remove ${esc(userName(u))}?</b> Their sign-in is deleted, so they can’t log in to Formwright or Cadence with this account. Their Cadence tasks are deleted, and tasks given to them go back to whoever gave them. This can’t be undone.</p>
+    <label class="prop"><span>Their ${n} record${n === 1 ? '' : 's'}</span><select class="in" data-urmgive="1"${rm.busy ? ' disabled' : ''}>
+      <option value="">Keep them under “${esc(userName(u))} (removed)”</option>
+      ${others([u.id]).map((x) => `<option value="${x.id}"${rm.giveTo === x.id ? ' selected' : ''}>Give them to ${esc(userName(x))}</option>`).join('')}
+    </select></label>
+    <div class="urm-btns"><button type="button" class="btn ghost" data-act="u-rm-cancel"${rm.busy ? ' disabled' : ''}>Cancel</button><button type="button" class="btn danger armed" data-act="u-rm-go" data-id="${u.id}"${rm.busy ? ' disabled' : ''}>${rm.busy ? 'Removing…' : 'Remove permanently'}</button></div>
+  </div>`;
+}
+
+/** People removed earlier: their name, the records they still own, and a way to hand those over */
+function removedHTML() {
+  const gone = Object.entries(store.profiles).filter(([, p]) => p && p.removed).map(([id, p]) => ({ id, name: p.baseName || 'Someone', n: ownedBy(id).length, at: p.removedAt || 0 }))
+    .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+  if (!gone.length) return '';
+  return `<section class="section"><div class="section-h"><h2>Removed <span class="count">${gone.length}</span></h2></div>
+    <div class="panel flist">${gone.map((g) => `<div class="ucard urm-gone">
+      <div class="uhead"><div class="grow"><b>${esc(g.name)} <span class="chip">Removed</span></b><small>${g.n ? `Still owns ${g.n} record${g.n === 1 ? '' : 's'}` : 'Owns no records'}${g.at ? ' · removed ' + new Date(g.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</small></div></div>
+      ${g.n ? `<div class="urm-reasn"><label class="prop"><span class="sr">Give ${esc(g.name)}’s records to</span><select class="in" data-ureasn="${g.id}"${reassigning ? ' disabled' : ''}><option value="">Give their records to…</option>${others([]).map((x) => `<option value="${x.id}"${give[g.id] === x.id ? ' selected' : ''}>${esc(userName(x))}</option>`).join('')}</select></label>
+        <button type="button" class="btn" data-act="u-reassign" data-id="${g.id}"${!give[g.id] || reassigning ? ' disabled' : ''}>${reassigning === g.id ? 'Moving…' : `Reassign ${g.n} record${g.n === 1 ? '' : 's'}`}</button></div>` : ''}
+    </div>`).join('')}</div></section>`;
 }
 
 /* ---------- Events (delegated from app.js) ---------- */
 
 export async function onClick(el, a, id) {
   switch (a) {
+    case 'u-rm': rm = { id, giveTo: '', busy: false }; renderMain(); document.querySelector('[data-urmgive]')?.focus(); return;
+    case 'u-rm-cancel': rm = null; renderMain(); return;
+    case 'u-rm-go': {
+      if (!rm || rm.busy) return;
+      const u = store.users.find((x) => x.id === rm.id); const name = u ? userName(u) : 'them';
+      const to = rm.giveTo ? store.users.find((x) => x.id === rm.giveTo) : null;
+      rm.busy = true; renderMain();
+      try {
+        const out = await removeAccount(rm.id, rm.giveTo);
+        rm = null;
+        const bits = [to ? `${out.records} record${out.records === 1 ? '' : 's'} given to ${userName(to)}` : 'their records kept', out.tasksDeleted ? `${out.tasksDeleted} task${out.tasksDeleted === 1 ? '' : 's'} deleted` : '', out.tasksReturned ? `${out.tasksReturned} handed back` : ''].filter(Boolean);
+        toast(`Removed ${name}: ${bits.join(', ')}.`);
+      } catch (e) {
+        console.error('[formwright] remove', e);
+        rm.busy = false;
+        toast(e?.code === 'functions/not-found' || /not.?found|404/i.test(e?.message || '') ? 'The remove service isn’t set up yet. Deploy the Cadence functions first (see the install steps).' : e?.message ? 'Couldn’t remove: ' + e.message : 'Couldn’t remove them. Try again.');
+      }
+      renderMain();
+      return;
+    }
+    case 'u-reassign': {
+      const to = give[id]; if (!to || reassigning) return;
+      const recs = store.records.filter((r) => r.ownerId === id).map((r) => r.id);
+      const target = store.users.find((x) => x.id === to);
+      reassigning = id; renderMain();
+      try { const n = await setOwner(recs, to); delete give[id]; toast(`${n} record${n === 1 ? '' : 's'} given to ${target ? userName(target) : 'them'}.`); }
+      catch (e) { console.error('[formwright] reassign', e); toast('Couldn’t move those records. Nothing was changed.'); }
+      reassigning = null; renderMain();
+      return;
+    }
     case 'g-new':
       openGroup(null);
       if (go({ name: 'groupEdit' })) setTimeout(() => document.querySelector('[data-gp=name]')?.focus(), 50);
@@ -252,6 +317,8 @@ export async function onChange(t) {
     renderMain();
     return;
   }
+  if (t.dataset.urmgive && rm) { rm.giveTo = t.value; return; }
+  if (t.dataset.ureasn) { give[t.dataset.ureasn] = t.value; renderMain(); return; }
   if (t.dataset.ucad) {
     try {
       await setUserCadence(t.dataset.ucad, t.checked);

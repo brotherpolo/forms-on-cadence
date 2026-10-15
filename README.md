@@ -205,7 +205,7 @@ Sorting goes by the real value everywhere (lists, grids, report tables, drill-do
 
 Each form's list can be set up from the list itself.
 
-- **Columns:** **Columns** opens a picker. Tick fields to show them and use the arrows to reorder. Besides the form's own fields, you can add the parent record (**Belongs to**), fields of the parent (Clients › Status), counts of child records (how many Site visits), and **Last updated**, **Created** and **Created by**. The record's title is always the first column.
+- **Columns:** **Columns** opens a picker. Tick fields to show them and use the arrows to reorder. Besides the form's own fields, you can add the parent record (**Belongs to**), fields of the parent (Clients › Status), counts of child records (how many Site visits), and **Last updated**, **Created**, **Created by** and **Owner**. The record's title is always the first column.
 - **Sort:** click a column heading; click again to reverse. Empty values always go last.
 - **Filter:** **Filter** lists the form's choice fields (dropdown, single choice, multiple choice, yes/no). Tick options to show records with any of them; every field you filter must match.
 - **Row height:** Comfortable or Compact.
@@ -215,6 +215,7 @@ Each form's list can be set up from the list itself.
   - The app remembers the last view you used for each form on each device.
 - **Select several:** tick rows (or **select all**, which picks only the rows shown). A bar appears with:
   - **Set field:** set a dropdown, single choice or yes/no field to the same value on all of them.
+  - **Set owner** (admins): give the selected records to someone. Who created them stays as history.
   - **Export CSV:** the selected records with the columns you're showing.
   - **Delete:** asks first, then gives you about 6 seconds to **Undo** before anything is deleted. Child records stay (without a parent), and linked Cadence tasks show the record as removed. Closing the app during those seconds cancels the delete.
   - Records you aren't allowed to edit are skipped, and the bar and dialog say how many.
@@ -308,6 +309,19 @@ Add `http://localhost:5173`'s host (`localhost`) to authorized domains if it isn
 3. Add people to groups, either from the group page or the Users page.
 
 Changes apply immediately. The person's app re-subscribes to exactly the records they may see.
+
+### 5. Removing someone
+
+On **Users**, **Remove…** beside a person (not yourself) asks first, naming them and how many records they own. It can't be undone.
+
+- **Their records:** keep them under their name, shown as "Jane Smith (removed)", or pick **Give them to** someone.
+- **Cadence:** tasks they own are deleted; tasks assigned to them go back to the owner, unassigned.
+- **Reports, dashboards and list views:** private ones are deleted; shared ones pass to you.
+- Their account, groups, private Cadence settings and push settings are deleted, then their sign-in. If they sign in again later they start as a new person with no access.
+
+Removing runs on the server (the `removeAccount` function in the Cadence folder), so deploy the Cadence functions first. An administrator can't remove themselves, and the last administrator can't be removed.
+
+**Removed** (below the people list) shows everyone removed and how many records they still own. **Reassign** gives all of them to someone at any time. To move only some, use **Set owner** in a records list.
 
 ---
 

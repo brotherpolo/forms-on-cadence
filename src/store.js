@@ -1,7 +1,8 @@
 // Data layer: Firestore subscriptions, writes, and Storage uploads.
 // The UI reads the synchronous arrays on `store` and re-renders when `store.onChange` fires.
 
-import { db, storage } from './firebase.js';
+import { app, db, storage } from './firebase.js';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   collection,
   doc,
@@ -123,7 +124,8 @@ export function startData(user) {
   // Form designs and display names: for members only.
   const onForms = (docs) => { store.forms = docs.map((d) => ({ ...d.data(), id: d.id })); got.forms = true; syncRecordSubs(); changed(); };
   memberParts.push({ start: () => onSnapshot(collection(db, 'forms'), (s) => onForms(s.docs), fail('forms')), empty: () => onForms([]) });
-  const onProfiles = (docs) => { store.profiles = Object.fromEntries(docs.map((d) => [d.id, d.data()])); changed(); };
+  // someone removed keeps their name, marked so: "Jane Smith (removed)" (baseName is the plain name)
+  const onProfiles = (docs) => { store.profiles = Object.fromEntries(docs.map((d) => { const p = d.data(); return [d.id, p.removed ? { ...p, baseName: p.displayName, displayName: (p.displayName || 'Someone') + ' (removed)' } : p]; })); changed(); };
   memberParts.push({ start: () => onSnapshot(collection(db, 'profiles'), (s) => onProfiles(s.docs), fail('profiles')), empty: () => onProfiles([]) });
 
   /**
@@ -603,6 +605,25 @@ export async function setUserGroups(userId, groupIds) {
 
 export async function setUserRole(userId, role) {
   await updateDoc(doc(db, 'users', userId), { role });
+}
+
+/** Remove a person: their sign-in and account go, their records stay (or go to giveTo).
+    Runs on the server (Cadence's functions, removeAccount), which checks the caller is an admin. */
+export async function removeAccount(uid, giveTo) {
+  const fn = httpsCallable(getFunctions(app, 'us-central1'), 'removeAccount');
+  const r = await fn({ uid, giveTo: giveTo || null });
+  return r.data;
+}
+
+/** Give records to someone else (admins). Who created them stays as history. */
+export async function setOwner(recordIds, ownerId) {
+  const ids = [...new Set(recordIds)];
+  for (let i = 0; i < ids.length; i += 400) {
+    const b = writeBatch(db);
+    ids.slice(i, i + 400).forEach((id) => b.update(doc(db, 'records', id), { ownerId, updatedAt: Date.now(), updatedBy: store.user.uid }));
+    await b.commit();
+  }
+  return ids.length;
 }
 
 /** Let someone use Cadence, or stop them (admins only; the rules check users/{uid}.cadence). */

@@ -61,6 +61,7 @@ export function columnCatalog(ctx) {
   out.push({ key: 'sys:updated', label: 'Last updated', group: 'Record info', src: 'Record', num: false, sys: true });
   out.push({ key: 'sys:created', label: 'Created', group: 'Record info', src: 'Record', num: false, sys: true });
   out.push({ key: 'sys:by', label: 'Created by', group: 'Record info', src: 'Record', num: false, sys: true });
+  out.push({ key: 'sys:owner', label: 'Owner', group: 'Record info', src: 'Record', num: false, sys: true });
   return out;
 }
 
@@ -182,6 +183,10 @@ export function cellOf(key, rec, h) {
   }
   if (key === 'sys:updated') return { text: shortDate(rec.updatedAt), sort: rec.updatedAt || null, num: false };
   if (key === 'sys:created') return { text: shortDate(rec.createdAt), sort: rec.createdAt || null, num: false };
+  if (key === 'sys:owner') {
+    const t = rec.ownerId ? h.nameOf(rec.ownerId) : '';
+    return { text: t, sort: t ? t.toLowerCase() : null, num: false };
+  }
   if (key === 'sys:by') {
     const t = rec.createdBy ? h.nameOf(rec.createdBy) : '';
     return { text: t, sort: t ? t.toLowerCase() : null, num: false };

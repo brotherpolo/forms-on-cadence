@@ -377,3 +377,10 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .na-card .na-who{font-size:13px}
 .na-card .na-who b{color:var(--fg);word-break:break-all}
 .na-card .btn{align-self:flex-start;min-height:44px}
+.urm-row{display:flex;justify-content:flex-end}
+.urm{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border:1px solid var(--danger);border-radius:10px;background:var(--danger-soft)}
+.urm p{color:var(--fg);font-size:14px}
+.urm-btns{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.urm-reasn{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px}
+.urm-reasn .prop{flex:1 1 220px;margin:0}
+.urm-gone .uhead b{color:var(--muted)}

@@ -46,7 +46,7 @@ test('catalog leaves out the title and headings, keeps long text, and adds paren
   assert.ok(keys.includes('f:brief') && !keys.includes('f:h1'));
   assert.ok(keys.includes('f:stage') && keys.includes('parent'));
   assert.ok(keys.includes('p:clients:cstatus') && keys.includes('p:clients:notes'));
-  assert.ok(keys.includes('kids:visits') && keys.includes('sys:by'));
+  assert.ok(keys.includes('kids:visits') && keys.includes('sys:by') && keys.includes('sys:owner'));
 });
 
 test('default config follows "Show as list column", with Belongs to first', () => {
@@ -87,6 +87,7 @@ test('cells read fields, the parent, parent fields, counts and record info', () 
   assert.equal(cellOf('p:clients:cstatus', byId.get('r2'), h).text, '');
   assert.equal(cellOf('kids:visits', r1, h).sort, 2);
   assert.equal(cellOf('sys:by', r1, h).text, 'Adam');
+  assert.equal(cellOf('sys:owner', { ...r1, ownerId: r1.createdBy }, h).text, 'Adam', 'Owner column names the owner');
   assert.equal(cellOf('title', byId.get('r2'), h).sort, 'audit');
 });
 

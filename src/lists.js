@@ -2,7 +2,7 @@
 // height, and selecting several records to change, export or delete together.
 // Column and view logic lives in listlogic.js; app.js passes in its formatting helpers.
 import './lists.css';
-import { store, saveListView, deleteListView, deleteRecords, setRecordsValue, attachRecords } from './store.js';
+import { store, saveListView, deleteListView, deleteRecords, setRecordsValue, attachRecords, setOwner } from './store.js';
 import { openPickParent } from './attach.js';
 import { attachChange } from './attachlogic.js';
 import { nounOf } from './dashlogic.js';
@@ -231,11 +231,31 @@ function bulkBar(form, selRecs, editable, selHidden, settable) {
     <b>${selRecs.length} selected</b>${selHidden ? `<span class="lv-note">${selHidden} hidden by filters</span>` : ''}${none ? '<span class="lv-note">You can’t change these</span>' : ''}
     <span class="lv-grow"></span>
     ${settable.length ? `<div class="lv-anchor"><button type="button" class="btn" data-lv="pop" data-v="set"${none || LV.busy ? ' disabled' : ''}>Set field</button>${setPop}</div>` : ''}
+    ${isAdmin(store.me) ? ownerAnchor(selRecs) : ''}
     ${H.parentsOf(form.id).some((pf) => canViewForm(store.me, pf.id)) ? `<button type="button" class="btn" data-lv="attach-to"${none || LV.busy ? ' disabled' : ''}>Attach to…</button>` : ''}
     <button type="button" class="btn" data-lv="export">Export CSV</button>
     <button type="button" class="btn lv-del" data-lv="del-ask"${none || LV.busy ? ' disabled' : ''}>${ICON.trash}Delete</button>
     <button type="button" class="btn" data-lv="sel-clear">Clear</button>
   </div>`;
+}
+
+/** Admins: give the ticked records to someone else (owner = whose "mine only" lists they show in) */
+function ownerAnchor(selRecs) {
+  const people = [...store.users].map((u) => ({ id: u.id, name: store.profiles[u.id]?.displayName || u.displayName || (u.email || '').split('@')[0] || 'Unnamed user' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const pop = LV.pop === 'owner' ? `<div class="lv-pop right"><p class="lv-hint">Give ${selRecs.length} record${selRecs.length === 1 ? '' : 's'} to… They’ll show in that person’s “mine only” lists. Who created them stays the same.</p>${people.map((p) => `<button type="button" class="lv-opt" data-lv="owner" data-v="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>` : '';
+  return `<div class="lv-anchor"><button type="button" class="btn" data-lv="pop" data-v="owner"${LV.busy ? ' disabled' : ''}>Set owner</button>${pop}</div>`;
+}
+
+async function setOwnerOf(to) {
+  const form = formNow(); if (!form) return;
+  const recs = H.recordsOf(form.id).filter((r) => LV.sel.has(r.id));
+  if (!recs.length) return;
+  const name = store.profiles[to]?.displayName || 'them';
+  LV.pop = null; LV.busy = true; repaint();
+  try { const n = await setOwner(recs.map((r) => r.id), to); toast(`${n} record${n === 1 ? '' : 's'} given to ${name}`); }
+  catch (e) { console.error('[formwright] set owner', e); toast('Couldn’t change the owner. Nothing was changed.'); }
+  LV.busy = false; repaint();
 }
 
 function headCell(col, label, cfg) {
@@ -536,6 +556,7 @@ document.addEventListener('click', (e) => {
     case 'name-cancel': LV.naming = null; repaint(); break;
     case 'name-save': saveNamed(); break;
     case 'set': setField(el.dataset.f, v); break;
+    case 'owner': setOwnerOf(v); break;
     case 'attach-to': attachTo(); break;
     case 'export': exportCsv(); break;
     case 'sel-clear': LV.sel.clear(); LV.pop = null; repaint(); break;
