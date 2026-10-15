@@ -10,7 +10,9 @@ import { parseRoute, routeFor } from './route.js';
 import { initReports, closeCatalogPop, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts, drillNav, fitTiles } from './dash.js';
 import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
 import { initAttach, openPickChildren, closeAttach } from './attach.js';
-import { titleSortOf } from './listlogic.js';
+import { titleSortOf, columnCatalog, defaultConfig, cellOf, defaultViewId } from './listlogic.js';
+import { storeKey as subStoreKey, readSubs, prefsOf, setPrefs, colsFor, toggleCol as subToggle, moveCol as subMove, nextSort as subNext, limitRows, sortByVal, TASK_COLS, TASK_DEFAULT, taskCell } from './sublogic.js';
+import { colsTool, showMenu, sortMenu, toolBar, moreLine, headCell as subHead } from './subui.js';
 import { headingOf, readFolds, isFolded, setFold, setFolds, foldKeys } from './foldlogic.js';
 import { sectionOrder, moveSection, TASKS as TASKS_KEY } from './sectionlogic.js';
 import { searchForms, allSearchable, designerMatch } from './navlogic.js';
@@ -142,7 +144,7 @@ const ui={search:'',openField:null,tab:'fields',palette:false,confirm:null,leave
 function dirty(){return (view.name==='record'&&rdraft?.dirty)||(view.name==='formEdit'&&fdraft?.dirty)||(view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId))||admin.isDirty(view)}
 function guard(){if(importRunning()){toast('The import is still running. Wait for it to finish.');return false;}if(dirty()&&!ui.leaveOk){ui.leaveOk=true;toast('You have unsaved changes. Tap again to leave without saving.');setTimeout(()=>ui.leaveOk=false,4000);return false;}ui.leaveOk=true;return true;}
 export function goRec(draft,v){if(!guard())return;rdraft=draft;go(v);}
-export function go(v,push=true){
+export function go(v,push=true){ui.subPop=null;
   if(ADMIN_VIEWS.has(v.name)&&!isAdmin(store.me)){toast('Only administrators can open that.');return false;}
   if((v.name==='records'||v.name==='record')&&!canViewForm(store.me,v.formId)){toast('You don’t have access to that form.');return false;}
   if(!guard())return false;
@@ -426,34 +428,51 @@ function tasksInner(){
   const rec=view.recordId?recById(view.recordId):null;
   const form=rec?formById(rec.formId):null;
   const noun=form?itemName(form).toLowerCase():'record';
-  const add=cadenceUrl?`<div class="gfoot"><button class="btn sm" data-act="add-task">+ Add task</button></div>`:'';
+  const k='t:tasks',p=form?subPrefs(form.id,k):prefsOf({},'',k);
+  const addBtn=cadenceUrl?`<button class="btn sm" data-act="add-task">+ Add task</button>`:'';
   const ready=tw.status==='ready'&&tw.recordId===view.recordId;
   const openTasks=ready?tw.tasks.filter(t=>!t.done):[];
-  const tOpen=!(form&&folded(form.id,'t:tasks'));
+  const tOpen=!(form&&folded(form.id,k));
   let tSum='';
   if(ready&&tw.tasks.length){
     const next=sortTasks(openTasks).find(t=>t.due);
     const done=tw.tasks.length-openTasks.length;
     tSum=[next?'next due '+new Date(next.due+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}):'',done?done+' done':''].filter(Boolean).join(' · ');
   }
-  const head=`<div class="section-h"><h2>${foldBtn('t:tasks',tOpen,`<span class="badge" style="background:${COLORS[6]}" aria-hidden="true">T</span><span>Tasks</span>${openTasks.length?` <span class="count">${openTasks.length}</span>`:''}`,tSum)}</h2></div>`;
+  const head=`<div class="section-h"><h2>${foldBtn(k,tOpen,`<span class="badge" style="background:${COLORS[6]}" aria-hidden="true">T</span><span>Tasks</span>${openTasks.length?` <span class="count">${openTasks.length}</span>`:''}`,tSum)}</h2></div>`;
   if(!tOpen)return head;
-  if(tw.status==='loading'||tw.recordId!==view.recordId)return head+`<div class="panel"><p class="note">Loading tasks…</p></div>`;
-  if(tw.status==='error')return head+`<div class="panel"><p class="note">${tw.error==='failed-precondition'?'Tasks need a database index that is still being built. Try again in a few minutes.':tw.error==='permission-denied'&&!isAdmin(store.me)&&store.me?.cadence!==true?'Tasks come from Cadence, which isn’t switched on for you yet. Ask an administrator to turn on Cadence for you under Users.':'Couldn’t load tasks ('+esc(tw.error)+').'}</p></div>`;
-  if(!tw.tasks.length)return head+`<div class="panel"><p class="note">No tasks for this ${esc(noun)} yet.${cadenceUrl?' Add one, or link an existing task to it in Cadence.':' Link a task to it from Cadence.'}</p>${add}</div>`;
-  const me=store.user?.uid,today=dateKey(new Date());
-  const tq=(rdraft?.kq||{})['t:tasks']||'';
-  const shown=sortTasks(tw.tasks).filter(t=>!tq.trim()||searchHit(taskText(t,today),tq));
-  const tSearch=tw.tasks.length>5||tq?kSearch('t:tasks',{name:'Tasks'},tq,shown.length,tw.tasks.length,false):'';
-  if(!shown.length)return head+`<div class="panel">${tSearch}<p class="note">No tasks match “${esc(tq)}”.</p>${add}</div>`;
-  return head+`<div class="panel">${tSearch}<div class="tlist">${shown.map(t=>{
+  if(tw.status==='loading'||tw.recordId!==view.recordId)return head+`<div class="panel subsec">${toolBar({buttons:addBtn})}<p class="note">Loading tasks…</p></div>`;
+  if(tw.status==='error')return head+`<div class="panel subsec"><p class="note">${tw.error==='failed-precondition'?'Tasks need a database index that is still being built. Try again in a few minutes.':tw.error==='permission-denied'&&!isAdmin(store.me)&&store.me?.cadence!==true?'Tasks come from Cadence, which isn’t switched on for you yet. Ask an administrator to turn on Cadence for you under Users.':'Couldn’t load tasks ('+esc(tw.error)+').'}</p></div>`;
+  if(!tw.tasks.length)return head+`<div class="panel subsec">${toolBar({buttons:addBtn})}<p class="note">No tasks for this ${esc(noun)} yet.${cadenceUrl?' Add one, or link an existing task to it in Cadence.':' Link a task to it from Cadence.'}</p></div>`;
+  const me=store.user?.uid,today=dateKey(new Date()),now=Date.now();
+  const tq=(rdraft?.kq||{})[k]||'';
+  const {cols,sort,rows:found}=taskRows(p,tq,today,now);
+  const lim=limitRows(found,p.show);
+  const tools=colsTool(k,ui.subPop===k,cols,TASK_COLS.map(c=>({...c,group:''})),{fixed:'Task'})+showMenu(k,p.show,tw.tasks.length)+sortMenu(k,[{key:'title',label:'Task'},...cols],sort,'Open first, by due date');
+  const bar=toolBar({search:tw.tasks.length>5||tq?subSearch(k,'Tasks',tq,found.length,tw.tasks.length):'',tools,buttons:addBtn});
+  if(!found.length)return head+`<div class="panel subsec">${bar}<p class="note">No tasks match “${esc(tq)}”.</p></div>`;
+  const tick=t=>{const busy=tw.busy.has(t.id),rep=repeats(t);return `<button class="tcheck${t.done?' on':''}" data-act="task-done" data-id="${esc(t.id)}" aria-pressed="${!!t.done}" aria-label="${t.done?'Reopen':'Mark done'}: ${esc(t.title)}"${busy?' disabled':''}${rep&&!t.done?' title="Repeating tasks are completed in Cadence, so the next one is created"':''}>✓</button>`;};
+  const tdCell=(c,x)=>`<td class="${[c.num?'num':'',x.tone?'tt-'+x.tone:'',x.long?'lv-long':''].filter(Boolean).join(' ')}"${x.long&&x.text?` title="${esc(x.text)}"`:''}>${esc(x.text)}</td>`;
+  const table=`<div class="sub-box"><div class="tblwrap"><table class="tbl lv-tbl sub-tbl tt-tbl"><thead><tr><th class="tt-ck"><span class="sr">Done</span></th>${subHead(k,{key:'title',label:'Task'},sort)}${cols.map(c=>subHead(k,c,sort)).join('')}</tr></thead>
+    <tbody>${lim.rows.map(r=>`<tr class="${r.t.done?'done':''}"${cadenceUrl?` data-act="task-open" data-id="${esc(r.t.id)}"`:''}><td class="tt-ck">${tick(r.t)}</td><td class="title" title="${esc(r.title.text)}">${esc(r.title.text)}</td>${cols.map((c,i)=>tdCell(c,r.cells[i])).join('')}</tr>`).join('')}</tbody></table></div></div>`;
+  const cards=`<div class="sub-cards tlist">${lim.rows.map(({t})=>{
     const due=t.done?{text:'Done',tone:'ok'}:dueInfo(t.due,today);
-    const rep=repeats(t),busy=tw.busy.has(t.id);
+    const rep=repeats(t);
     const meta=[`<span class="tdue ${due.tone}">${esc(due.text)}</span>`,whoLine(t,me),rep?repeatLabel(t):''].filter(Boolean);
-    return `<div class="trow${t.done?' done':''}">
-      <button class="tcheck${t.done?' on':''}" data-act="task-done" data-id="${esc(t.id)}" aria-pressed="${!!t.done}" aria-label="${t.done?'Reopen':'Mark done'}: ${esc(t.title)}"${busy?' disabled':''}${rep&&!t.done?' title="Repeating tasks are completed in Cadence, so the next one is created"':''}>✓</button>
+    return `<div class="trow${t.done?' done':''}">${tick(t)}
       <button class="tmain" data-act="task-open" data-id="${esc(t.id)}"${cadenceUrl?'':' disabled'}><b>${esc(t.title||'Untitled task')}</b><span class="tmeta">${meta.map(x=>x.startsWith('<')?x:`<span>${esc(x)}</span>`).join('')}</span></button>
-    </div>`;}).join('')}</div>${add}</div>`;
+    </div>`;}).join('')}</div>`;
+  return head+`<div class="panel subsec">${bar}${table}${cards}${moreLine(k,lim.rows.length,found.length,found.length===1?'task':'tasks')}</div>`;
+}
+/** This record's tasks as rows: chosen columns, searched, sorted (default: open first, by due date). */
+function taskRows(p,tq,today,now){
+  const keys=colsFor(p.cols,TASK_COLS,TASK_DEFAULT);
+  const cols=keys.map(x=>TASK_COLS.find(c=>c.key===x));
+  const sort=p.sort&&(p.sort.key==='title'||keys.includes(p.sort.key)||TASK_COLS.some(c=>c.key===p.sort.key))?p.sort:null;
+  const opt={todayKey:today,now,dueInfo};
+  let rows=sortTasks(tw.tasks).filter(t=>!tq.trim()||searchHit(taskText(t,today),tq)).map(t=>({t,title:taskCell('title',t,opt),cells:cols.map(c=>taskCell(c.key,t,opt))}));
+  if(sort){rows.forEach(r=>{r.sortVal=taskCell(sort.key,r.t,opt).sort;});rows=sortByVal(rows,sort.dir);}
+  return {cols,sort,rows};
 }
 async function toggleTask(id){
   const t=tw.tasks.find(x=>x.id===id);if(!t)return;
@@ -507,21 +526,7 @@ function viewRecord(form){
   const children=(form.children||[]).filter(c=>c.display!=='grid').map(c=>({rel:c,cf:formById(c.formId)})).filter(x=>x.cf&&canViewForm(store.me,x.cf.id));
   const sec={}; // the sections under the fields, by child form id (or 'tasks'), shown in the form's chosen order
   grels.forEach(({rel,cf})=>{sec[cf.id]=gridSection(form,rel,cf,rdraft,ro);});
-  if(rec)children.forEach(({cf})=>{sec[cf.id]=(()=>{
-    const allRs=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-    const kq=(rdraft.kq||{})['c:'+cf.id]||'';
-    const recText=r=>[recTitle(r,cf),...(cf.fields||[]).filter(f=>!['heading','file','image','signature'].includes(f.type)).map(f=>{try{return fmt(f,valOf(f,r))}catch(e){return ''}})].join(' \u2022 ');
-    const rs=kq.trim()?allRs.filter(r=>searchHit(recText(r),kq)):allRs;
-    const cols=(cf.fields||[]).filter(f=>f.inList&&!NOCOL.has(f.type)&&f.id!==titleFieldOf(cf)?.id).slice(0,3);
-    const card=r=>`<button class="card" data-act="open-record" data-id="${r.id}"><b>${esc(recTitle(r,cf))}</b><div class="meta">${cols.map(c=>{const t=fmt(c,valOf(c,r));return t?`<span>${esc(c.label)}: ${esc(t)}</span>`:''}).join('')}</div></button>`;
-    const detachable=r=>!ro&&canEditRecord(store.me,r);
-    const cOpen=!folded(form.id,'c:'+cf.id);
-    const cHead=`<div class="section-h"><h2>${foldBtn('c:'+cf.id,cOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${allRs.length}</span>`,allRs.length?'latest: '+recTitle(allRs[0],cf):'')}</h2></div>`;
-    if(!cOpen)return `<section class="section" id="kids-${cf.id}">${cHead}</section>`;
-    const cBtns=`${canCreate(store.me,cf.id)?`<button class="btn sm" data-act="add-child" data-id="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${ro?'':`<button class="btn sm" data-act="child-attach" data-id="${cf.id}">Attach existing</button>`}`;
-    return `<section class="section" id="kids-${cf.id}">${cHead}
-      <div class="panel">${allRs.length>5||kq?kSearch('c:'+cf.id,cf,kq,rs.length,allRs.length,false):''}${rs.length?`<div class="cards" style="display:flex">${rs.map(r=>detachable(r)?`<div class="at-card">${card(r)}<button type="button" class="ibtn at-det" data-act="child-detach" data-id="${r.id}" aria-label="Detach ${esc(recTitle(r,cf))} (keeps it)" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button></div>`:card(r)).join('')}</div>`:`<p class="note">${kq.trim()&&allRs.length?`No ${esc(cf.name.toLowerCase())} match “${esc(kq)}”.`:`No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.`}</p>`}${cBtns?`<div class="gfoot">${cBtns}</div>`:''}</div></section>`;
-  })();});
+  if(rec)children.forEach(({cf})=>{sec[cf.id]=childSection(form,cf,rec,ro);});
   if(rec)sec[TASKS_KEY]=`<section class="section" id="rec-tasks">${tasksInner()}</section>`;
   const sectionsHTML=sectionOrder(form).map(k=>sec[k]||'').join('');
   let backHTML='';
@@ -576,20 +581,17 @@ function pdfModel(form,rec){
   const kids=Object.fromEntries((form.children||[]).filter(c=>c.display!=='grid').map(c=>formById(c.formId)).filter(cf=>cf&&canViewForm(store.me,cf.id)).map(cf=>[cf.id,cf]));
   sectionOrder(form).forEach(k=>{
     if(gmap[k]){
-      const {rel,cf}=gmap[k],cols=gridCols(rel,cf),g=rdraft.grids?.[cf.id];
-      const rows=g?sortRowsGrid(g,cf,rdraft):[];
+      const {rel,cf}=gmap[k],cols=gridColsFor(form,rel,cf),g=rdraft.grids?.[cf.id],gp=subPrefs(form.id,'g:'+cf.id);
+      const rows=g?sortRowsGrid(g,cf,rdraft,gp.sort&&cols.some(f=>f.id===gp.sort.key)?gp.sort:null):[];
       const totals=cols.map(f=>gridTotal(cf,f,rdraft,rows));
       const total=rows.length>1&&totals.some(t=>t!=null)?cols.map((f,i)=>totals[i]==null?(i===0?'Total':''):pdfText(f,totals[i])):null;
       sections.push({title:cf.name,count:rows.length,cols:cols.map(f=>({label:f.label,num:pdfNum(f)})),rows:rows.map(r=>cols.map(f=>pdfText(f,valOf(f,rowRec(r,cf,rdraft),cf)))),total,empty:`No ${cf.name.toLowerCase()}.`});
     }else if(kids[k]){
-      const cf=kids[k],tf=titleFieldOf(cf);
-      const cols=(cf.fields||[]).filter(f=>f.inList&&!NOCOL.has(f.type)&&!['file','image'].includes(f.type)&&f.id!==tf?.id).slice(0,5);
-      const rs=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-      sections.push({title:cf.name,count:rs.length,cols:[{label:tf?.label||itemName(cf)},...cols.map(f=>({label:f.label,num:pdfNum(f)}))],rows:rs.map(r=>[recTitle(r,cf),...cols.map(f=>pdfText(f,valOf(f,r,cf)))]),total:null,empty:`No ${cf.name.toLowerCase()} for this ${itemName(form).toLowerCase()}.`});
+      const cf=kids[k],{ctx,cols,rows}=childRowsOf(form,cf,rec,'');
+      sections.push({title:cf.name,count:rows.length,cols:[{label:ctx.tf?.label||itemName(cf)},...cols.map(c=>({label:c.label,num:!!c.num}))],rows:rows.map(r=>[r.title,...r.cells.map(c=>c.text)]),total:null,empty:`No ${cf.name.toLowerCase()} for this ${itemName(form).toLowerCase()}.`});
     }else if(k===TASKS_KEY&&tw.recordId===rec.id&&tw.status==='ready'){
-      const ts=sortTasks(tw.tasks);
-      sections.push({title:'Tasks',count:ts.length,cols:[{label:'Task'},{label:'Due'},{label:'Owner'},{label:'Assigned to'},{label:'Status'}],
-        rows:ts.map(t=>[t.title||'Untitled task',t.due?longDate(t.due+'T00:00'):'',t.ownerName||'',t.assigneeName||'',t.done?'Done':'Open']),total:null,empty:`No tasks for this ${itemName(form).toLowerCase()}.`});
+      const {cols,rows}=taskRows(subPrefs(form.id,'t:tasks'),'',dateKey(new Date()),Date.now());
+      sections.push({title:'Tasks',count:rows.length,cols:[{label:'Task'},...cols.map(c=>({label:c.label,num:!!c.num}))],rows:rows.map(r=>[r.title.text,...r.cells.map(c=>c.text)]),total:null,empty:`No tasks for this ${itemName(form).toLowerCase()}.`});
     }
   });
   const parent=rec.parentId?recById(rec.parentId):null,pform=parent?formById(parent.formId):null;
@@ -611,6 +613,86 @@ async function exportPdf(){
     toast(r.missing?`Downloaded ${r.name}. ${r.missing} picture${r.missing>1?'s':''} couldn’t be included.`:`Downloaded ${r.name}`);
   }catch(e){console.error('[formwright] PDF',e);toast(/Failed to fetch|dynamically imported|Importing a module/i.test(String(e?.message))?'Couldn’t load the PDF maker. Check your connection and try again.':'Couldn’t make the PDF. Try again.');}
   finally{ui.pdfBusy=false;paint();}
+}
+
+/* ---------- Sections under the fields: columns, sort and how many show ----------
+   Grids ('g:'), child records ('c:') and Tasks ('t:tasks') each have a tool bar at the top
+   (search, Columns, Show, then Add / Attach) and a sortable table. Choices are kept per person
+   on this device (sublogic.js). Phones get cards with a Sort menu. */
+let subsCache=null;
+function subsAll(){const k=subStoreKey(store.user?.uid);if(!subsCache||subsCache.k!==k){let raw=null;try{raw=localStorage.getItem(k)}catch(e){}subsCache={k,v:readSubs(raw)};}return subsCache.v;}
+function subPrefs(formId,k){return prefsOf(subsAll(),formId,k);}
+function saveSub(formId,k,patch){const all=setPrefs(subsAll(),formId,k,patch);subsCache.v=all;try{localStorage.setItem(subsCache.k,JSON.stringify(all))}catch(e){/* private mode: kept for this visit */}}
+/** A section's current columns and how its headings first sort. */
+function subCols(formId,k){
+  const form=formById(formId);if(!form)return null;
+  if(k==='t:tasks'){const p=subPrefs(formId,k);return {cur:colsFor(p.cols,TASK_COLS,TASK_DEFAULT),min:0,firstDir:x=>{const c=TASK_COLS.find(y=>y.key===x);return c&&(c.num||c.date)?'desc':'asc';}};}
+  const cf=formById(k.slice(2));if(!cf)return null;
+  if(k.startsWith('g:')){const g=gridRels(form).find(x=>x.cf.id===cf.id);if(!g)return null;return {cur:gridColsFor(form,g.rel,cf).map(f=>f.id),min:1,firstDir:x=>{const f=cf.fields.find(y=>y.id===x);return f&&(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?'desc':'asc';}};}
+  const ctx=childCtx(cf),p=subPrefs(formId,k);
+  return {cur:colsFor(p.cols,ctx.catalog,ctx.defaults),min:0,firstDir:x=>{const c=ctx.byKey.get(x);return c&&(c.num||x==='sys:updated'||x==='sys:created')?'desc':'asc';}};
+}
+const subNoun=(cf,n)=>n===1?itemName(cf).toLowerCase():cf.name.toLowerCase();
+function subSearch(k,label,q,shown,all,anyNew){return `<input type="search" class="in sub-q" data-ksearch="${esc(k)}" value="${esc(q)}" placeholder="Search ${esc(label.toLowerCase())}" aria-label="Search ${esc(label)}">${q.trim()?`<span class="help sub-n" role="status">Showing ${shown} of ${all}${anyNew?'; new rows always show':''}</span>`:''}`;}
+
+/** Child records: the columns on offer and the starting ones (the form's own list columns). */
+function childCtx(cf){
+  const tf=titleFieldOf(cf);
+  const kidForms=(cf.children||[]).map(c=>formById(c.formId)).filter(x=>x&&canViewForm(store.me,x.id));
+  const catalog=columnCatalog({form:cf,titleField:tf,parents:[],children:kidForms});
+  const saved=store.listViews.find(v=>v.id===defaultViewId(cf.id));
+  const defaults=(Array.isArray(saved?.cols)?saved.cols:defaultConfig({form:cf,titleField:tf,parents:[]}).cols).filter(x=>x!=='parent'&&!x.startsWith('p:'));
+  return {tf,catalog,byKey:new Map(catalog.map(c=>[c.key,c])),defaults};
+}
+function childCells(cf){
+  const kids=new Map();store.records.forEach(r=>{if(r.parentId){const x=r.parentId+'|'+r.formId;kids.set(x,(kids.get(x)||0)+1);}});
+  return {form:cf,formById,recById,valOf,fmt,recTitle:(r,f)=>recTitle(r,f),kids:(id,fid)=>kids.get(id+'|'+fid)||0,nameOf:u=>store.profiles[u]?.displayName||(u===store.user?.uid?'You':'Someone')};
+}
+/** A child form's records under this record: cells, sorted, searched. */
+function childRowsOf(form,cf,rec,q){
+  const k='c:'+cf.id,p=subPrefs(form.id,k),ctx=childCtx(cf);
+  const cols=colsFor(p.cols,ctx.catalog,ctx.defaults).map(x=>ctx.byKey.get(x));
+  const h=childCells(cf);
+  const sort=p.sort&&(p.sort.key==='title'||ctx.byKey.has(p.sort.key))?p.sort:{key:'sys:updated',dir:'desc'};
+  let rows=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).map(r=>({rec:r,title:recTitle(r,cf),cells:cols.map(c=>cellOf(c.key,r,h))}));
+  const total=rows.length;
+  // search looks at every field, not only the columns shown
+  const hayFields=(cf.fields||[]).filter(f=>!['heading','file','image','signature'].includes(f.type));
+  if(q&&q.trim())rows=rows.filter(r=>searchHit([r.title,...r.cells.map(c=>c.text),...hayFields.map(f=>{try{return fmt(f,valOf(f,r.rec,cf))}catch(e){return ''}})].join(' • '),q));
+  const si=cols.findIndex(c=>c.key===sort.key);
+  rows.forEach(r=>{r.sortVal=sort.key==='title'?cellOf('title',r.rec,h).sort:si>=0?r.cells[si].sort:cellOf(sort.key,r.rec,h).sort;});
+  return {k,p,ctx,cols,sort,total,rows:sortByVal(rows,sort.dir)};
+}
+function childSection(form,cf,rec,ro){
+  const kq=(rdraft.kq||{})['c:'+cf.id]||'';
+  const {k,p,ctx,cols,sort,total,rows}=childRowsOf(form,cf,rec,kq);
+  const latest=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0))[0];
+  const cOpen=!folded(form.id,k);
+  const cHead=`<div class="section-h"><h2>${foldBtn(k,cOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${total}</span>`,latest?'latest: '+recTitle(latest,cf):'')}</h2></div>`;
+  if(!cOpen)return `<section class="section" id="kids-${cf.id}">${cHead}</section>`;
+  const lim=limitRows(rows,p.show);
+  const titleLabel=ctx.tf?.label||itemName(cf);
+  const detachable=r=>!ro&&canEditRecord(store.me,r);
+  const buttons=`${canCreate(store.me,cf.id)?`<button class="btn sm" data-act="add-child" data-id="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${ro?'':`<button class="btn sm" data-act="child-attach" data-id="${cf.id}">Attach existing</button>`}`;
+  const tools=total?colsTool(k,ui.subPop===k,cols.map(c=>({key:c.key,label:c.label,src:c.src})),ctx.catalog,{fixed:titleLabel})+showMenu(k,p.show,total)+sortMenu(k,[{key:'title',label:titleLabel},...cols],sort,''):'';
+  const bar=toolBar({search:total>5||kq?subSearch(k,cf.name,kq,rows.length,total):'',tools,buttons});
+  const det=r=>detachable(r.rec)?`<button type="button" class="ibtn at-det" data-act="child-detach" data-id="${r.rec.id}" aria-label="Detach ${esc(r.title)} (keeps it)" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button>`:'';
+  const cell=c=>`<td${c.num?' class="num"':c.long?` class="lv-long" title="${esc(c.text)}"`:c.text&&c.text.length>30?` title="${esc(c.text)}"`:''}>${esc(c.text)}</td>`;
+  const body=!total?`<p class="note">No ${esc(cf.name.toLowerCase())} for this ${esc(itemName(form).toLowerCase())} yet.</p>`
+    :!rows.length?`<p class="note">No ${esc(cf.name.toLowerCase())} match “${esc(kq)}”.</p>`
+    :`<div class="sub-box"><div class="tblwrap"><table class="tbl lv-tbl sub-tbl"><thead><tr>${subHead(k,{key:'title',label:titleLabel},sort)}${cols.map(c=>subHead(k,c,sort)).join('')}<th class="sub-act"><span class="sr">Actions</span></th></tr></thead>
+      <tbody>${lim.rows.map(r=>`<tr data-act="open-record" data-id="${r.rec.id}"><td class="title" title="${esc(r.title)}">${esc(r.title)}</td>${r.cells.map(cell).join('')}<td class="sub-act">${det(r)}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="sub-cards">${lim.rows.map(r=>{const meta=cols.map((c,i)=>r.cells[i].text?`<span>${esc(c.label)}: ${esc(r.cells[i].text)}</span>`:'').filter(Boolean).slice(0,4).join('');const card=`<button class="card" data-act="open-record" data-id="${r.rec.id}"><b>${esc(r.title)}</b>${meta?`<div class="meta">${meta}</div>`:''}</button>`;return det(r)?`<div class="at-card">${card}${det(r)}</div>`:card;}).join('')}</div>
+      ${moreLine(k,lim.rows.length,rows.length,subNoun(cf,rows.length))}`;
+  return `<section class="section" id="kids-${cf.id}">${cHead}<div class="panel subsec">${bar}${body}</div></section>`;
+}
+
+/** The columns a grid shows for this person: their choice, else the ones set in the form designer. */
+function gridColsFor(form,rel,cf){
+  const usable=(cf.fields||[]).filter(f=>f.type!=='heading');
+  const p=subPrefs(form.id,'g:'+cf.id);
+  const keys=colsFor(p.cols,usable.map(f=>({key:f.id})),gridCols(rel,cf).map(f=>f.id),{min:1});
+  return keys.map(id=>usable.find(f=>f.id===id)).filter(Boolean);
 }
 
 /* ---------- Sub-form grids ----------
@@ -671,13 +753,12 @@ function newRowValues(cf,d,parentForm){
   return values;
 }
 function rowEditable(row,cf){return row.isNew?canCreate(store.me,cf.id):canEditRecord(store.me,{formId:cf.id,ownerId:row.ownerId});}
-function sortRowsGrid(g,cf,d){
-  const old=g.rows.filter(r=>!r.isNew),fresh=g.rows.filter(r=>r.isNew);
-  if(!g.sort)return old.concat(fresh);
-  const f=(cf.fields||[]).find(x=>x.id===g.sort.key);if(!f)return old.concat(fresh);
+function sortRowsGrid(g,cf,d,sort){
+  const old=g.rows.filter(r=>!r.isNew),fresh=g.rows.filter(r=>r.isNew).reverse(); // new rows at the top, newest first
+  if(!sort)return fresh.concat(old);
+  const f=(cf.fields||[]).find(x=>x.id===sort.key);if(!f)return fresh.concat(old);
   const val=r=>{const v=valOf(f,rowRec(r,cf,d),cf);if(v==null||v==='')return null;if(typeof v==='number'||typeof v==='boolean')return Number(v);if(['date','datetime','time'].includes(f.type))return String(v);if(f.type==='relation'){const t=recById(v);return t?titleSortOf(t,formById(t.formId),SORT_H):null;}return fmt(f,v).toLowerCase();};
-  const dir=g.sort.dir==='asc'?1:-1;
-  return old.map(r=>({r,v:val(r)})).sort((a,b)=>{if(a.v==null||b.v==null)return a.v==null&&b.v==null?0:a.v==null?1:-1;return (typeof a.v==='number'&&typeof b.v==='number'?a.v-b.v:String(a.v).localeCompare(String(b.v),undefined,{numeric:true}))*dir;}).map(x=>x.r).concat(fresh);
+  return fresh.concat(sortByVal(old.map(r=>({r,sortVal:val(r)})),sort.dir).map(x=>x.r));
 }
 function popupSummary(f,v){
   if(isEmpty(v))return '';
@@ -711,42 +792,51 @@ function gridTotal(cf,f,d,rows){
   return n?s:null;
 }
 function gridSection(form,rel,cf,d,parentRo){
-  const g=d.grids[cf.id];const cols=gridCols(rel,cf);
-  const allRows=sortRowsGrid(g,cf,d);
+  const g=d.grids[cf.id];const k='g:'+cf.id,p=subPrefs(form.id,k);const cols=gridColsFor(form,rel,cf);
+  const sort=p.sort&&cols.some(f=>f.id===p.sort.key)?p.sort:null;
+  const allRows=sortRowsGrid(g,cf,d,sort);
   // search across the grid's columns; new rows and rows with a problem always show
-  const q=(d.kq||{})['g:'+cf.id]||'';
-  const rowText=row=>cols.map(f=>{try{const v=valOf(f,rowRec(row,cf,d),cf);return f.type==='formula'?fmtCalc(f,v):fmt(f,v);}catch(e){return ''}}).join(' \u2022 ');
-  const rows=q.trim()?allRows.filter(r=>r.isNew||(r.errors&&Object.keys(r.errors).length)||searchHit(rowText(r),q)):allRows;
+  const q=(d.kq||{})[k]||'';
+  const bad=r=>!!(r.errors&&Object.keys(r.errors).length);
+  const rowText=row=>cols.map(f=>{try{const v=valOf(f,rowRec(row,cf,d),cf);return f.type==='formula'?fmtCalc(f,v):fmt(f,v);}catch(e){return ''}}).join(' • ');
+  const found=q.trim()?allRows.filter(r=>r.isNew||bad(r)||searchHit(rowText(r),q)):allRows;
+  const lim=limitRows(found,p.show,r=>r.isNew||bad(r));
+  const rows=lim.rows;
   const mayAdd=!parentRo&&canCreate(store.me,cf.id);
   const errs=[];
   const body=rows.map((row,i)=>{
     const ro=parentRo||!rowEditable(row,cf);
-    const bad=row.errors&&Object.keys(row.errors).length;
-    if(bad)Object.entries(row.errors).forEach(([fid,m])=>{const f=cf.fields.find(x=>x.id===fid);errs.push(`Row ${i+1}: ${f?f.label+' – ':''}${m}`);});
-    return `<tr class="${row.isNew?'gnew':''}${bad?' gbad':''}" data-growid="${row.id}">${cols.map(f=>`<td class="${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?'num':''}${row.errors?.[f.id]?' bad':''}">${gridCell(cf,row,f,d,ro)}</td>`).join('')}
+    if(bad(row))Object.entries(row.errors).forEach(([fid,m])=>{const f=cf.fields.find(x=>x.id===fid);errs.push(`${row.isNew?'New row':'Row '+(i+1)}: ${f?f.label+' – ':''}${m}`);});
+    return `<tr class="${row.isNew?'gnew':''}${bad(row)?' gbad':''}" data-growid="${row.id}">${cols.map(f=>`<td class="${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?'num':''}${row.errors?.[f.id]?' bad':''}">${gridCell(cf,row,f,d,ro)}</td>`).join('')}
       <td class="gact">${row.isNew?'':`<button type="button" class="ibtn" data-act="open-record" data-id="${row.id}" aria-label="Open this row on its own" title="Open on its own">↗</button>`}${ro||row.isNew?'':`<button type="button" class="ibtn at-det" data-act="grid-detach" data-grid="${cf.id}" data-row="${row.id}" aria-label="Detach row ${i+1} (keeps the ${esc(itemName(cf).toLowerCase())})" title="Detach: take it off this ${esc(itemName(form).toLowerCase())} but keep it">${DETACH_ICON}</button>`}${ro?'':`<button type="button" class="ibtn" data-act="grid-del" data-grid="${cf.id}" data-row="${row.id}" aria-label="Delete row ${i+1}" title="Delete row">✕</button>`}</td></tr>`;
   }).join('');
   const totals=cols.map(f=>gridTotal(cf,f,d,allRows)); // totals always cover every row
   const showTot=allRows.length>1&&totals.some(t=>t!=null);
-  const head=cols.map(f=>{const on=g.sort?.key===f.id;return `<th${(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating'?' class="num"':''} aria-sort="${on?(g.sort.dir==='asc'?'ascending':'descending'):'none'}"><button type="button" class="ghb${on?' on':''}" data-act="grid-sort" data-grid="${cf.id}" data-key="${f.id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}<span class="arr" aria-hidden="true">${on?(g.sort.dir==='asc'?'▲':'▼'):''}</span></button></th>`;}).join('');
-  const gOpen=!folded(form.id,'g:'+cf.id)||errs.length>0;
+  const isNum=f=>(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating';
+  const head=cols.map(f=>{const on=sort?.key===f.id;return `<th${isNum(f)?' class="num"':''} aria-sort="${on?(sort.dir==='asc'?'ascending':'descending'):'none'}"><button type="button" class="ghb${on?' on':''}" data-act="sub-sort" data-k="${k}" data-v="${f.id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}<span class="arr" aria-hidden="true">${on?(sort.dir==='asc'?'▲':'▼'):''}</span></button></th>`;}).join('');
+  const gOpen=!folded(form.id,k)||errs.length>0;
   const gSum=cols.map((f,i)=>totals[i]==null?'':`${f.label} ${f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i])}`).filter(Boolean).slice(0,3).join(' · ');
-  const gHead=`<div class="section-h"><h2>${foldBtn('g:'+cf.id,gOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${allRows.length}</span>`,gSum)}</h2><span class="chip acc">Grid</span></div>`;
-  const gSearch=allRows.length>5||q?kSearch('g:'+cf.id,cf,q,rows.length,allRows.length,rows.some(r=>r.isNew)):'';
+  const gHead=`<div class="section-h"><h2>${foldBtn(k,gOpen,`${badge(cf)}<span>${esc(cf.name)}</span> <span class="count">${allRows.filter(r=>!r.isNew).length}</span>`,gSum)}</h2><span class="chip acc">Grid</span></div>`;
   if(!gOpen)return `<section class="section gsec" id="grid-${cf.id}">${gHead}</section>`;
+  const usable=(cf.fields||[]).filter(f=>f.type!=='heading');
+  const buttons=`${mayAdd?`<button type="button" class="btn sm" data-act="grid-add" data-grid="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${parentRo?'':`<button type="button" class="btn sm" data-act="grid-attach" data-grid="${cf.id}">Attach existing</button>`}`;
+  const tools=colsTool(k,ui.subPop===k,cols.map(f=>({key:f.id,label:f.label})),usable.map(f=>({key:f.id,label:f.label,group:''})),{min:1})+(allRows.length?showMenu(k,p.show,allRows.filter(r=>!r.isNew).length):'');
+  const hint=(sort?'Click a heading again to reverse. ':'Click a heading to sort. ')+(mayAdd?'New rows stay at the top until you save.':'');
+  const bar=toolBar({search:allRows.length>5||q?subSearch(k,cf.name,q,found.filter(r=>!r.isNew).length,allRows.filter(r=>!r.isNew).length,allRows.some(r=>r.isNew)):'',tools,buttons,hint});
+  const nouns=subNoun(cf,found.length);
   return `<section class="section gsec" id="grid-${cf.id}">${gHead}
-    <div class="panel">${gSearch}<div class="gwrap"><table class="gtbl"><thead><tr>${head}<th class="gact"><span class="sr">Row actions</span></th></tr></thead>
+    <div class="panel subsec">${bar}<div class="gwrap"><table class="gtbl"><thead><tr>${head}<th class="gact"><span class="sr">Row actions</span></th></tr></thead>
       <tbody>${body||`<tr><td class="gempty" colspan="${cols.length+1}">${q.trim()&&allRows.length?`No ${esc(cf.name.toLowerCase())} match “${esc(q)}”.`:`No ${esc(cf.name.toLowerCase())} yet.`}</td></tr>`}</tbody>
       ${showTot?`<tfoot><tr>${cols.map((f,i)=>`<td class="num" id="gt-${cf.id}-${f.id}">${totals[i]==null?(i===0?(rows.length<allRows.length?`Total (all ${allRows.length})`:'Total'):''):esc(f.type==='formula'?fmtCalc(f,totals[i]):fmt(f,totals[i]))}</td>`).join('')}<td></td></tr></tfoot>`:''}
     </table></div>
     ${errs.length?`<div class="gerrs" role="alert">${errs.slice(0,6).map(e=>`<p>${esc(e)}</p>`).join('')}</div>`:''}
-    <div class="gfoot">${mayAdd?`<button type="button" class="btn sm" data-act="grid-add" data-grid="${cf.id}">+ Add ${esc(itemName(cf).toLowerCase())}</button>`:''}${parentRo?'':`<button type="button" class="btn sm" data-act="grid-attach" data-grid="${cf.id}">Attach existing</button>`}<span class="help">${g.sort?'Click a heading again to reverse. ':'Click a heading to sort. '}${mayAdd?'New rows stay at the bottom until you save.':''}</span></div></div></section>`;
+    ${moreLine(k,rows.length,found.length,nouns)}</div></section>`;
 }
 function refreshGrids(d){
   if(!d?.grids)return;
   const form=formById(d.formId);if(!form)return;
   gridRels(form).forEach(({rel,cf})=>{
-    const g=d.grids[cf.id];if(!g)return;const cols=gridCols(rel,cf);
+    const g=d.grids[cf.id];if(!g)return;const cols=gridColsFor(form,rel,cf);
     cols.filter(f=>f.type==='formula').forEach(f=>g.rows.forEach(row=>{const el=document.getElementById(`gc-${cf.id}-${row.id}-${f.id}`);if(el){const r=calc(cf,f,rowRec(row,cf,d));el.textContent=r.e?'—':fmtCalc(f,r.v);}}));
     cols.forEach(f=>{const el=document.getElementById(`gt-${cf.id}-${f.id}`);if(!el)return;const t=gridTotal(cf,f,d,g.rows);if(t!=null)el.textContent=f.type==='formula'?fmtCalc(f,t):fmt(f,t);});
   });
@@ -1231,7 +1321,7 @@ document.addEventListener('click',async e=>{
     case 'open-record':{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});break;}
     case 'add-child':{const parent=recById(view.recordId);const cf=formById(id);if(!parent||!cf)return;if(rdraft?.dirty){toast('Save this record first.');return;}goRec(newRecordDraft(cf,parent),{name:'record',formId:cf.id,recordId:null});break;}
     case 'save-record':saveRecord();break;
-    case 'grid-add':{const cf=formById(el.dataset.grid);const g=rdraft?.grids?.[el.dataset.grid];if(!cf||!g)return;const row={id:uid('r'),values:newRowValues(cf,rdraft,formById(rdraft.formId)),ownerId:store.user.uid,isNew:true,dirty:true,errors:{}};g.rows.push(row);markDirty(rdraft);renderMain();document.querySelector(`tr[data-growid="${row.id}"] .gin, tr[data-growid="${row.id}"] .gck, tr[data-growid="${row.id}"] .gpopbtn`)?.focus();break;}
+    case 'grid-add':{const cf=formById(el.dataset.grid);const g=rdraft?.grids?.[el.dataset.grid];if(!cf||!g)return;const row={id:uid('r'),values:newRowValues(cf,rdraft,formById(rdraft.formId)),ownerId:store.user.uid,isNew:true,dirty:true,errors:{}};g.rows.push(row);markDirty(rdraft);renderMain();document.querySelector(`tr[data-growid="${row.id}"] .gin, tr[data-growid="${row.id}"] .gck, tr[data-growid="${row.id}"] .gpopbtn`)?.focus({preventScroll:true});document.querySelector(`tr[data-growid="${row.id}"]`)?.scrollIntoView({block:'nearest'});break;}
     case 'grid-del':{const g=rdraft?.grids?.[el.dataset.grid];if(!g)return;const row=g.rows.find(r=>r.id===el.dataset.row);if(!row)return;g.rows=g.rows.filter(r=>r!==row);if(!row.isNew)g.removed.push(row.id);markDirty(rdraft);renderMain();toast('Row removed. It’s deleted when you save; Discard brings it back.');break;}
     case 'fold':{const fid=rdraft?.formId;if(!fid)return;const k=el.dataset.k;saveFolds(setFold(folds(),fid,k,!folded(fid,k)));renderMain();document.querySelector(`[data-act="fold"][data-k="${CSS.escape(k)}"]`)?.focus({preventScroll:true});break;}
     case 'fold-all':{const form=formById(rdraft?.formId);if(!form)return;const keys=recordFoldKeys(form,rdraft.recordId?recById(rdraft.recordId):null);const shut=keys.some(k=>!folded(form.id,k));saveFolds(setFolds(folds(),form.id,keys,shut));renderMain();document.querySelector('[data-act="fold-all"]')?.focus({preventScroll:true});break;}
@@ -1274,13 +1364,18 @@ document.addEventListener('click',async e=>{
       catch(err){console.error('[formwright] detach',err);toast(err?.code==='permission-denied'?'You don’t have permission to change that record.':'Detaching failed. Check your connection and try again.');return;}
       toast(`Detached ${recTitle(r,cf)}. It’s kept; Attach existing brings it back.`);renderMain();
       break;}
-    case 'grid-sort':{const g=rdraft?.grids?.[el.dataset.grid];if(!g)return;const k=el.dataset.key;g.sort=g.sort?.key===k?{key:k,dir:g.sort.dir==='asc'?'desc':'asc'}:{key:k,dir:'asc'};renderMain();document.querySelector(`[data-act="grid-sort"][data-grid="${el.dataset.grid}"][data-key="${k}"]`)?.focus();break;}
     case 'grid-cell':{const g=rdraft?.grids?.[el.dataset.grid];const cf=formById(el.dataset.grid);const row=g?.rows.find(r=>r.id===el.dataset.row);if(!row||!cf)return;cdraft={formId:cf.id,values:row.values,errors:{},_row:row,_fid:el.dataset.fid,readOnly:rdraft.readOnly||!rowEditable(row,cf)};renderMain();document.querySelector('.gpop [data-scope="cell"] input, .gpop [data-scope="cell"] textarea, .gpop [data-scope="cell"] canvas')?.focus();break;}
     case 'cell-close':{const back=cdraft&&`[data-act="grid-cell"][data-row="${cdraft._row.id}"][data-fid="${cdraft._fid}"]`;cdraft=null;renderMain();if(back)document.querySelector(back)?.focus();break;}
     case 'task-done':toggleTask(id);break;
     case 'task-open':if(cadenceUrl)window.open(cadenceLink(cadenceUrl,{task:id}),'cadence');break;
     case 'add-task':if(cadenceUrl&&view.recordId)window.open(cadenceLink(cadenceUrl,{addTaskFor:view.recordId}),'cadence');break;
     case 'export-pdf':exportPdf();break;
+    case 'sub-pop':{const k=el.dataset.k;ui.subPop=ui.subPop===k?null:k;renderMain();if(ui.subPop)document.querySelector('.sub-pop input:not(:disabled)')?.focus({preventScroll:true});else document.querySelector(`[data-act="sub-pop"][data-k="${CSS.escape(k)}"]`)?.focus();break;}
+    case 'sub-pop-close':{const k=ui.subPop;ui.subPop=null;renderMain();if(k)document.querySelector(`[data-act="sub-pop"][data-k="${CSS.escape(k)}"]`)?.focus();break;}
+    case 'sub-col-move':{const fid=rdraft?.formId;if(!fid)return;const k=el.dataset.k,c=subCols(fid,k);if(!c)return;saveSub(fid,k,{cols:subMove(c.cur,el.dataset.v,+el.dataset.dir)});renderMain();document.querySelector(`[data-act="sub-col-move"][data-k="${CSS.escape(k)}"][data-v="${CSS.escape(el.dataset.v)}"][data-dir="${el.dataset.dir}"]:not(:disabled)`)?.focus();break;}
+    case 'sub-cols-reset':{const fid=rdraft?.formId;if(!fid)return;saveSub(fid,el.dataset.k,{cols:undefined});renderMain();break;}
+    case 'sub-sort':{const fid=rdraft?.formId;if(!fid)return;const k=el.dataset.k,c=subCols(fid,k);if(!c)return;const cur=subPrefs(fid,k).sort;saveSub(fid,k,{sort:subNext(cur,el.dataset.v,c.firstDir(el.dataset.v))});renderMain();document.querySelector(`[data-act="sub-sort"][data-k="${CSS.escape(k)}"][data-v="${CSS.escape(el.dataset.v)}"]`)?.focus();break;}
+    case 'sub-showall':{const fid=rdraft?.formId;if(!fid)return;saveSub(fid,el.dataset.k,{show:'all'});renderMain();break;}
     case 'del-record':{const k='rec-'+view.recordId;if(ui.confirm!==k){ui.confirm=k;renderMain();return;}ui.confirm=null;const rid=view.recordId;rdraft.dirty=false;try{await store.del('records',rid);toast('Deleted');}catch(err){toast('Delete failed. Try again.');}break;}
     case 'rate':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);const n=+el.dataset.n;d.values[f.id]=d.values[f.id]===n?0:n;markDirty(d);repaint(d,f);break;}
     case 'file-clear':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);d.values[f.id]=null;markDirty(d);repaint(d,f);break;}
@@ -1348,6 +1443,10 @@ document.addEventListener('input',e=>{
   admin.onInput(t);
 });
 document.addEventListener('change',async e=>{
+  {const t0=e.target,fid=rdraft?.formId;
+   if(fid&&t0.dataset?.subcol){const k=t0.dataset.subcol,c=subCols(fid,k);if(c){saveSub(fid,k,{cols:subToggle(c.cur,t0.dataset.v,{min:c.min})});renderMain();document.querySelector(`[data-subcol="${CSS.escape(k)}"][data-v="${CSS.escape(t0.dataset.v)}"]`)?.focus({preventScroll:true});}return;}
+   if(fid&&t0.dataset?.subshow){const v=t0.value==='all'?'all':Number(t0.value);saveSub(fid,t0.dataset.subshow,{show:v});renderMain();document.querySelector(`[data-subshow="${CSS.escape(t0.dataset.subshow)}"]`)?.focus({preventScroll:true});return;}
+   if(fid&&t0.dataset?.subsort!=null&&t0.dataset.subsort){const [key,dir]=t0.value.split('|');saveSub(fid,t0.dataset.subsort,{sort:key?{key,dir}:undefined});renderMain();document.querySelector(`[data-subsort="${CSS.escape(t0.dataset.subsort)}"]`)?.focus({preventScroll:true});return;}}
   const t=e.target;
   if(t.dataset.grid&&t.dataset.gf){setGridVal(t);return;}
   if(t.dataset.fid){if(t.type==='file')return onFile(t);if(t.type==='radio'||t.type==='checkbox'||t.tagName==='SELECT')setVal(t);return;}
@@ -1387,6 +1486,8 @@ document.addEventListener('keydown',e=>{
   }
   if(e.target?.id==='dq'&&e.key==='Escape'&&e.target.value){e.preventDefault();e.target.value='';ui.dq='';applyDq();}
 });
+document.addEventListener('pointerdown',e=>{if(ui.subPop&&!e.target.closest?.('.lv-anchor')){ui.subPop=null;renderMain();}},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ui.subPop){e.preventDefault();const k=ui.subPop;ui.subPop=null;renderMain();document.querySelector(`[data-act="sub-pop"][data-k="${CSS.escape(k)}"]`)?.focus();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cdraft){e.preventDefault();document.querySelector('[data-act="cell-close"]')?.click();}});
 function closeMenu(){$('#side').classList.remove('open');$('#scrim').classList.remove('open');}
 

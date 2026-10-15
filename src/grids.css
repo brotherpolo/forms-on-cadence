@@ -56,3 +56,36 @@ th.num .ghb{justify-content:flex-end;width:100%}
 .ksearch{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:10px 12px;border-bottom:1px solid var(--line)}
 .ksearch .in{flex:1 1 240px;max-width:420px;min-height:40px}
 .ksearch .help{margin:0}
+
+/* Sections under a record's fields (grids, child records, tasks): tool bar on top, then a
+   sortable table (cards on phones), then "Showing 10 of 34 · Show all". */
+.sub-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.sub-q{flex:1 1 220px;max-width:360px;width:auto;min-height:38px}
+.sub-mid{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.sub-btns{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto}
+.sub-show,.sub-sortm{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.sub-show select,.sub-sortm select{width:auto;min-height:34px;padding-top:4px;padding-bottom:4px;font-size:13px}
+.sub-sortm{display:none}
+.subsec .btn.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.sub-hint{margin:0;padding:6px 12px 0}
+.sub-more{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+.sub-tbl th{padding:6px 12px}
+.sub-tbl td{padding:10px 12px;vertical-align:middle}
+.sub-tbl th.num{text-align:right}
+.sub-tbl th.num .lv-hb{justify-content:flex-end;width:100%}
+.sub-tbl .sub-act{width:44px;padding:0 6px;text-align:right}
+.sub-tbl .sub-act .at-det{position:static}
+.tt-tbl .tt-ck{width:40px;padding-right:0}
+.tt-tbl tr.done td.title{text-decoration:line-through;color:var(--muted);font-weight:500}
+.tt-tbl td.tt-late{color:var(--danger);font-weight:600}
+.tt-tbl td.tt-today{color:var(--accent);font-weight:600}
+.tt-tbl td.tt-ok{color:var(--ok)}
+.subsec .sub-cards{display:none;flex-direction:column}
+@media (max-width:640px){
+  .subsec .sub-box{display:none}
+  .subsec .sub-cards{display:flex}
+  .sub-sortm{display:inline-flex}
+  .sub-btns{margin-left:0;width:100%}
+  .sub-q{max-width:none;flex-basis:100%}
+}
+.sub-n{margin:0;font-size:13px}

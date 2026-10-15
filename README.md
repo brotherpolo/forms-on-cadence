@@ -76,6 +76,7 @@ src/
   imports.js, imports.css  Import screens: templates menu, choose file, match columns, check rows, history and undo
   importlogic.js           Templates, column matching, checking rows, undo plans (pure, unit-tested)
   xlsx.js                  Reads and writes .xlsx and .csv with no extra packages (unit-tested)
+  sublogic.js, subui.js    Sections under a record: columns, sort, Show menu, task cells (sublogic pure, unit-tested)
   pdfdoc.js                Export PDF: field layout, text wrapping, table columns, file names (pure, unit-tested)
   pdfdraw.js               Export PDF: draws the document with pdf-lib (unit-tested)
   pdfexport.js             Export PDF: fetches photos, loads pdf-lib on first use, downloads the file
@@ -229,6 +230,18 @@ Each form's list can be set up from the list itself.
 
 A view only decides how the list looks. It never shows anyone records they couldn't already see.
 
+## Sections under a record (grids, child records, Tasks)
+
+Each section under a record's fields has a bar at the top: a search box (once there are more than 5), **Columns**, **Show** (5, 10, 15, 20 or all; 10 to start) and its buttons (**+ Add …**, **Attach existing**, **+ Add task**). Long lists end with "Showing 10 of 34 · Show all".
+
+- **Tables with sortable headings**, like the records lists. Click a heading to sort; again to reverse. Numbers and dates start biggest or newest first.
+- **Columns** picks and orders the columns for that section. Child records offer the child form's fields, counts of its own children, and Last updated, Created, Created by and Owner; their title always comes first and they start with the form's list columns. Grids start with the columns set in the form designer. Tasks offer Due (red when overdue), Days open (from when the task was made until it was done, or today), Owner, Assigned to, Status, Repeats, Notes, Created and Done on.
+- Your columns, sort and Show choice are kept per section **for you, on this device** (`localStorage` `fw.subs.<uid>`), like folded sections.
+- **Search** looks through every record in the section (all fields for child records), then Show applies to the matches.
+- **Grids:** new rows go at the top until you save, with the cursor in the first cell. New rows and rows with a problem always show, whatever Show is set to, and totals always cover every row.
+- **Phones** show cards with a **Sort** menu instead of the table.
+- `sublogic.js` (pure, unit-tested) holds the choices, limits and task cells; `subui.js` draws the bar, picker and menus.
+
 ## Export PDF
 
 **Export PDF** in a saved record's top bar downloads it as a tidy document, for example `Site visits - Smith house.pdf`. Anyone who can see the record can export it.
@@ -236,7 +249,7 @@ A view only decides how the list looks. It never shows anyone records they could
 - **Top:** the company name and logo from **Administration → PDF exports** (if set), then the form's name, the record's title, who created it and when, the last update, the owner, and its parent.
 - **Fields** in the form's order and layout: half-width fields side by side, section headings as headings (with their help text). Values print as the app shows them: CAD currency, written-out dates, Yes/No, ratings as stars, colours as a swatch, linked records by name, calculation results. Empty fields print empty. Long text prints in full and runs onto the next page if it needs to.
 - **Photos and signatures** print as pictures (photos are turned upright and scaled down). Other files are listed by name and size. A photo that can't be read prints as its name, and the message after the download says so.
-- **Grids, child records and Tasks** follow as tables, in the form's section order: grids with their columns and totals, child records with their title and list columns, and the Cadence tasks you can see. Long tables continue on the next page with their headings repeated.
+- **Grids, child records and Tasks** follow as tables, in the form's section order, with the columns and sort you chose for each section on screen (every row, whatever Show is set to): grids with their totals, child records, and the Cadence tasks you can see. Long tables continue on the next page with their headings repeated.
 - Every page has the export date, who exported it and "Page 1 of 3". Pages are US Letter.
 - Unsaved changes: it asks you to save first, so the PDF matches what's saved.
 - The standard PDF fonts are used, which cover English and French. Other characters (emoji, symbols, other scripts) print as `?`.
