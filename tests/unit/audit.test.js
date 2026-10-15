@@ -51,3 +51,12 @@ test('form rule changes get a readable label', async () => {
   assert.equal(changeLabel({ key: 'prop:rules', label: 'rules' }), 'Show and hide rules');
   assert.equal(changeLabel({ key: 'st', label: 'Status' }), 'Status');
 });
+
+test('deleted sent emails: their own filter and wording, nothing to put back', () => {
+  const e = { area: 'record', kind: 'emaildeleted', formName: 'Customer', title: 'Oliver', changes: [{ key: 'email:e1', label: 'Sent email', type: 'text', from: '“Invoice” to a@b.com', to: null }] };
+  assert.deepEqual(serverFilter({ kind: 'emaildeleted' }), ['kind', 'emaildeleted']);
+  assert.equal(matches(e, { kind: 'emaildeleted' }, () => ''), true);
+  assert.equal(matches(e, { kind: 'changed' }, () => ''), false);
+  assert.equal(verb(e), 'deleted sent emails of');
+  assert.equal(canPutBack(e, e.changes[0]), false);
+});

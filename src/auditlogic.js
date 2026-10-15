@@ -9,6 +9,7 @@ export const KINDS = [
   { key: 'deleted', label: 'Records deleted', q: ['kind', 'deleted'], test: (e) => e.area === 'record' && e.kind === 'deleted' },
   { key: 'restored', label: 'Records restored', q: ['kind', 'restored'], test: (e) => e.kind === 'restored' },
   { key: 'emailed', label: 'PDFs emailed', q: ['kind', 'emailed'], test: (e) => e.kind === 'emailed' },
+  { key: 'emaildeleted', label: 'Sent emails deleted', q: ['kind', 'emaildeleted'], test: (e) => e.kind === 'emaildeleted' },
   { key: 'form', label: 'Form designs', q: ['area', 'form'], test: (e) => e.area === 'form' },
   { key: 'group', label: 'Security groups', q: ['area', 'group'], test: (e) => e.area === 'group' },
   { key: 'user', label: 'Users', q: ['area', 'user'], test: (e) => e.area === 'user' },
@@ -49,7 +50,7 @@ export function verb(e) {
   const v = {
     created: e.area === 'user' ? 'signed in for the first time:' : 'created',
     changed: 'changed', deleted: 'deleted', restored: 'restored', moved: 'moved', owner: 'gave to someone else',
-    emailed: 'emailed the PDF of', removed: 'removed', numbered: 'numbered the records of',
+    emailed: 'emailed the PDF of', emaildeleted: 'deleted sent emails of', removed: 'removed', numbered: 'numbered the records of',
   }[e.kind];
   return v || e.kind || 'changed';
 }

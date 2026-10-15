@@ -107,6 +107,7 @@ function entryHTML(e) {
     : `<span>${esc(targetText(e))}</span>`;
   const changes = (e.changes || []).length ? `<ul class="au-changes">${e.changes.map((c, i) => {
     const from = show(e, c, 'from'), to = show(e, c, 'to');
+    if (e.kind === 'emaildeleted') return `<li><span class="au-l">${esc(c.label)}</span><span class="au-v">${esc(from)} <i>deleted</i></span></li>`;
     const pb = canPutBack(e, c) && rec ? putBackBtn(e, c, i, rec) : '';
     return `<li><span class="au-l">${esc(changeLabel(c))}</span><span class="au-v">${from ? `<s>${esc(from)}</s>` : '<i>empty</i>'} <span aria-hidden="true">→</span><span class="sr"> to </span> ${to ? `<b>${esc(to)}</b>` : '<i>empty</i>'}</span>${pb}</li>`;
   }).join('')}</ul>` : '';

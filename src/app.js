@@ -4,7 +4,7 @@ import './grids.css';
 import { readTheme, applyTheme, nextTheme, themeLabel } from './theme.js';
 // Admin screens (users and groups) live in admin.js; data access in store.js.
 
-import { fillAutoNumbers, setAutoNumber, autoCounter, emailRecord, watchEmails, getExportSettings } from './store.js';
+import { fillAutoNumbers, setAutoNumber, autoCounter, emailRecord, watchEmails, deleteSentEmails, fileBlob, getExportSettings } from './store.js';
 import { DEFAULT_SUBJECT, DEFAULT_MESSAGE, fillTemplate, parseEmails, emailSuggestions } from './emaillogic.js';
 import { runImport, rewriteValues, moveStage, watchStages } from './store.js';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
@@ -582,7 +582,7 @@ function viewRecord(form){
   </div>
   ${sectionsHTML}${rec&&wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}${backHTML}${rec?`<div id="rec-emails">${sentEmailsHTML()}</div>`:''}
   ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}
-  ${cellPopup()}${ui.mail&&ui.mail.rec===rec?.id?mailDialog(form,rec):''}${ui.cascade&&ui.cascade.parentId===rec?.id?cascadeDialog():''}${ui.wfAsk&&ui.wfAsk.recId===rec?.id?wfAskDialog(form,rec):''}`;
+  ${cellPopup()}${ui.mail&&ui.mail.rec===rec?.id?mailDialog(form,rec):''}${ui.cascade&&ui.cascade.parentId===rec?.id?cascadeDialog():''}${ui.mailView&&ui.mailView.rec===rec?.id?mailViewDialog():''}${ui.mailDelAll?.stage===2&&ew.recordId===rec?.id&&ew.list.length?delAllDialog():''}${ui.wfAsk&&ui.wfAsk.recId===rec?.id?wfAskDialog(form,rec):''}`;
 }
 
 const personName=id=>String(id||'').startsWith('auto:')?'an automation':store.profiles[id]?.displayName||(id===store.user?.uid?'you':'someone');
@@ -701,17 +701,120 @@ const myWorkCount=()=>{const me=store.user?.uid,groups=store.me?.groups||[];retu
    form's template. Sending makes the same PDF as Export PDF and hands it to the server
    (emailRecord), which sends it through Gmail and notes it under "Sent emails". */
 const ew={recordId:null,unsub:null,list:[]};
+const MAIL_KEY='e:emails';
 function syncEmailWatch(){
   const want=view.name==='record'&&view.recordId?view.recordId:null;
   if(want===ew.recordId)return;
   if(ew.unsub){ew.unsub();ew.unsub=null;}
   Object.assign(ew,{recordId:want,list:[]});
-  if(want)ew.unsub=watchEmails(want,list=>{ew.list=list;const el=$('#rec-emails');if(el)el.innerHTML=sentEmailsHTML();});
+  closeMailView();ui.mailDelAll=null;
+  if(want)ew.unsub=watchEmails(want,list=>{
+    ew.list=list;
+    // the email open in the pop-up was deleted (here or by another admin): close it
+    if(ui.mailView&&!list.some(m=>m.id===ui.mailView.id)&&!ui.mailView.busy){closeMailView();renderMain();return;}
+    if(ui.mailDelAll&&!list.length)ui.mailDelAll=null;
+    const el=$('#rec-emails');if(el)el.innerHTML=sentEmailsHTML();
+  });
 }
+/** "Sent emails" under a record: folds like the other sections; Show 5–20 or all; click one to open it. */
 function sentEmailsHTML(){
-  if(!ew.list.length||ew.recordId!==view.recordId)return '';
-  const row=m=>`<div class="mail-row"><div class="grow"><b>${esc(m.subject||'(no subject)')}</b><span>To ${esc((m.to||[]).join(', '))}${(m.cc||[]).length?' · Cc '+esc(m.cc.join(', ')):''}</span></div><small>${esc(when(m.at))}<br>${esc(m.byName||'')}</small></div>`;
-  return `<section class="section"><div class="section-h"><h2>Sent emails <span class="count">${ew.list.length}</span></h2></div><div class="panel mail-list">${ew.list.slice(0,20).map(row).join('')}</div></section>`;
+  const list=ew.recordId===view.recordId?ew.list:[];
+  if(!list.length)return '';
+  const fid=rdraft?.formId,k=MAIL_KEY;
+  const open=!(fid&&folded(fid,k));
+  const head=`<div class="section-h"><h2>${foldBtn(k,open,`<span class="badge mail-badge" aria-hidden="true">✉</span><span>Sent emails</span> <span class="count">${list.length}</span>`,'latest '+when(list[0].at))}</h2></div>`;
+  if(!open)return `<section class="section" id="sent-emails">${head}</section>`;
+  const p=fid?subPrefs(fid,k):prefsOf({},'',k);
+  const lim=limitRows(list,p.show);
+  const da=ui.mailDelAll;
+  const delAll=isAdmin(store.me)?`<button type="button" class="btn sm danger${da?.stage===1?' armed':''}" data-act="mail-delall"${da?.busy?' disabled':''}>${da?.busy?'Deleting…':da?.stage===1?`Tap again to delete all ${list.length}`:'Delete all'}</button>`:'';
+  const row=m=>`<button type="button" class="mail-row" data-act="mail-view" data-id="${esc(m.id)}" aria-label="Open the email “${esc(m.subject||'(no subject)')}” sent ${esc(when(m.at))}">
+    <span class="grow"><b>${esc(m.subject||'(no subject)')}</b><span>To ${esc((m.to||[]).join(', '))}${(m.cc||[]).length?' · Cc '+esc(m.cc.join(', ')):''}</span></span>
+    <small><span>${esc(when(m.at))}</span><span>${esc(m.byName||'')}</span>${m.pdfPath?'<span class="mail-clip" title="The PDF is kept">📎 PDF</span>':''}</small></button>`;
+  return `<section class="section" id="sent-emails">${head}<div class="panel subsec">${toolBar({tools:showMenu(k,p.show,list.length),buttons:delAll})}
+    <div class="mail-list">${lim.rows.map(row).join('')}</div>${moreLine(k,lim.rows.length,list.length,list.length===1?'email':'emails')}</div></section>`;
+}
+function repaintEmails(){const el=$('#rec-emails');if(el)el.innerHTML=sentEmailsHTML();}
+
+/* One sent email in a pop-up: who, when, to, subject, message and the PDF as it was sent. */
+function closeMailView(){const v=ui.mailView;if(v?.url)try{URL.revokeObjectURL(v.url)}catch(e){/* already gone */}ui.mailView=null;}
+async function openMailView(id){
+  const m=ew.list.find(x=>x.id===id);if(!m)return;
+  closeMailView();
+  const v=ui.mailView={id,rec:ew.recordId,status:m.pdfPath?'loading':'none',url:null,armed:false,busy:false};
+  renderMain();
+  setTimeout(()=>document.querySelector('.mailv-dlg [data-act="mailv-close"]')?.focus(),0);
+  if(!m.pdfPath)return;
+  try{
+    const blob=await fileBlob({path:m.pdfPath});
+    if(ui.mailView!==v)return;
+    v.url=URL.createObjectURL(blob.type==='application/pdf'?blob:new Blob([blob],{type:'application/pdf'}));v.status='ready';
+  }catch(e){
+    if(ui.mailView!==v)return;
+    console.error('[formwright] sent PDF',e);
+    const c=String(e?.code||'');
+    v.status=/object-not-found/.test(c)?'gone':/unauthorized|unauthenticated/.test(c)?'denied':'error';
+  }
+  renderMain();
+}
+const sizeText=b=>!b?'':b<1024*1024?Math.max(1,Math.round(b/1024))+' KB':(b/1048576).toFixed(1)+' MB';
+function mailViewDialog(){
+  const v=ui.mailView,m=ew.list.find(x=>x.id===v.id);if(!m)return '';
+  const inline=v.status==='ready'&&navigator.pdfViewerEnabled!==false&&!matchMedia('(max-width:640px)').matches;
+  const fname=m.fileName||'Record.pdf';
+  const noPdf=m.fileName===null&&!m.bytes; // sent with “Attach the PDF” off, or by an automation without one
+  const pdf=noPdf?'<p class="help mailv-nopdf">Sent without a PDF.</p>':v.status==='ready'?`<div class="mailv-file"><span class="mailv-fn"><span aria-hidden="true">📄</span> <b>${esc(fname)}</b> <small>${esc(sizeText(m.bytes))}</small></span>
+      <span class="mailv-fb"><a class="btn sm" href="${v.url}" target="_blank" rel="noopener">Open</a><a class="btn sm" href="${v.url}" download="${esc(fname)}">Download</a></span></div>${inline?`<iframe class="mailv-pdf" src="${v.url}#view=FitH" title="${esc(fname)}"></iframe>`:''}`
+    :v.status==='loading'?`<div class="mailv-file"><span class="mailv-fn"><span aria-hidden="true">📄</span> <b>${esc(fname)}</b></span><span class="help">Loading the PDF…</span></div>`
+    :`<div class="mailv-file"><span class="mailv-fn"><span aria-hidden="true">📄</span> <b>${esc(fname)}</b> <small>${esc(sizeText(m.bytes))}</small></span></div><p class="help">${
+      v.status==='none'?(m.pdfPath===null?'The PDF couldn’t be kept when this was sent.':'No copy of the PDF was kept for emails sent before PDFs were saved.')
+      :v.status==='gone'?'The kept PDF is no longer there.':v.status==='denied'?'You don’t have access to open this PDF.':'Couldn’t load the PDF. Check your connection and try again.'}</p>`;
+  const msg=typeof m.message==='string'?(m.message.trim()?`<div class="mailv-msg">${esc(m.message)}</div>`:'<p class="help">No message.</p>'):'<p class="help">The message wasn’t kept for emails sent before PDFs were saved.</p>';
+  const del=isAdmin(store.me)?`<button type="button" class="btn danger${v.armed?' armed':''}" data-act="mailv-del"${v.busy?' disabled':''}>${v.busy?'Deleting…':v.armed?'Tap again to delete':'Delete'}</button>`:'';
+  return `<div class="lv-scrim mail-scrim" data-act="mailv-scrim"><div class="lv-dlg mail-dlg mailv-dlg" role="dialog" aria-modal="true" aria-labelledby="mailv-h" data-stop-scrim="1">
+    <h2 id="mailv-h">${esc(m.subject||'(no subject)')}</h2>
+    <dl class="mailv-meta"><dt>Sent</dt><dd>${esc(new Date(m.at).toLocaleString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))}${m.byName?' by '+esc(m.byName):''}</dd>
+      <dt>To</dt><dd>${esc((m.to||[]).join(', '))}</dd>${(m.cc||[]).length?`<dt>Cc</dt><dd>${esc(m.cc.join(', '))}</dd>`:''}${m.copyMe?'<dt>Copy</dt><dd>A copy went to the sender</dd>':''}</dl>
+    ${msg}${pdf}
+    <div class="lv-dlgacts">${del}<span class="grow"></span><button type="button" class="btn" data-act="mailv-close" data-id="${esc(m.id)}">Close</button></div>
+  </div></div>`;
+}
+const mailErr=(e,what)=>{
+  const code=String(e?.code||'');
+  return code==='functions/not-found'?'Deleting sent emails needs the latest Cadence functions. Deploy them first (see the install steps).'
+    :/permission-denied|not-found|invalid-argument/.test(code)&&e?.message?e.message:`The ${what} weren’t deleted. Check your connection and try again.`;
+};
+async function deleteOneMail(){
+  const v=ui.mailView;if(!v||v.busy||!isAdmin(store.me))return;
+  if(!v.armed){v.armed=true;renderMain();document.querySelector('[data-act="mailv-del"]')?.focus();setTimeout(()=>{if(ui.mailView===v&&v.armed&&!v.busy){v.armed=false;renderMain();}},5000);return;}
+  v.armed=false;v.busy=true;renderMain();
+  try{await deleteSentEmails(v.rec,{ids:[v.id]});if(ui.mailView===v){closeMailView();}toast('Sent email deleted');}
+  catch(e){console.error('[formwright] delete email',e);if(ui.mailView===v)v.busy=false;toast(mailErr(e,'email'));}
+  renderMain();
+}
+/* Delete all: a second tap, then type how many, then it goes. */
+function delAllDialog(){
+  const d=ui.mailDelAll,n=ew.list.length,ok=String(d.typed||'').trim()===String(n);
+  const rec=recById(ew.recordId),form=rec?formById(rec.formId):null;
+  return `<div class="lv-scrim mail-scrim" data-act="delall-scrim"><div class="lv-dlg mail-dlg" role="alertdialog" aria-modal="true" aria-labelledby="delall-h" aria-describedby="delall-p" data-stop-scrim="1">
+    <h2 id="delall-h">Delete all ${n} sent email${n===1?'':'s'}?</h2>
+    <p id="delall-p">This deletes every email listed under Sent emails on this ${esc(form?itemName(form).toLowerCase():'record')}, and the PDFs kept with them. It can’t be undone. The emails already delivered stay in people’s inboxes, and the audit trail keeps a note of what was deleted.</p>
+    <label class="mail-l"><span class="mlab">Type ${n} to confirm</span><input class="in" data-delall="1" inputmode="numeric" autocomplete="off" value="${esc(d.typed||'')}"${d.busy?' disabled':''}></label>
+    <div class="lv-dlgacts"><button type="button" class="btn ghost" data-act="delall-cancel"${d.busy?' disabled':''}>Cancel</button><button type="button" class="btn danger armed" data-act="delall-go"${ok&&!d.busy?'':' disabled'}>${d.busy?'Deleting…':`Delete all ${n}`}</button></div>
+  </div></div>`;
+}
+async function deleteAllMail(){
+  const d=ui.mailDelAll;if(!d||d.busy||String(d.typed||'').trim()!==String(ew.list.length))return;
+  const recId=ew.recordId;d.busy=true;renderMain();
+  let n=0;
+  try{
+    for(;;){const r=await deleteSentEmails(recId,{all:true});n+=r.deleted||0;if((r.deleted||0)<500)break;}
+    ui.mailDelAll=null;toast(`Deleted ${n} sent email${n===1?'':'s'}`);
+  }catch(e){
+    if(n&&String(e?.code||'')==='functions/not-found'&&/already/.test(e.message||'')){ui.mailDelAll=null;}
+    else{console.error('[formwright] delete all emails',e);d.busy=false;toast(mailErr(e,'emails'));}
+  }
+  renderMain();
 }
 function fieldTextByLabel(form,rec,label){
   const n=String(label).trim().toLowerCase();
@@ -941,7 +1044,7 @@ function kSearch(key,cf,q,shown,all,anyNew){
 function recordFoldKeys(form,rec){
   const grids=gridRels(form).map(x=>x.cf.id);
   const kids=rec?(form.children||[]).filter(c=>c.display!=='grid').map(c=>formById(c.formId)).filter(cf=>cf&&canViewForm(store.me,cf.id)).map(cf=>cf.id):[];
-  return foldKeys(form,grids,kids).concat(rec?['t:tasks']:[]).concat(rec&&wfOn(form)?[WF_KEY]:[]);
+  return foldKeys(form,grids,kids).concat(rec?['t:tasks']:[]).concat(rec&&ew.recordId===rec.id&&ew.list.length?[MAIL_KEY]:[]).concat(rec&&wfOn(form)?[WF_KEY]:[]);
 }
 const SORT_H={valOf:(f,r,fm)=>valOf(f,r,fm),fmt:(f,v)=>fmt(f,v),recTitle:(r,fm)=>recTitle(r,fm),recById:id=>recById(id),formById:id=>formById(id)};
 const DETACH_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 4 8"/><path d="M8 12h3"/><path d="M3 3l18 18"/></svg>';
@@ -1923,6 +2026,17 @@ document.addEventListener('click',async e=>{
     case 'mail-cancel':if(ui.mail&&!ui.mail.busy){ui.mail=null;renderMain();document.querySelector('[data-act="email-pdf"]')?.focus();}break;
     case 'mail-scrim':if(e.target===el&&ui.mail&&!ui.mail.busy){ui.mail=null;renderMain();}break;
     case 'mail-send':sendMail();break;
+    case 'mail-view':openMailView(el.dataset.id);break;
+    case 'mailv-close':closeMailView();renderMain();document.querySelector(`[data-act="mail-view"][data-id="${CSS.escape(el.dataset.id||'')}"]`)?.focus();break;
+    case 'mailv-scrim':if(e.target===el&&!ui.mailView?.busy){closeMailView();renderMain();}break;
+    case 'mailv-del':deleteOneMail();break;
+    case 'mail-delall':{if(!isAdmin(store.me)||!ew.list.length)return;const d=ui.mailDelAll;if(d?.busy)return;
+      if(d?.stage===1){ui.mailDelAll={stage:2,typed:''};renderMain();setTimeout(()=>document.querySelector('[data-delall]')?.focus(),0);return;}
+      const armed=ui.mailDelAll={stage:1};repaintEmails();document.querySelector('[data-act="mail-delall"]')?.focus({preventScroll:true});
+      setTimeout(()=>{if(ui.mailDelAll===armed){ui.mailDelAll=null;repaintEmails();}},5000);break;}
+    case 'delall-cancel':if(!ui.mailDelAll?.busy){ui.mailDelAll=null;renderMain();document.querySelector('[data-act="mail-delall"]')?.focus();}break;
+    case 'delall-scrim':if(e.target===el&&!ui.mailDelAll?.busy){ui.mailDelAll=null;renderMain();}break;
+    case 'delall-go':deleteAllMail();break;
     case 'an-edit':{const rid=rdraft?.recordId;const t=recById(rid)?.nums?.[el.dataset.fid]||'';ui.anEdit={rec:rid,fid:el.dataset.fid,value:t,busy:false};renderMain();const i=document.querySelector('[data-anval]');if(i){i.focus();i.select();}break;}
     case 'an-cancel':ui.anEdit=null;renderMain();break;
     case 'an-save':{const ed=ui.anEdit;if(!ed||ed.busy)return;const v=String(ed.value||'').trim();if(!v){toast('Type the new number.');return;}if(v===(recById(ed.rec)?.nums?.[ed.fid]||'')){ui.anEdit=null;renderMain();return;}
@@ -2010,6 +2124,7 @@ document.addEventListener('click',async e=>{
 document.addEventListener('input',e=>{
   if(e.target.dataset?.mail&&ui.mail&&e.target.type!=='checkbox'){ui.mail[e.target.dataset.mail]=e.target.value;return;}
   if(e.target.dataset?.wfComment&&ui.wfAsk){ui.wfAsk.comment=e.target.value;return;}
+  if(e.target.dataset?.delall&&ui.mailDelAll){ui.mailDelAll.typed=e.target.value;const b=document.querySelector('[data-act="delall-go"]');if(b)b.disabled=String(e.target.value).trim()!==String(ew.list.length);return;}
   if(e.target.dataset?.anval){if(ui.anEdit)ui.anEdit.value=e.target.value;return;}
   const t=e.target;
   if(t.dataset.dzq!==undefined){ui.dzq=t.value;applyDzq();return;}
@@ -2080,7 +2195,11 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('pointerdown',e=>{if(ui.subPop&&!e.target.closest?.('.lv-anchor')){ui.subPop=null;renderMain();}},true);
 document.addEventListener('keydown',e=>{if(e.target?.dataset?.anval&&(e.key==='Enter'||e.key==='Escape')){e.preventDefault();document.querySelector(e.key==='Enter'?'[data-act="an-save"]':'[data-act="an-cancel"]')?.click();}});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ui.mail&&!ui.mail.busy){e.preventDefault();ui.mail=null;renderMain();document.querySelector('[data-act="email-pdf"]')?.focus();}});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&ui.mailView&&!ui.mailView.busy){e.preventDefault();const id=ui.mailView.id;closeMailView();renderMain();document.querySelector(`[data-act="mail-view"][data-id="${CSS.escape(id)}"]`)?.focus();return;}
+  if(e.key==='Escape'&&ui.mailDelAll?.stage===2&&!ui.mailDelAll.busy){e.preventDefault();ui.mailDelAll=null;renderMain();document.querySelector('[data-act="mail-delall"]')?.focus();return;}
+  if(e.key==='Enter'&&e.target?.dataset?.delall){e.preventDefault();deleteAllMail();return;}
+  if(e.key==='Escape'&&ui.mail&&!ui.mail.busy){e.preventDefault();ui.mail=null;renderMain();document.querySelector('[data-act="email-pdf"]')?.focus();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ui.subPop){e.preventDefault();const k=ui.subPop;ui.subPop=null;renderMain();document.querySelector(`[data-act="sub-pop"][data-k="${CSS.escape(k)}"]`)?.focus();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cdraft){e.preventDefault();document.querySelector('[data-act="cell-close"]')?.click();}});
 function closeMenu(){$('#side').classList.remove('open');$('#scrim').classList.remove('open');}

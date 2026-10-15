@@ -596,6 +596,10 @@ export async function testAutomation(automation, recordId) {
   return (await httpsCallable(fns(), 'automationTest')({ automation, recordId })).data;
 }
 
+/** Admins: delete sent emails and their kept PDFs. what: { ids: [emailId] } or { all: true }. → { deleted: n } */
+export async function deleteSentEmails(recordId, what) {
+  return (await httpsCallable(fns(), 'deleteSentEmails')({ recordId, ...what })).data;
+}
 /** Live list of what's been emailed from a record, newest first. Returns an unsubscribe function. */
 export function watchEmails(recordId, onNext, onError) {
   return onSnapshot(collection(db, 'records', recordId, 'emails'), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.at || 0) - (a.at || 0))), onError || (() => onNext([])));
