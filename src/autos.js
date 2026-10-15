@@ -85,6 +85,10 @@ function triggerHTML(a, form) {
       <select class="in am-sel" data-am="tdate" aria-label="Date field"><option value="">Pick a date field…</option>${ds.map((x) => `<option value="${x.id}"${x.id === t.dateField ? ' selected' : ''}>${esc(x.label)}</option>`).join('')}</select></div>
       <p class="help">Checked every morning at 7:00 a.m. (Toronto time), once per record per day.${ds.length ? '' : ' This form has no date fields yet.'}</p>`;
   } else if (t.type === 'emailed') more = '<p class="help">Runs after someone sends this record with Email PDF.</p>';
+  else if (t.type === 'stage') {
+    const st = form.workflow?.on ? form.workflow.stages || [] : [];
+    more = st.length ? `<div class="am-row"><span class="am-lab">To</span><select class="in am-sel" data-am="tstage"><option value="">any stage</option>${st.map((x) => `<option value="${esc(x.id)}"${x.id === t.to ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>` : '<p class="help">This form has no workflow yet (form designer → Workflow).</p>';
+  }
   else more = '<p class="help">Runs once, when the record is first saved (by hand, an import, or another automation).</p>';
   return `<div class="am-row"><span class="am-lab">When ${esc((form ? itemName(form) : 'a record').toLowerCase())}</span>${sel}</div>${more}`;
 }
@@ -268,6 +272,7 @@ export function onChange(t) {
     case 'trel': d.trigger.rel = t.value; if (t.value !== 'on' && d.trigger.days == null) d.trigger.days = 1; redraw(); return true;
     case 'tdays': d.trigger.days = Math.max(0, Math.min(365, Math.round(Number(t.value) || 0))); redraw(); return true;
     case 'tdate': d.trigger.dateField = t.value; redraw(); return true;
+    case 'tstage': d.trigger = { type: 'stage' }; if (t.value) d.trigger.to = t.value; redraw(); return true;
     case 'trec': AM.test.recordId = t.value; AM.test.out = null; AM.test.err = null; H.renderMain(); return true;
   }
   const x = t.dataset.a != null ? act(t) : null;

@@ -9,6 +9,7 @@
 import { FX } from '../formulas.js';
 import { fieldItem } from '../pdfdoc.js';
 import { evaluate, NO_RULES } from '../rules.js';
+import { withStageField, stageName, STAGE_FIELD, stageView } from '../workflow.js';
 
 const POPUP = new Set(['textarea', 'file', 'image', 'signature', 'location', 'multiselect']);
 export const COLORS = ['#3346c8', '#0f7b6c', '#b4531a', '#8a3fb8', '#b42367', '#3d6b1f', '#56607a', '#0b6aa2'];
@@ -99,6 +100,7 @@ export function makeKit({ forms = [], records = [], locale = 'en-CA', timeZone =
     });
   }
   function valOf(f, rec, form) {
+    if (f.id === STAGE_FIELD) return stageName(form || formById(rec.formId), rec);
     if (f.type === 'autonumber') return rec.nums?.[f.id] ?? null;
     if (f.type !== 'formula') return rec.values?.[f.id];
     form = form || formById(rec.formId);
@@ -115,29 +117,29 @@ export function makeKit({ forms = [], records = [], locale = 'en-CA', timeZone =
 
   /** The getter rules.js needs for one record (its parent comes from the data loaded). */
   function getter(form, rec, parent) {
-    const byId = new Map((form.fields || []).map((f) => [f.id, f]));
+    const byId = new Map((withStageField(form).fields || []).map((f) => [f.id, f]));
     const p = parent !== undefined ? parent : rec.parentId ? recById(rec.parentId) : null;
     return (src, fid) => {
       if (src === 'self') { const f = byId.get(fid); return f ? { f, v: valOf(f, rec, form) } : null; }
       if (!p || p.formId !== src) return null;
-      const pf = formById(src); const f = pf?.fields?.find((x) => x.id === fid);
+      const pf = formById(src); const f = withStageField(pf)?.fields?.find((x) => x.id === fid);
       return f ? { f, v: valOf(f, p, pf) } : null;
     };
   }
-  const rulesFor = (form, rec) => (form?.rules?.length ? evaluate(form, getter(form, rec)) : NO_RULES);
+  const rulesFor = (form, rec) => (form?.rules?.length ? evaluate(withStageField(form), getter(form, rec)) : NO_RULES);
   /** For automation conditions: look(cond) → { f, v } like the rules use. */
   function look(form, rec) {
     const g = getter(form, rec);
     return (c) => {
-      if (!c.src || c.src === 'self') { const f = (form.fields || []).find((x) => x.id === c.field); return f ? { f, v: valOf(f, rec, form) } : null; }
+      if (!c.src || c.src === 'self') { const f = (withStageField(form).fields || []).find((x) => x.id === c.field); return f ? { f, v: valOf(f, rec, form) } : null; }
       return g(c.src, c.field);
     };
   }
 
   /** The PDF model (as pdfdraw.js draws it), with the form's default columns. */
   function pdfModel(form, rec, { stamp = '', userName = (id) => '' } = {}) {
-    const rs = rulesFor(form, rec);
-    const items = (form.fields || []).filter((f) => !rs.hiddenFields.has(f.id) && !rs.hidden.has('f:' + f.id)).map((f) => {
+    const rs = rulesFor(form, rec), sv = stageView(form, rec.stage); // what the rules and the record's stage hide is left out
+    const items = (form.fields || []).filter((f) => !rs.hiddenFields.has(f.id) && !rs.hidden.has('f:' + f.id) && !sv.hide.has(f.id) && !sv.keys.has('f:' + f.id)).map((f) => {
       const v = f.type === 'heading' || rs.cleared.has(f.id) ? null : valOf(f, rec, form);
       const it = fieldItem(f, v, f.type === 'heading' ? '' : f.type === 'rating' ? (isEmpty(v) ? '' : `${v} of ${f.max || 5}`) : text(form, { ...rec, values: { ...rec.values, [f.id]: v } }, f));
       return it;
@@ -150,7 +152,7 @@ export function makeKit({ forms = [], records = [], locale = 'en-CA', timeZone =
       const rel = (form.children || []).find((c) => c.formId === k); const cf = rel && formById(k);
       if (!cf || cf.id === form.id) return;
       const isGrid = rel.display === 'grid';
-      if (rs.hidden.has((isGrid ? 'g:' : 'c:') + cf.id)) return;
+      if (rs.hidden.has((isGrid ? 'g:' : 'c:') + cf.id) || sv.keys.has((isGrid ? 'g:' : 'c:') + cf.id)) return;
       const rows = childrenOf(rec.id, cf.id).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
       const usable = (cf.fields || []).filter((f) => f.type !== 'heading');
       const num = (f) => (['number', 'decimal', 'currency', 'percent', 'range'].includes(f.type) || f.type === 'formula');

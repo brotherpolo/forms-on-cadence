@@ -4,6 +4,7 @@
 // The logic lives in rules.js; this file draws the editor and handles its clicks.
 import { esc, uid } from './ui.js';
 import { ACTIONS, opsFor, opOf, kindOf, targetsOf, actionFits, checkRules, ruleText } from './rules.js';
+import { withStageField } from './workflow.js';
 
 let H = { formById: null, recById: null, parentsOf: null, recordsOf: null, recTitle: null, setFdirty: null, renderMain: null, ui: () => ({}), canSeeTasks: () => true };
 export function initRules(helpers) { H = { ...H, ...helpers }; }
@@ -21,9 +22,9 @@ function sectionsOf(f) {
 export function rulesCtx(f) {
   const { grids, kids } = sectionsOf(f);
   const parents = (f.isNew ? [] : H.parentsOf(f.id)) || [];
-  const parentFields = new Map(parents.map((p) => [p.id, { name: p.name, fields: (p.fields || []).filter((x) => x.type !== 'heading') }]));
+  const parentFields = new Map(parents.map((p) => [p.id, { name: p.name, fields: (withStageField(p).fields || []).filter((x) => x.type !== 'heading') }]));
   const targets = targetsOf(f, { grids, kids, tasks: H.canSeeTasks() });
-  return { form: f, targets, parentFields, recordTitle: titleOf };
+  return { form: withStageField(f), targets, parentFields, recordTitle: titleOf }; // conditions can use the workflow Stage
 }
 function titleOf(id) {
   if (!id) return '';
@@ -114,7 +115,7 @@ function ruleCard(ctx, r, ri, n, msgs) {
 export function viewRules(f) {
   const ctx = rulesCtx(f);
   const rules = f.rules || [];
-  const msgs = checkRules(f, ctx);
+  const msgs = checkRules(withStageField(f), ctx);
   const clashes = msgs.filter((m) => !m.ruleId);
   return `<section class="rl-list" aria-label="Rules">
     <div class="rl-top"><div><h2 class="dz-h">Show and hide rules</h2><p class="help">Rules decide what shows on a ${esc((f.itemName || f.name || 'record').toLowerCase())} as people fill it in. A hidden field, or one a rule clears, is emptied when the record is saved. Hiding isn’t a permission: lists, reports and exports still show the data.</p></div>

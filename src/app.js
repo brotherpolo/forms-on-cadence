@@ -6,7 +6,7 @@ import { readTheme, applyTheme, nextTheme, themeLabel } from './theme.js';
 
 import { fillAutoNumbers, setAutoNumber, autoCounter, emailRecord, watchEmails, getExportSettings } from './store.js';
 import { DEFAULT_SUBJECT, DEFAULT_MESSAGE, fillTemplate, parseEmails, emailSuggestions } from './emaillogic.js';
-import { runImport, rewriteValues } from './store.js';
+import { runImport, rewriteValues, moveStage, watchStages } from './store.js';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
@@ -32,6 +32,9 @@ import { copyValues, relinkRow } from './duplogic.js';
 import { shrinkPhoto } from './photo.js';
 import { evaluate as evalRules, toClear, withoutCleared, NO_RULES, holdsValue, pruneRules, impactOf, sameRules } from './rules.js';
 import { initAutos } from './autos.js';
+import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesign.js';
+import { checkWorkflow } from './workflow.js';
+import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageName, stageView, withStageField, canWork, assigneeFor, movesOf, missingToMove, waited } from './workflow.js';
 import { initRules, viewRules, rulesClick, rulesChange, parentUse, rulesCtx } from './rulesui.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
 import { signOutUser } from './auth.js';
@@ -380,6 +383,7 @@ function renderSide(){
       <div id="fs-res" class="fs-res" role="listbox" aria-label="Forms"${fsShown()?'':' hidden'}>${formResults()}</div>
     </div>
     <div class="navlabel" style="margin-top:12px">Insights</div>
+    ${store.forms.some(f=>wfOn(f))?`<button class="nav${view.name==='mywork'?' on':''}" data-act="nav-mywork"><span class="glyph navg">☰</span><span class="t">My work</span><span class="n">${myWorkCount()||''}</span></button>`:''}
     <button class="nav${view.name==='dashboards'||view.name==='dashboard'?' on':''}" data-act="nav-dashboards"><span class="glyph navg">▦</span><span class="t">Dashboards</span><span class="n">${counts().dashboards}</span></button>
     <button class="nav${view.name==='reports'||view.name==='report'?' on':''}" data-act="nav-reports"><span class="glyph navg">▤</span><span class="t">Reports</span><span class="n">${counts().reports}</span></button>
     ${adm?`<div class="navlabel" style="margin-top:12px">Administration</div>
@@ -403,6 +407,7 @@ function renderMain(){
   else if(view.name==='dashboard'){title=dashName(view.dashboardId);h=viewDashboard(view.dashboardId);wide='full';}
   else if(view.name==='records'){const f=formById(view.formId);title=f?.name;h=viewRecords(f);wide=true;}
   else if(view.name==='record'){const f=formById(view.formId);title=f?.name;h=viewRecord(f);}
+  else if(view.name==='mywork'){title='My work';h=viewMyWork();}
   else if(view.name==='import'){title=importTitle();h=viewImport(formById(view.formId));}
   else if(view.name==='imports'){title='Import history';h=viewImports();}
   else if(view.name==='designer'){title='Form designer';h=viewDesigner();}
@@ -419,7 +424,7 @@ function renderMain(){
   if(view.name==='record'&&rdraft){rdraft._rs=null;applyRules(rdraft);}
   if(view.name==='formEdit'&&pdraft&&(ui.tab==='rules'||ui.tab==='preview'))applyRules(pdraft);
   if(view.name==='dashboard')fitTiles();
-  syncTaskWatch();syncEmailWatch();
+  syncTaskWatch();syncEmailWatch();syncStageWatch();
 }
 
 /* ---------- Cadence tasks linked to the open record ---------- */
@@ -527,7 +532,7 @@ function viewRecord(form){
   const rec=view.recordId?recById(view.recordId):null;
   if(!rdraft||rdraft.formId!==form.id||rdraft.recordId!==(view.recordId||null)){rdraft=rec?{formId:form.id,recordId:rec.id,values:{},errors:{},dirty:false}:newRecordDraft(form,null);}
   if(rec&&!rdraft.dirty){rdraft.values=clone(rec.values||{});rdraft.parentId=rec.parentId||null;rdraft.parentFormId=rec.parentFormId||null;}
-  const ro=rec?!canEditRecord(store.me,rec):!canCreate(store.me,form.id);rdraft.readOnly=ro;
+  const ro=rec?(rec.stage&&wfOn(form)?!canWork(rec,store.me):!canEditRecord(store.me,rec)):!canCreate(store.me,form.id);rdraft.readOnly=ro;
   const grels=gridRels(form);syncGrids(rdraft,rec,grels);
   const parent=rdraft.parentId?recById(rdraft.parentId):null;
   const pform=parent?formById(parent.formId):null;
@@ -570,12 +575,13 @@ function viewRecord(form){
   <div class="crumbs">${crumbs}</div>
   <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}</h1>${rec?`<p class="sub">${recordMeta(rec)}</p>`:''}${!rec&&rdraft.duplicateOf?`<p class="sub dupnote">A copy of <b>${esc(rdraft.duplicateTitle||'')}</b>${rdraft.dupRows?` with its ${rdraft.dupRows} row${rdraft.dupRows>1?'s':''}`:''}. Nothing is saved until you click Save${rdraft.dupKids?`; its ${esc(rdraft.dupKids)} aren’t copied`:''}.</p>`:''}${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
   ${parentPick}
+  ${wfBar(form,rec)}
   <div class="panel">
     <fieldset class="fset"${ro?' disabled':''}>${formFieldsHTML(form,rdraft,'record')}</fieldset>
   </div>
-  ${sectionsHTML}${backHTML}${rec?`<div id="rec-emails">${sentEmailsHTML()}</div>`:''}
+  ${sectionsHTML}${rec&&wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}${backHTML}${rec?`<div id="rec-emails">${sentEmailsHTML()}</div>`:''}
   ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}
-  ${cellPopup()}${ui.mail&&ui.mail.rec===rec?.id?mailDialog(form,rec):''}${ui.cascade&&ui.cascade.parentId===rec?.id?cascadeDialog():''}`;
+  ${cellPopup()}${ui.mail&&ui.mail.rec===rec?.id?mailDialog(form,rec):''}${ui.cascade&&ui.cascade.parentId===rec?.id?cascadeDialog():''}${ui.wfAsk&&ui.wfAsk.recId===rec?.id?wfAskDialog(form,rec):''}`;
 }
 
 const personName=id=>String(id||'').startsWith('auto:')?'an automation':store.profiles[id]?.displayName||(id===store.user?.uid?'you':'someone');
@@ -586,6 +592,107 @@ function recordMeta(rec){
   if(rec.updatedAt)s+=` · edited ${esc(when(rec.updatedAt))}`+(rec.updatedBy&&rec.updatedBy!==rec.ownerId?` by ${esc(personName(rec.updatedBy))}`:'');
   return s;
 }
+
+/* ---------- Workflows: the stage bar, moving on, the history, My work ----------
+   form.workflow (workflow.js): stages with an assignee, buttons to move on, and fields per stage.
+   Only the assignee (or someone in the assigned group) and administrators can change a record
+   while it's in a stage; firestore.rules enforce the same. */
+const WF_KEY='w:history';
+const sw={recordId:null,unsub:null,list:[]};
+function syncStageWatch(){
+  const rec=view.name==='record'&&view.recordId?recById(view.recordId):null;
+  const want=rec&&wfOn(formById(rec.formId))?rec.id:null;
+  if(want===sw.recordId)return;
+  if(sw.unsub){sw.unsub();sw.unsub=null;}
+  Object.assign(sw,{recordId:want,list:[]});
+  if(want)sw.unsub=watchStages(want,list=>{sw.list=list;const el=$('#rec-history');if(el){const f=formById(recById(want)?.formId);if(f)el.innerHTML=historyHTML(f);}});
+}
+const groupName=id=>store.groups.find(g=>g.id===id)?.name||'';
+function whoHas(rec){
+  if(rec.assignee)return rec.assignee===store.user?.uid?'you':realName(rec.assignee);
+  if(rec.assigneeGroup){const n=groupName(rec.assigneeGroup);return n?`the ${n} group`:'a group';}
+  return 'nobody yet';
+}
+function wfBar(form,rec){
+  if(!wfOn(form))return '';
+  const stages=stagesOf(form),cur=rec?.stage&&stageById(form,rec.stage)?rec.stage:null,i=cur?stageIndex(form,cur):-1;
+  const chips=`<ol class="wf-steps">${stages.map((s,j)=>`<li class="${j<i?'done':j===i?'on':''}"${j===i?' aria-current="step"':''}>${j<i?'<span aria-hidden="true">✓</span> ':''}${esc(s.name)}</li>`).join('')}</ol>`;
+  let line='',btns='';
+  const admin=isAdmin(store.me);
+  if(!rec)line=`Starts at <b>${esc(stages[0].name)}</b> when you save it.`;
+  else if(!cur){
+    line='Not in the workflow yet.';
+    if(admin||canEditRecord(store.me,rec))btns=`<button type="button" class="btn sm primary" data-act="wf-start">Start at ${esc(stages[0].name)}</button>`;
+  }else{
+    const mine=canWork(rec,store.me);
+    line=`<b>${esc(stageName(form,rec))}</b> · waiting on <b>${esc(whoHas(rec))}</b>${rec.stageAt?(w=>w==='today'?' since today':` for ${esc(w)}`)(waited(rec.stageAt,Date.now())):''}`;
+    if(!mine)line+=`<span class="wf-ro">Only ${esc(whoHas(rec))} or an administrator can change it at this stage.</span>`;
+    else btns=movesOf(form,cur).map(m=>`<button type="button" class="btn sm${stageIndex(form,m.to)>i?' primary':''}" data-act="wf-move" data-id="${esc(m.id)}"${ui.wfBusy?' disabled':''}>${esc(m.label)}</button>`).join('');
+    if(admin)btns+=`<label class="wf-jump"><span class="sr">Move to any stage</span><select class="in" data-wf-jump="1" aria-label="Move to any stage"><option value="">Move to…</option>${stages.filter(s=>s.id!==cur).map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select></label>`;
+    if(stageView(form,cur).req.size)line+=`<span class="wf-note">Fields marked * are needed before moving on.</span>`;
+  }
+  return `<section class="panel wf-bar" aria-label="Workflow">${chips}<div class="wf-now"><p class="wf-line">${line}</p>${btns?`<div class="wf-btns">${btns}</div>`:''}</div></section>`;
+}
+function historyHTML(form){
+  const k=WF_KEY,list=sw.list;
+  const open=!folded(form.id,k);
+  const last=list[0];
+  const head=`<div class="section-h"><h2>${foldBtn(k,open,`<span class="badge wf-badge" aria-hidden="true">⇢</span><span>Stage history</span> <span class="count">${list.length}</span>`,last?`${last.toName||''} · ${when(last.at)}`:'')}</h2></div>`;
+  if(!open)return `<section class="section" id="wf-history">${head}</section>`;
+  const row=e=>`<li><div class="wf-h1"><b>${esc(realName(e.by))}</b> ${e.fromName?`moved it from <b>${esc(e.fromName)}</b> to <b>${esc(e.toName||'')}</b>`:`started it at <b>${esc(e.toName||'')}</b>`}${e.label?` <span class="chip">${esc(e.label)}</span>`:''}</div>
+    <div class="wf-h2">${esc(when(e.at))}${e.assignee?` · for ${esc(realName(e.assignee))}`:e.assigneeGroup?` · for ${esc(groupName(e.assigneeGroup)?'the '+groupName(e.assigneeGroup)+' group':'a group')}`:''}</div>${e.comment?`<blockquote class="wf-c">${esc(e.comment)}</blockquote>`:''}</li>`;
+  return `<section class="section" id="wf-history">${head}<div class="panel subsec">${list.length?`<ol class="wf-hist">${list.map(row).join('')}</ol>`:'<p class="note">No moves yet.</p>'}</div></section>`;
+}
+function wfAskDialog(form,rec){
+  const a=ui.wfAsk,t=stageById(form,a.to);
+  return `<div class="lv-scrim" data-act="wf-scrim"><div class="lv-dlg ra-dlg" role="dialog" aria-modal="true" aria-labelledby="wf-h" data-stop-scrim="1">
+    <h2 id="wf-h">${esc(a.label)}: move to ${esc(t?.name||'')}?</h2>
+    <label class="mail-l"><span class="mlab">${a.need?'Say why (required)':'Comment (optional)'}</span><textarea class="in" rows="4" data-wf-comment="1" maxlength="2000"${a.busy?' disabled':''}>${esc(a.comment||'')}</textarea></label>
+    <p class="help">It goes to ${esc(whoHas({...rec,...assigneeFor(t,rec,store.user?.uid)}))}, and the comment is kept in the stage history.</p>
+    <div class="lv-dlgacts"><button type="button" class="btn ghost" data-act="wf-cancel"${a.busy?' disabled':''}>Cancel</button><button type="button" class="btn primary" id="wf-go" data-act="wf-go"${a.busy?' disabled':''}>${a.busy?'Moving…':esc(a.label)}</button></div>
+  </div></div>`;
+}
+/** Move the open record on: save what's typed, check what this stage needs, ask for a comment if wanted. */
+async function wfMove(moveId,jumpTo){
+  const rec=recById(view.recordId),form=rec?formById(rec.formId):null;if(!rec||!form)return;
+  let m=null;
+  if(jumpTo){const t=stageById(form,jumpTo);if(!t||!isAdmin(store.me))return;m={id:'jump',label:'Moved by an administrator',to:t.id,comment:false,target:t,jump:true};}
+  else{m=movesOf(form,rec.stage).find(x=>x.id===moveId);if(!m)return;}
+  const onScreen=rdraft&&rdraft.recordId===rec.id?{...rdraft.values}:null; // what's typed (the saved copy can take a moment to come back)
+  if(rdraft?.dirty){await saveRecord();if(rdraft?.dirty)return;}
+  const fresh=recById(rec.id)||rec;
+  if(!m.jump&&stageIndex(form,m.to)>stageIndex(form,fresh.stage)){
+    const st=draftRules(rdraft);
+    const vals=onScreen||fresh.values||{};
+    const miss=missingToMove(form,fresh.stage,vals,isEmpty,st.hiddenFields);
+    if(miss.length){rdraft.errors={...(rdraft.errors||{})};miss.forEach(f=>{rdraft.errors[f.id]='Needed before moving on.';});renderMain();toast(`Fill in ${miss.map(f=>f.label).slice(0,3).join(', ')}${miss.length>3?' and more':''} first.`);document.querySelector('.fld.bad')?.scrollIntoView({block:'center',behavior:'smooth'});return;}
+  }
+  if(m.comment||m.jump){ui.wfAsk={recId:rec.id,to:m.to,label:m.label,need:!!m.comment,comment:'',busy:false};renderMain();setTimeout(()=>document.querySelector('[data-wf-comment]')?.focus(),0);return;}
+  await doWfMove(fresh,form,m.target,m.label,'');
+}
+async function doWfMove(rec,form,target,label,comment){
+  const next=assigneeFor(target,rec,store.user?.uid);
+  ui.wfBusy=true;
+  try{
+    await moveStage(rec.id,{stage:target.id,assignee:next.assignee||null,assigneeGroup:next.assigneeGroup||null,stageAt:Date.now()},
+      {from:rec.stage||null,fromName:rec.stage?stageName(form,rec):null,to:target.id,toName:target.name,label:String(label||'').slice(0,80),comment:String(comment||'').slice(0,2000),assignee:next.assignee||null,assigneeGroup:next.assigneeGroup||null});
+    toast(`Moved to ${target.name} · ${whoHas({...rec,...next})}`);
+    if(rdraft?.errors)Object.keys(rdraft.errors).forEach(k=>{if(rdraft.errors[k]==='Needed before moving on.')delete rdraft.errors[k];});
+  }catch(e){console.error(e);toast(e?.code==='permission-denied'?'Only the person it’s waiting on, or an administrator, can move it. (Or the latest security rules aren’t deployed yet.)':'Moving it failed. Check your connection and try again.');}
+  ui.wfBusy=false;renderMain();
+}
+/* My work: records waiting on you (or your groups) in any workflow. Admins can see everyone's. */
+function viewMyWork(){
+  const me=store.user?.uid,groups=store.me?.groups||[],admin=isAdmin(store.me),who=admin?ui.wfWho||'me':'me',now=Date.now();
+  const recs=store.records.filter(r=>{const f=formById(r.formId);if(!f||!wfOn(f)||!r.stage||!stageById(f,r.stage))return false;return who==='all'||r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup));}).sort((a,b)=>(a.stageAt||0)-(b.stageAt||0));
+  const byForm=new Map();recs.forEach(r=>{if(!byForm.has(r.formId))byForm.set(r.formId,[]);byForm.get(r.formId).push(r);});
+  const tables=[...byForm].map(([fid,rs])=>{const f=formById(fid);return `<section class="section"><div class="section-h"><h2>${badge(f)}<span>${esc(f.name)}</span> <span class="count">${rs.length}</span></h2></div>
+    <div class="panel"><div class="tblwrap"><table class="tbl lv-tbl wf-tbl"><thead><tr><th>${esc(itemName(f))}</th><th>Stage</th>${who==='all'?'<th>Waiting on</th>':''}<th class="num">Waiting</th></tr></thead><tbody>${rs.map(r=>`<tr data-act="open-record" data-id="${esc(r.id)}"><td class="title">${esc(recTitle(r,f))}</td><td>${esc(stageName(f,r))}</td>${who==='all'?`<td>${esc(whoHas(r))}</td>`:''}<td class="num">${esc(waited(r.stageAt,now))}</td></tr>`).join('')}</tbody></table></div></div></section>`;}).join('');
+  return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">${who==='all'?'Every record waiting on someone in a workflow':'Records waiting on you, or a group you’re in'}, longest waiting first.</p></div></div>
+    ${admin?`<div class="actions"><div class="segs" role="group" aria-label="Whose work"><button type="button" class="${who==='me'?'on':''}" aria-pressed="${who==='me'}" data-act="wf-who" data-v="me">Mine</button><button type="button" class="${who==='all'?'on':''}" aria-pressed="${who==='all'}" data-act="wf-who" data-v="all">Everyone</button></div></div>`:''}</div>
+    ${recs.length?tables:`<div class="panel empty"><h2>Nothing waiting${who==='all'?'':' on you'}</h2><p>When a record reaches a stage that’s yours, it shows up here.</p></div>`}`;
+}
+const myWorkCount=()=>{const me=store.user?.uid,groups=store.me?.groups||[];return store.records.filter(r=>r.stage&&(r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup)))&&wfOn(formById(r.formId))).length;};
 
 /* ---------- Email PDF (administrators) ----------
    Email PDF opens a short form: who to send to (addresses found on this record and the
@@ -686,7 +793,7 @@ const longDate=t=>new Date(t).toLocaleDateString(undefined,{year:'numeric',month
 function pdfText(f,v){if(f.type==='rating')return isEmpty(v)?'':`${v} of ${f.max||5}`;if(f.type==='textarea')return isEmpty(v)?'':String(v);try{return fmt(f,v)}catch(e){return String(v??'')}}
 const pdfNum=f=>(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating';
 function pdfModel(form,rec){
-  const rs=rulesOf(form,rec,rec.parentId?recById(rec.parentId):null); // what the rules hide is left out
+  const rs=withStage(rulesOf(form,rec,rec.parentId?recById(rec.parentId):null),form,rec.stage); // what the rules and the stage hide is left out
   const items=(form.fields||[]).filter(f=>!rs.hiddenFields.has(f.id)&&!rs.hidden.has('f:'+f.id)).map(f=>{const v=f.type==='heading'||rs.cleared.has(f.id)?null:valOf(f,rec,form);return fieldItem(f,v,f.type==='heading'?'':pdfText(f,v));});
   const sections=[];
   const grels=gridRels(form),gmap=Object.fromEntries(grels.map(g=>[g.cf.id,g]));
@@ -833,7 +940,7 @@ function kSearch(key,cf,q,shown,all,anyNew){
 function recordFoldKeys(form,rec){
   const grids=gridRels(form).map(x=>x.cf.id);
   const kids=rec?(form.children||[]).filter(c=>c.display!=='grid').map(c=>formById(c.formId)).filter(cf=>cf&&canViewForm(store.me,cf.id)).map(cf=>cf.id):[];
-  return foldKeys(form,grids,kids).concat(rec?['t:tasks']:[]);
+  return foldKeys(form,grids,kids).concat(rec?['t:tasks']:[]).concat(rec&&wfOn(form)?[WF_KEY]:[]);
 }
 const SORT_H={valOf:(f,r,fm)=>valOf(f,r,fm),fmt:(f,v)=>fmt(f,v),recTitle:(r,fm)=>recTitle(r,fm),recById:id=>recById(id),formById:id=>formById(id)};
 const DETACH_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 4 8"/><path d="M8 12h3"/><path d="M3 3l18 18"/></svg>';
@@ -1002,7 +1109,7 @@ function fieldBlock(f,v,err,scope,locked){
   if(f.type==='heading')return `<div class="fsec" id="fb-${scope}-${f.id}"><h3>${esc(f.label)}</h3>${f.help?`<p class="help">${esc(f.help)}</p>`:''}</div>`;
   const id=`in-${scope}-${f.id}`;
   const lab=['radio','multiselect','rating','checkbox','formula','autonumber'].includes(f.type)?`<span class="flabel" id="lb-${id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</span>`:`<label class="flabel" for="${id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</label>`;
-  if(locked)return `<div class="fld w-${f.width==='half'?'half':'full'} locked" id="fb-${scope}-${f.id}">${lab}<div class="lockw" inert>${control(f,null,id,scope)}</div><p class="help rule-note">Cleared by a rule</p></div>`;
+  if(locked)return `<div class="fld w-${f.width==='half'?'half':'full'} locked${locked==='view'?' viewonly':''}" id="fb-${scope}-${f.id}">${lab}<div class="lockw" inert>${control(f,locked==='view'?v:null,id,scope)}</div><p class="help rule-note">${locked==='view'?'View only at this stage':'Cleared by a rule'}</p></div>`;
   return `<div class="fld w-${f.width==='half'?'half':'full'}${err?' bad':''}" id="fb-${scope}-${f.id}">${lab}${control(f,v,id,scope)}${f.help?`<p class="help">${esc(f.help)}</p>`:''}${err?`<p class="err">${esc(err)}</p>`:''}</div>`;
 }
 function control(f,v,id,scope){
@@ -1064,19 +1171,30 @@ function draftRec(d){return {id:d.recordId||null,formId:d.formId,values:d.values
    Worked out from what's on screen as people type (the record, its parent, a grid row's parent
    record). Hidden fields and fields a rule clears are emptied when the record is saved. */
 function parentGetter(parent){
-  return (src,fid)=>{if(!parent||parent.formId!==src)return null;const pf=formById(src);const f=pf?.fields?.find(x=>x.id===fid);return f?{f,v:f.type==='autonumber'?recById(parent.id)?.nums?.[fid]:valOf(f,parent,pf)}:null;};
+  return (src,fid)=>{if(!parent||parent.formId!==src)return null;const pf=formById(src);const f=withStageField(pf)?.fields?.find(x=>x.id===fid);if(!f)return null;return {f,v:fid===STAGE_FIELD?stageName(pf,parent):f.type==='autonumber'?recById(parent.id)?.nums?.[fid]:valOf(f,parent,pf)};};
 }
 function rulesOf(form,recLike,parent){
   if(!form?.rules?.length)return NO_RULES;
-  const pg=parentGetter(parent),byId=new Map((form.fields||[]).map(f=>[f.id,f]));
-  return evalRules(form,(src,fid)=>{if(src!=='self')return pg(src,fid);const f=byId.get(fid);if(!f)return null;return {f,v:f.type==='autonumber'?(recLike.nums||recById(recLike.id)?.nums||{})[fid]:valOf(f,recLike,form)};});
+  const sf=withStageField(form);
+  const pg=parentGetter(parent),byId=new Map((sf.fields||[]).map(f=>[f.id,f]));
+  return evalRules(sf,(src,fid)=>{if(src!=='self')return pg(src,fid);const f=byId.get(fid);if(!f)return null;return {f,v:fid===STAGE_FIELD?stageName(form,recLike):f.type==='autonumber'?(recLike.nums||recById(recLike.id)?.nums||{})[fid]:valOf(f,recLike,form)};});
+}
+/** The rules, plus what the record's workflow stage hides, shows read-only or needs before moving on. */
+function withStage(st,form,stage){
+  if(!wfOn(form)||!stage)return st;
+  const sv=stageView(form,stage);
+  if(!sv.hide.size&&!sv.view.size&&!sv.req.size&&!sv.keys.size)return st;
+  const hidden=new Set([...st.hidden,...sv.keys,...[...sv.hide].map(id=>'f:'+id)]);
+  return {...st,hidden,hiddenFields:new Set([...st.hiddenFields,...sv.hide]),view:sv.view,moveReq:sv.req,
+    required:f=>!sv.hide.has(f.id)&&!sv.view.has(f.id)&&st.required(f)};
 }
 /** The rules for a draft on screen: the record being edited, or the designer's Try it. */
 function draftRules(d){
   if(!d||d===cdraft)return NO_RULES;
-  if(d===pdraft)return fdraft?rulesOf(fdraft,{id:null,formId:fdraft.id,values:d.values},d._parent||null):NO_RULES;
+  if(d===pdraft)return fdraft?withStage(rulesOf(fdraft,{id:null,formId:fdraft.id,values:d.values,stage:d._stage||null},d._parent||null),fdraft,d._stage||null):NO_RULES;
   const form=formById(d.formId);
-  return rulesOf(form,draftRec(d),d.parentId?recById(d.parentId):null);
+  const stage=d.recordId?recById(d.recordId)?.stage||null:null;
+  return withStage(rulesOf(form,{...draftRec(d),stage},d.parentId?recById(d.parentId):null),form,stage);
 }
 /** A grid row's rules: its own form's, with the record on screen as its parent. */
 function rowRules(cf,row,d){return cf?.rules?.length?rulesOf(cf,rowRec(row,cf,d),draftRec(d)):NO_RULES;}
@@ -1086,6 +1204,8 @@ function fieldOut(d,f,scope,st){
   const off=st.hiddenFields.has(f.id)||st.hidden.has('f:'+f.id);
   let html;
   if(st.cleared.has(f.id))html=fieldBlock({...f,required:false},null,null,scope,true);
+  else if(st.view?.has(f.id))html=fieldBlock({...f,required:false},d.values[f.id],null,scope,'view');
+  else if(st.moveReq?.has(f.id))html=fieldBlock({...f,required:true},d.values[f.id],d.errors?.[f.id],scope);
   else if(f.type==='heading'||!holdsValue(f)||st.required(f)===!!f.required)html=fieldBlock(f,d.values[f.id],d.errors?.[f.id],scope);
   else html=fieldBlock({...f,required:st.required(f)},d.values[f.id],d.errors?.[f.id],scope);
   return off?html.replace(/^<div class="/,'<div class="rule-off '):html;
@@ -1100,7 +1220,7 @@ function applyRules(d){
     const el=document.getElementById(`fb-${scope}-${f.id}`);if(!el)return;
     el.classList.toggle('rule-off',st.hiddenFields.has(f.id)||st.hidden.has('f:'+f.id));
     if(f.type==='heading')return;
-    if(prev.cleared.has(f.id)!==st.cleared.has(f.id)||prev.required(f)!==st.required(f)){repaint(d,f);const c=document.querySelector(`#fb-${scope}-${f.id} canvas[data-sig]`);if(c)initSig(c);}
+    if(prev.cleared.has(f.id)!==st.cleared.has(f.id)||prev.required(f)!==st.required(f)||!!prev.view?.has(f.id)!==!!st.view?.has(f.id)||!!prev.moveReq?.has(f.id)!==!!st.moveReq?.has(f.id)){repaint(d,f);const c=document.querySelector(`#fb-${scope}-${f.id} canvas[data-sig]`);if(c)initSig(c);}
   });
   if(d===rdraft){
     ['g:','c:'].forEach(pre=>(form.children||[]).forEach(c=>{const el=document.getElementById(RULE_SECTIONS(pre+c.formId));if(el)el.classList.toggle('rule-off',st.hidden.has(pre+c.formId));}));
@@ -1173,7 +1293,7 @@ function validate(form,vals,st){
   const errs={};st=st||NO_RULES;
   (form.fields||[]).forEach(f=>{
     if(f.type==='heading'||f.type==='formula'||f.type==='autonumber')return;const v=vals[f.id];
-    if(st.blank.has(f.id))return; // hidden or cleared by a rule: emptied on save, nothing to check
+    if(st.blank.has(f.id)||st.hiddenFields.has(f.id)||st.view?.has(f.id))return; // hidden, cleared or view only: nothing to check
     if(st.required(f)&&(f.type==='checkbox'?!v:isEmpty(v))){errs[f.id]=f.type==='checkbox'?'This must be switched on.':'This field is required.';return;}
     if(isEmpty(v))return;
     if(f.type==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))errs[f.id]='Enter an email like name@example.com.';
@@ -1222,6 +1342,7 @@ async function saveRecord(){
   catch(e){console.error(e);if(!old)d.recordId=null;toast(e?.code==='permission-denied'?'You don’t have permission to save this record or one of its rows.':'Saving failed. Check your connection and try again.');return;}
   if(rowsOut.length||removed.length){const n=rowsOut.length+removed.length;setTimeout(()=>toast(`Saved with ${n} row change${n>1?'s':''}`),0);}
   d.dirty=false;d.errors={};d.recordId=id;d.copied=0;view.recordId=id;toast('Saved');render();
+  if(!old&&wfOn(form)){const fs=firstStage(form);await doWfMove({...rec,ownerId:store.user?.uid},form,fs,'Created','');}
   askChildRules(form,{...(old||{}),...rec,nums:old?.nums});
 }
 /* ---------- A parent changed: children whose rules look at it ----------
@@ -1353,6 +1474,7 @@ function tryPanel(f){
       par=`<div class="rl-par"><p class="help">Pretend this ${esc(itemName(f).toLowerCase())} belongs to ${ids.length>1?`a <select class="in rl-pform" data-tryp="form" aria-label="Parent form">${ids.map(id=>`<option value="${id}"${id===pdraft._parent.formId?' selected':''}>${esc(itemName(formById(id)).toLowerCase())}</option>`).join('')}</select>`:`a ${esc(itemName(pf).toLowerCase())}`} with:</p>${[...use.get(pdraft._parent.formId)||[]].map(fid=>{const x=pf.fields.find(y=>y.id===fid);return x?`<label class="rl-pv"><span>${esc(x.label)}</span>${tryInput(x,pdraft._parent.values[fid])}</label>`:'';}).join('')}</div>`;
     }
   }
+  if(wfOn(f)&&(f.rules||[]).some(r=>(r.conds||[]).flatMap(c=>c.group?c.conds||[]:[c]).some(c=>c.field===STAGE_FIELD)))par+=`<div class="rl-par"><label class="rl-pv"><span>Pretend its stage is</span><select class="in" data-tryp="stage"><option value=""></option>${stagesOf(f).map(x=>`<option value="${esc(x.id)}"${x.id===pdraft._stage?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`;
   const secs=rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind));
   return `<h2 class="dz-h">Try it</h2><p class="help">Fill in the fields to watch the rules work. Nothing here is saved.</p>${par}
     ${formFieldsHTML(f,pdraft,'preview')}
@@ -1365,7 +1487,7 @@ function paintTryState(st){
   document.querySelectorAll('[data-rlfire]').forEach(el=>{el.hidden=!st.fired.get(el.dataset.rlfire);});
 }
 function viewFormEdit(){
-  const f=fdraft;const tabs=[['fields','Fields'],['relations','Relationships'],['rules','Rules'],['settings','Settings'],['preview','Preview']];
+  const f=fdraft;const tabs=[['fields','Fields'],['relations','Relationships'],['rules','Rules'],['workflow','Workflow'],['settings','Settings'],['preview','Preview']];
   let body='';
   if(ui.tab==='fields'){
     const groups=[...new Set(TYPES.map(t=>t[3]))];
@@ -1422,6 +1544,8 @@ function viewFormEdit(){
       <p class="help">“Copy matching fields” fills in any child field whose label and type match a field on the parent. Sub-forms go one level deep: a form shown as a grid can’t have grids of its own.</p></section>
       <section class="section"><div class="section-h"><h2>Parents</h2></div><div class="panel"><p class="note">${par.length?`This form is a child of ${par.map(p=>`<b>${esc(p.name)}</b>`).join(', ')}. Its records can belong to one of their records.`:'No form lists this one as a child.'}</p></div></section>
       <section class="section"><div class="section-h"><h2>Linked by fields</h2></div><div class="panel"><p class="note">${linkers.length?'Link-to-record fields that point here: '+linkers.map(esc).join(', ')+'.':'Add a “Link to record” field to any form to point at records in another form, like a lookup.'}</p></div></section>`;
+  }else if(ui.tab==='workflow'){
+    body=viewWorkflow(f);
   }else if(ui.tab==='rules'){
     body=`<div class="rl-wrap">${viewRules(f)}<aside class="panel rl-try" aria-label="Try the rules">${tryPanel(f)}</aside></div>`;
   }else if(ui.tab==='settings'){
@@ -1443,7 +1567,7 @@ function viewFormEdit(){
   return `
   <div class="crumbs"><button data-act="nav-designer">Form designer</button><span>›</span><span>${f.isNew?'New form':esc(f.name)}</span></div>
   <div class="head"><div class="ttl">${badge(f.name?f:{...f,name:'?'},1)}<div style="flex:1;min-width:0"><input class="title-in" data-fprop="name" value="${esc(f.name)}" placeholder="Form name, e.g. Inspections" aria-label="Form name"></div></div></div>
-  <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab${ui.tab===k?' on':''}" role="tab" aria-selected="${ui.tab===k}" data-act="tab" data-tab="${k}">${l}${k==='fields'?` <span class="count">${f.fields.length}</span>`:''}${k==='relations'&&(f.children||[]).length?` <span class="count">${f.children.length}</span>`:''}${k==='rules'&&(f.rules||[]).length?` <span class="count">${f.rules.length}</span>`:''}</button>`).join('')}</div>
+  <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab${ui.tab===k?' on':''}" role="tab" aria-selected="${ui.tab===k}" data-act="tab" data-tab="${k}">${l}${k==='fields'?` <span class="count">${f.fields.length}</span>`:''}${k==='relations'&&(f.children||[]).length?` <span class="count">${f.children.length}</span>`:''}${k==='rules'&&(f.rules||[]).length?` <span class="count">${f.rules.length}</span>`:''}${k==='workflow'&&wfOn(f)?` <span class="count">${stagesOf(f).length}</span>`:''}</button>`).join('')}</div>
   ${body}
   ${ui.ruleApply?ruleApplyDialog():''}
   <div class="panel savebar" style="border-radius:var(--r)"><span class="grow" id="fdirty">${f.dirty?'Unsaved changes':'All changes saved'}</span><button class="btn ghost" data-act="done-form">${f.dirty?'Discard':'Done'}</button><button class="btn primary" data-act="save-form">Save form</button></div>`;
@@ -1543,6 +1667,8 @@ function setFdirty(){fdraft.dirty=true;const n=$('#fdirty');if(n)n.textContent='
 async function saveForm(){
   const f=fdraft;
   if(!f.name.trim()){toast('Give the form a name first.');$('.title-in')?.focus();return;}
+  {const wp=checkWorkflow(f,{people:new Set(store.users.map(u=>u.id)),groups:new Set(store.groups.map(g=>g.id))});if(wp.length){ui.tab='workflow';renderMain();toast('Workflow: '+wp[0]);return;}}
+  if(f.workflow?.stages){f.workflow.stages.forEach(x=>{x.name=String(x.name||'').trim();x.moves=(x.moves||[]).filter(m=>m.label&&m.label.trim()&&f.workflow.stages.some(y=>y.id===m.to));});}
   f.fields.forEach(x=>{if(!x.label.trim())x.label='Untitled field';if(CHOICE.has(x.type))x.options=(x.options||[]).filter(Boolean);});
   const reEsc=t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
   Object.entries(f._labels||{}).forEach(([id,old])=>{const nf=f.fields.find(z=>z.id===id);if(!nf||!old||nf.label===old)return;f.fields.filter(z=>z.type==='formula'&&z.expr).forEach(z=>{z.expr=z.expr.replace(new RegExp('\\{\\s*'+reEsc(old)+'\\s*\\}','gi'),()=>'{'+nf.label+'}');});});
@@ -1576,7 +1702,7 @@ async function saveForm(){
   }catch(e){toast('Saving the sub-forms failed. Check your connection and try again.');return;}
   f._labels=Object.fromEntries(f.fields.map(x=>[x.id,x.label]));
   const out=clone(f);delete out.dirty;delete out.isNew;delete out._labels;delete out._newForms;delete out._inherit;out.name=out.name.trim();
-  if(out.rules){const c=rulesCtx(f);out.rules=pruneRules(out,{targets:c.targets,parentFields:c.parentFields});if(!out.rules.length)delete out.rules;}
+  if(out.rules){const c=rulesCtx(f);out.rules=pruneRules(withStageField(out),{targets:c.targets,parentFields:c.parentFields});if(!out.rules.length)delete out.rules;}
   // changed rules: saved records they'd empty fields on are cleared now (with Undo) or on their next save
   let applyRows=null;
   if(!f.isNew&&!sameRules(before?.rules,out.rules)){
@@ -1606,10 +1732,12 @@ async function saveForm(){
 }
 /** Which saved records the form's rules would empty fields on: { rows: [{ id, clear }], perField }. */
 function ruleImpact(form,recs,parent){
-  return impactOf(form,recs,r=>{
-    const byId=new Map((form.fields||[]).map(x=>[x.id,x])),pg=parentGetter(parent&&parent.id===r.parentId?parent:r.parentId?recById(r.parentId):null);
-    return (src,fid)=>{if(src!=='self')return pg(src,fid);const x=byId.get(fid);return x?{f:x,v:x.type==='autonumber'?r.nums?.[fid]:valOf(x,r,form)}:null;};
+  const sf=withStageField(form);
+  const im=impactOf(sf,recs,r=>{
+    const byId=new Map((sf.fields||[]).map(x=>[x.id,x])),pg=parentGetter(parent&&parent.id===r.parentId?parent:r.parentId?recById(r.parentId):null);
+    return (src,fid)=>{if(src!=='self')return pg(src,fid);const x=byId.get(fid);return x?{f:x,v:fid===STAGE_FIELD?stageName(form,r):x.type==='autonumber'?r.nums?.[fid]:valOf(x,r,form)}:null;};
   });
+  return im;
 }
 /**
  * Empty those fields on saved records (rows: [{ id, clear, set? }]; set = values to change first).
@@ -1657,11 +1785,15 @@ function editForm(id){
 /* ---------- Events ---------- */
 // Rules tab: building rules, and Try it's parent values
 document.addEventListener('click',e=>{const el=e.target.closest?.('[data-rl]');if(!el||el.dataset.rl==='toggle'||view.name!=='formEdit'||!fdraft)return;rulesClick(fdraft,el);});
+document.addEventListener('click',e=>{const el=e.target.closest?.('[data-wfa]');if(!el||view.name!=='formEdit'||!fdraft)return;wfClick(fdraft,el);});
+document.addEventListener('input',e=>{const el=e.target;if(view.name==='formEdit'&&fdraft&&el.dataset?.wfd)wfInput(fdraft,el);});
 document.addEventListener('change',e=>{
   const el=e.target;if(view.name!=='formEdit'||!fdraft||!el.dataset)return;
   if(el.closest('.rl-list')&&(el.dataset.rl==='toggle'||el.dataset.rlj||el.dataset.rlc||el.dataset.rla)){rulesChange(fdraft,el);return;}
+  if(el.dataset.wfd&&el.closest('.wf-design')){wfChange(fdraft,el);return;}
   if(el.dataset.tryp&&pdraft){
     if(el.dataset.tryp==='form'){pdraft._parent={id:null,formId:el.value,values:{}};renderMain();return;}
+    if(el.dataset.tryp==='stage'){pdraft._stage=el.value||null;applyRules(pdraft);return;}
     const pf=formById(pdraft._parent?.formId),x=pf?.fields.find(y=>y.id===el.dataset.fid);if(!x)return;
     pdraft._parent.values[x.id]=x.type==='checkbox'?el.value==='1':x.type==='multiselect'?(el.value?[el.value]:[]):NUMERIC.has(x.type)?(el.value===''?null:Number(el.value)):el.value;
     applyRules(pdraft);
@@ -1833,6 +1965,14 @@ document.addEventListener('click',async e=>{
       c.display=el.dataset.v;setFdirty();renderMain();break;}
     case 'set-color':fdraft.color=+el.dataset.i;setFdirty();renderMain();break;
     case 'save-form':ui.ruleApply=null;saveForm();break;
+    case 'wf-move':wfMove(el.dataset.id);break;
+    case 'wf-start':{const rec=recById(view.recordId),form=rec&&formById(rec.formId);if(rec&&form){if(rdraft?.dirty){await saveRecord();if(rdraft?.dirty)return;}await doWfMove(recById(rec.id)||rec,form,firstStage(form),'Started','');}break;}
+    case 'wf-cancel':if(ui.wfAsk&&!ui.wfAsk.busy){ui.wfAsk=null;renderMain();}break;
+    case 'wf-scrim':if(e.target===el&&ui.wfAsk&&!ui.wfAsk.busy){ui.wfAsk=null;renderMain();}break;
+    case 'wf-go':{const a=ui.wfAsk;if(!a||a.busy)return;if(a.need&&!String(a.comment||'').trim()){toast('Say why, so they know what to change.');document.querySelector('[data-wf-comment]')?.focus();return;}
+      const rec=recById(a.recId),form=rec&&formById(rec.formId),t=form&&stageById(form,a.to);if(!t)return;a.busy=true;renderMain();await doWfMove(rec,form,t,a.label,a.comment);ui.wfAsk=null;renderMain();break;}
+    case 'wf-who':ui.wfWho=el.dataset.v;renderMain();break;
+    case 'nav-mywork':go({name:'mywork'});break;
     case 'cs-no':if(ui.cascade&&!ui.cascade.busy){ui.cascade=null;renderMain();}break;
     case 'cs-scrim':if(e.target===el&&ui.cascade&&!ui.cascade.busy){ui.cascade=null;renderMain();}break;
     case 'cs-go':runCascade();break;
@@ -1852,6 +1992,7 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('input',e=>{
   if(e.target.dataset?.mail&&ui.mail&&e.target.type!=='checkbox'){ui.mail[e.target.dataset.mail]=e.target.value;return;}
+  if(e.target.dataset?.wfComment&&ui.wfAsk){ui.wfAsk.comment=e.target.value;return;}
   if(e.target.dataset?.anval){if(ui.anEdit)ui.anEdit.value=e.target.value;return;}
   const t=e.target;
   if(t.dataset.dzq!==undefined){ui.dzq=t.value;applyDzq();return;}
@@ -1874,6 +2015,7 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('change',async e=>{
   if(ui.mail&&e.target.dataset?.mailto){const v=e.target.dataset.mailto;if(e.target.checked)ui.mail.to.add(v);else ui.mail.to.delete(v);return;}
+  if(e.target.dataset?.wfJump){const v=e.target.value;e.target.value='';if(v)wfMove(null,v);return;}
   if(ui.mail&&e.target.dataset?.mail==='copyMe'){ui.mail.copyMe=e.target.checked;return;}
   if(ui.mail&&e.target.dataset?.mail==='attach'){ui.mail.attach=e.target.checked;renderMain();return;}
   {const t0=e.target,fid=rdraft?.formId;
@@ -2110,6 +2252,7 @@ export function startApp(){
   initLists({ruleImpact,applyRuleChange,fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,withFormulas,search:()=>ui.search});
   initAudit({fmt,formById,recById,recTitle:(r,f)=>recTitle(r,f),go,renderMain});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
+  initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
   initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});
   initRules({formById,recById,parentsOf,recordsOf,recTitle,setFdirty,renderMain,ui:()=>ui});
   initImports({ruleClears:(form,r)=>toClear(form,r.values,rulesOf(form,r,r.parentId?recById(r.parentId):null)),fmt,recTitle,formById,go,renderMain,computeFormulas:(form,rec)=>{const out={};(form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,rec);out[f.id]=r.e?null:r.v;});return out;}});

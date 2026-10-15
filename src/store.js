@@ -53,6 +53,8 @@ let baseUnsubs = [];
 let adminUnsubs = [];
 const recordSubs = new Map(); // formId -> { key, unsub }
 const recordsByForm = new Map(); // formId -> records[]
+// records waiting on this person in a workflow, which they might not otherwise see ("own" access)
+let assignedSub = null, assigned = [];
 const got = { forms: false, me: false };
 
 const fail = (where) => (err) => {
@@ -173,6 +175,8 @@ export function stopData() {
   recordSubs.forEach((s) => s.unsub());
   recordSubs.clear();
   recordsByForm.clear();
+  if (assignedSub) { assignedSub(); assignedSub = null; }
+  assigned = [];
   Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, imports: [], reportDefs: [], dashboards: [], dashReady: false });
   store.recordsLoading.clear();
 }
@@ -277,11 +281,18 @@ function syncRecordSubs() {
     );
     recordSubs.set(formId, { key: view, unsub });
   }
+  if (!assignedSub && store.forms.some((f) => f.workflow?.on)) {
+    assignedSub = onSnapshot(query(collection(db, 'records'), where('assignee', '==', uidNow)),
+      (s) => { assigned = s.docs.map((d) => withNums({ ...d.data(), id: d.id })); flattenRecords(); changed(); },
+      () => { assigned = []; }); // older security rules: only the usual access applies
+  }
   flattenRecords();
 }
 
 function flattenRecords() {
-  store.records = [...recordsByForm.values()].flat();
+  const all = [...recordsByForm.values()].flat();
+  if (assigned.length) { const have = new Set(all.map((r) => r.id)); assigned.forEach((r) => { if (!have.has(r.id)) all.push(r); }); }
+  store.records = all;
 }
 
 /** Update the display name other people see. */
@@ -538,6 +549,20 @@ export async function autoCounter(formId, fieldId) {
 export async function emailRecord(mail) {
   return (await httpsCallable(fns(), 'emailRecord')(mail)).data;
 }
+/* ---------- Workflows ---------- */
+/** Move a record to another stage: the record and its history entry together. */
+export async function moveStage(recordId, patch, entry) {
+  const me = store.user.uid, now = Date.now();
+  const b = writeBatch(db);
+  b.update(doc(db, 'records', recordId), plain({ ...patch, updatedAt: now, updatedBy: me }));
+  b.set(doc(collection(db, 'records', recordId, 'stages')), plain({ ...entry, at: now, by: me }));
+  await b.commit();
+}
+/** Live stage history of a record, newest first. */
+export function watchStages(recordId, onNext) {
+  return onSnapshot(collection(db, 'records', recordId, 'stages'), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.at || 0) - (a.at || 0))), () => onNext([]));
+}
+
 /* ---------- Automations (admins) ---------- */
 export async function saveAutomation(id, data) {
   const me = store.user.uid, now = Date.now();

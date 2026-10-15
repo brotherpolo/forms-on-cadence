@@ -60,6 +60,8 @@ src/
   store.js                 Firestore subscriptions and writes, Storage uploads, group/access writes
   access.js                Permission model (pure; mirrored by the rules)
   formulas.js              Formula parser and evaluator (no eval)
+  workflow.js              Workflow stages: what each shows, who works on it, checks (pure, unit-tested)
+  wfdesign.js              Form designer → Workflow tab
   route.js                 Web addresses for records, form lists and reports (pure)
   dash.js, dash.css        Reports and dashboards screens (charts reuse reports.css)
   dashlogic.js             Report types, filters, periods, sharing, moving old reports (pure, unit-tested)
@@ -114,7 +116,8 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | Collection | Document | Written by |
 |---|---|---|
 | `forms/{formId}` | `name, itemName, description, color, showInSidebar, order, titleField, fields[], children[]` | admins |
-| `records/{id}` | `formId, values{fieldId: value}, parentId, parentFormId, ownerId, createdBy, createdAt, updatedAt, updatedBy`; `nums{fieldId: number}` and `autoLog[]` from the server | per access (`nums`, `autoLog`: server only) |
+| `records/{id}` | `formId, values{fieldId: value}, parentId, parentFormId, ownerId, createdBy, createdAt, updatedAt, updatedBy`; `nums{fieldId: number}` and `autoLog[]` from the server; `stage, assignee, assigneeGroup, stageAt` with a workflow | per access; at a workflow stage only its assignee or admins (`nums`, `autoLog`: server only) |
+| `records/{id}/stages/{id}` | `at, by, from, fromName, to, toName, label, comment, assignee, assigneeGroup`: stage history | whoever moves it, as themselves; never changed |
 | `groups/{id}` | `name, description, access{formId or "*": {view, edit}}` | admins |
 | `users/{uid}` | `email, displayName, role, groups[], access{…}, createdAt` | self on first sign-in; admins after |
 | `profiles/{uid}` | `displayName` (readable by everyone signed in, for "Created by") | self |
@@ -262,6 +265,20 @@ A view only decides how the list looks. It never shows anyone records they could
 - **Server code from Formwright:** the functions use `fwkit.cjs`, a bundle of `src/server/`, `formulas.js`, `rules.js`, `pdfdoc.js`/`pdfdraw.js` and `emaillogic.js`, plus `functions/vendor/pdf-lib.min.js`. After changing those, run `node scripts/build-fwkit.mjs ../cadence/functions/fwkit.cjs` and deploy the functions.
 
 **Email PDF** also has an **Attach the PDF** switch (on by default); off sends just the message.
+
+## Workflows (stages)
+
+**Form designer → Workflow** turns on stages for a form, like Draft → Review → Approved (a starter set is filled in). Logic in `src/workflow.js` (pure, unit-tested); the tab is `src/wfdesign.js`.
+
+- **Each stage** has a name, who it **goes to** when a record arrives (the record's owner, a specific person, a security group, whoever moved it, or the same person as before), whether they get a **Cadence task** and/or an **email**, and its **buttons** (label → stage; "Ask why" makes the person write a comment, as on Send back). A stage with no buttons is the end.
+- **Fields at each stage:** Edit, **Required** (must be filled before moving on to a later stage; saving is still allowed), **View only**, or **Hidden** (its value is kept). Hiding a section heading hides everything under it; child sections, grids and Tasks can be hidden per stage too. Show/hide rules still apply on top.
+- **On the record:** a bar shows the stages, where it is, who it's waiting on and for how long, and that stage's buttons. While a record is at a stage, **only its assignee (or a member of its group) and administrators can change it**, enforced by the security rules; others see it read-only. Administrators can **Move to** any stage. New records start at the first stage when saved; records saved before the workflow was turned on (or made by an import or an automation) show **Start**.
+- **Stage history** (a collapsible section on the record): every move, who made it, which button, the comment, and who it went to. Stored in `records/{id}/stages/`.
+- **My work** (in the sidebar once any form has a workflow): records waiting on you or your groups, longest waiting first. Administrators can switch to **Everyone**.
+- **Stage in rules and automations:** "Stage" can be picked in show/hide rule conditions and automation conditions, and automations have a **moves to a workflow stage** trigger.
+- **Notices** (server, `automationOnWrite` in Cadence): when a record arrives at a stage, the previous stage's workflow tasks for it are ticked done, and the new assignee gets a task and/or email (a group: up to 10 members, each their own).
+- **Record fields:** `stage`, `assignee`, `assigneeGroup`, `stageAt`.
+- **Not covered:** grid rows inside a record follow the record's stage only through its sections being hidden; someone with "mine only" access sees records assigned to their group only if their normal access lets them see the record (records assigned to them personally always show).
 
 ## Show and hide rules
 

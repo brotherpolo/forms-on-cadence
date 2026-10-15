@@ -180,3 +180,19 @@ body.pd-on .pgrip{cursor:grabbing}
 .am-runs .err{color:var(--danger)}
 .am-rw{color:var(--muted)}
 @media (max-width:640px){.am-side{position:static}.am-v,.am-sel{flex:1 1 100%}}
+/* Workflows: designer tab (wfdesign.js) */
+.wf-design{display:flex;flex-direction:column;gap:12px}
+.wf-stages{display:flex;flex-direction:column;gap:10px}
+.wf-stage{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.wf-num{width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700;display:grid;place-items:center;font-size:13px;flex:none}
+.wf-name{width:auto;flex:1 1 200px;min-width:0;font-weight:600}
+.wf-mvs{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.wf-mv{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.wf-mv .in:first-child{width:auto;min-width:180px}
+.wf-fields{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.wf-ftbl{min-width:0}
+.wf-ftbl td,.wf-ftbl th{padding:4px 8px;white-space:nowrap}
+.wf-ftbl .wf-secrow td:first-child{font-weight:600}
+.wf-cell{min-height:32px;padding:0 6px;font-size:13px;width:auto}
+.wf-cell.m-req{color:var(--accent);font-weight:600}
+.wf-cell.m-hide,.wf-cell.off{color:var(--muted)}

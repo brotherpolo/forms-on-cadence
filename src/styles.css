@@ -484,3 +484,21 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .fld.locked .lockw{opacity:.55;pointer-events:none}
 .fld.locked .rule-note{margin-top:4px;font-style:italic}
 .gcalc.rule-na{color:var(--muted);opacity:.7}
+/* Workflows: the stage bar, history and My work (app.js) */
+.wf-bar{padding:12px 14px;display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.wf-steps{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:4px}
+.wf-steps li{font-size:13px;padding:4px 12px;border-radius:999px;background:var(--sunk);color:var(--muted)}
+.wf-steps li.done{background:var(--accent-soft);color:var(--accent)}
+.wf-steps li.on{background:var(--accent);color:#fff;font-weight:600}
+.wf-now{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;justify-content:space-between}
+.wf-line{margin:0;font-size:14px;min-width:0}
+.wf-ro,.wf-note{display:block;margin-top:2px;font-size:12px;color:var(--muted)}
+.wf-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.wf-jump .in{min-height:32px;padding:0 8px;font-size:13px;width:auto}
+.wf-badge{background:var(--accent);font-size:14px}
+.wf-hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.wf-hist li{border-left:3px solid var(--accent-soft);padding-left:10px;font-size:14px}
+.wf-h2{color:var(--muted);font-size:12px;margin-top:2px}
+.wf-c{margin:6px 0 0;padding:6px 10px;background:var(--sunk);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}
+.wf-tbl tbody tr{cursor:pointer}
+.fld.viewonly .lockw{opacity:.8}
