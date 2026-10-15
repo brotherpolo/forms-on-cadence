@@ -84,6 +84,8 @@ src/
   pdfdraw.js               Export PDF: draws the document with pdf-lib (unit-tested)
   pdfexport.js             Export PDF: fetches photos, loads pdf-lib on first use, downloads the file
   exportset.js             Administration → PDF exports: company name and logo
+  duplogic.js              Duplicate: which values a copy keeps (pure, unit-tested)
+  photo.js                 Smaller photos: turns photos upright and scales them down before upload
   app.js                   Navigation, record screens, form designer
   admin.js                 Security groups and users screens (admins only)
   auth.js                  Sign-in screen: Google, email and password, password reset
@@ -199,7 +201,7 @@ In the Form designer, **Search forms by name** above the list narrows it as you 
 
 In the form editor, **Search field types** at the top of the field types filters as you type (other words work too: "money" finds Currency, "lookup" finds Link to record); **Enter** adds the first match.
 
-On a record, **Delete**, **Back** and **Save** sit in a bar at the top that stays in view as you scroll; who created and last edited the record is under its title.
+On a record, **Delete**, **History**, **Duplicate**, **Email PDF**, **Export PDF**, **Back** and **Save** (those you can use) sit in a bar at the top that stays in view as you scroll; who created and last edited the record is under its title.
 
 On a record, **Section Heading** fields, sub-form grids, child sections and **Tasks** fold and open from their headings (a folded one shows a short summary, such as a grid's totals); **Collapse all / Expand all** is at the top. Everything starts open. What you fold is remembered for each form (folding Notes on one invoice folds it on every invoice), for your account on that device. A section with a problem to fix opens by itself when you save.
 
@@ -234,6 +236,19 @@ Each form's list can be set up from the list itself.
 - **Phones:** the list shows cards with tick boxes, and menus open as a sheet at the bottom.
 
 A view only decides how the list looks. It never shows anyone records they couldn't already see.
+
+## Duplicating a record
+
+**Duplicate** in a saved record's top bar (for anyone who can create records on that form) opens an unsaved copy, with its title selected so you can type the new one straight away.
+
+- **Copied:** every typed value, choices, dates, links to records, photos and files (the copy points at the same stored photo or file; nothing is uploaded again), and the same parent. A text title gets " (copy)" added.
+- **Not copied:** auto numbers (the copy gets its own when saved), signatures (they belong to one record), calculations (worked out again), child records and Tasks.
+- **Sub-form grids:** their rows are copied as new rows of the copy.
+- Nothing is saved until you click **Save**; Back without saving leaves no trace. A line under the title says what it's a copy of.
+
+## Smaller photos
+
+A **Photo** field turns the picture upright and scales it to at most 2,000 pixels on its longest side as a JPEG (quality 85%) before uploading. A 12-megapixel phone photo of about 4 MB becomes roughly 300–500 KB, so saving is quicker on mobile data, storage stays small and PDFs build faster, and it still prints sharply. The smaller copy has no location or camera details. Photos already small enough, GIFs, and pictures the browser can't read (some HEIC photos) are uploaded as they are. **File upload** fields always keep the original file exactly.
 
 ## Auto number fields
 

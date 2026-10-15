@@ -27,6 +27,8 @@ import * as admin from './admin.js';
 import { leave as exportLeave } from './exportset.js';
 import { initAudit } from './audit.js';
 import { fieldItem, fileName as pdfFileName } from './pdfdoc.js';
+import { copyValues, relinkRow } from './duplogic.js';
+import { shrinkPhoto } from './photo.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
 import { signOutUser } from './auth.js';
 import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
@@ -553,12 +555,13 @@ function viewRecord(form){
     <span class="grow" id="dirtynote" role="status">${rdraft.dirty?'Unsaved changes':ro?'Read only':''}</span>
     ${rec&&isAdmin(store.me)?`<button class="btn ghost" data-act="rec-history" title="This ${esc(itemName(form).toLowerCase())} in the audit trail">History</button>`:''}
     ${rec&&isAdmin(store.me)?`<button class="btn" data-act="email-pdf" title="Email this ${esc(itemName(form).toLowerCase())} as a PDF">Email PDF</button>`:''}
+    ${rec&&canCreate(store.me,form.id)?`<button class="btn ghost" data-act="rec-duplicate" title="Start a new ${esc(itemName(form).toLowerCase())} with this one’s details">Duplicate</button>`:''}
     ${rec?`<button class="btn" data-act="export-pdf" id="pdf-btn"${ui.pdfBusy?' disabled':''} title="Download this ${esc(itemName(form).toLowerCase())} as a PDF">${ui.pdfBusy?'Making PDF…':'Export PDF'}</button>`:''}
     <button class="btn ghost" data-act="back">${rdraft.dirty?'Discard':'Back'}</button>
     ${ro?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
   </div>
   <div class="crumbs">${crumbs}</div>
-  <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}</h1>${rec?`<p class="sub">${recordMeta(rec)}</p>`:''}${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
+  <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}</h1>${rec?`<p class="sub">${recordMeta(rec)}</p>`:''}${!rec&&rdraft.duplicateOf?`<p class="sub dupnote">A copy of <b>${esc(rdraft.duplicateTitle||'')}</b>${rdraft.dupRows?` with its ${rdraft.dupRows} row${rdraft.dupRows>1?'s':''}`:''}. Nothing is saved until you click Save${rdraft.dupKids?`; its ${esc(rdraft.dupKids)} aren’t copied`:''}.</p>`:''}${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
   ${parentPick}
   <div class="panel">
     <fieldset class="fset"${ro?' disabled':''}>${formFieldsHTML(form,rdraft,'record')}</fieldset>
@@ -1066,6 +1069,7 @@ async function onFile(t){
     let val;
     if(d===pdraft){val={name:file.name,size:file.size,type:file.type,url:URL.createObjectURL(file)};}
     else{
+      if(f.type==='image'){fb.querySelector('.pick')?.setAttribute('data-busy','Preparing photo…');file=await shrinkPhoto(file);}
       if(file.size>25*1024*1024){fb.classList.remove('pending');t.value='';toast(`That file is ${fsize(file.size)}. Files must be under 25 MB.`);return;}
       val=await uploadFile(file,form.id);
     }
@@ -1454,6 +1458,25 @@ document.addEventListener('click',async e=>{
     case 'nav-users':go({name:'users'});break;
     case 'nav-imports':go({name:'imports'});break;
     case 'nav-audit':go({name:'audit'});break;
+    case 'rec-duplicate':{
+      const rec=view.recordId?recById(view.recordId):null,form=rec?formById(rec.formId):null;
+      if(!rec||!form||!canCreate(store.me,form.id))return;
+      if(rdraft?.dirty){toast('Save or discard your changes first, then duplicate.');return;}
+      const parent=rec.parentId?recById(rec.parentId):null;
+      const d=newRecordDraft(form,parent);
+      d.values={...d.values,...copyValues(form,rec.values,{titleId:titleFieldOf(form)?.id})};
+      d.parentId=rec.parentId||null;d.parentFormId=rec.parentFormId||null;d.copied=0;
+      d.grids={};let nRows=0;
+      gridRels(form).forEach(({cf})=>{
+        const rows=canCreate(store.me,cf.id)?store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)):[];
+        nRows+=rows.length;
+        d.grids[cf.id]={rows:rows.map(r=>({id:uid('r'),values:relinkRow(cf,copyValues(cf,r.values,{suffix:''}),form.id,rec.id),ownerId:store.user.uid,isNew:true,dirty:true,errors:{}})),removed:[],detached:[],sort:null};
+      });
+      const kids=(form.children||[]).filter(c=>c.display!=='grid').map(c=>formById(c.formId)).filter(cf=>cf&&store.records.some(r=>r.parentId===rec.id&&r.formId===cf.id));
+      Object.assign(d,{dirty:true,duplicateOf:rec.id,duplicateTitle:recTitle(rec,form),dupRows:nRows,dupKids:kids.map(k=>k.name.toLowerCase()).join(' and ')});
+      goRec(d,{name:'record',formId:form.id,recordId:null});
+      setTimeout(()=>{const t=document.getElementById('in-record-'+(titleFieldOf(form)?.id||''));if(t){t.focus();try{t.select();}catch(e){}}},0);
+      break;}
     case 'rec-history':if(view.recordId)go({name:'audit',recordId:view.recordId});break;
     case 'nav-exports':if(view.name!=='exports')exportLeave();go({name:'exports'});break;
     case 'theme':{const t=applyTheme(document,nextTheme(readTheme(localStorage)),localStorage);renderSide();toast(themeLabel(t)==='Auto'?'Theme: Auto (follows this device)':'Theme: '+themeLabel(t)+' on this device');$('[data-act="theme"]')?.focus({preventScroll:true});break;}
