@@ -384,3 +384,19 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .urm-reasn{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px}
 .urm-reasn .prop{flex:1 1 220px;margin:0}
 .urm-gone .uhead b{color:var(--muted)}
+
+/* Administration → PDF exports */
+.exset{max-width:720px;padding:20px 22px}
+.exset .actions{display:flex;align-items:center;gap:10px}
+.exset .actions .grow{flex:1}
+.ex-logo{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}
+.ex-logo img{max-height:56px;max-width:220px;object-fit:contain;padding:6px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.ex-prev{margin-top:8px;padding:22px 24px;border:1px solid var(--line);border-radius:10px;background:#fff;color:#1a1c24;box-shadow:0 4px 14px rgba(10,12,20,.08)}
+.ex-lh{display:flex;align-items:center;gap:14px;min-height:30px;padding-bottom:12px;border-bottom:1px solid #d6d8de}
+.ex-lh img{max-height:44px;max-width:150px;object-fit:contain}
+.ex-lh b{font-size:16px}
+.ex-lh .note{color:#6b7080}
+.ex-ttl{padding-top:14px}
+.ex-ttl small{display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:#3346c8}
+.ex-ttl b{font-size:19px}
+@media (max-width:520px){.recbar #pdf-btn{padding-inline:10px}}

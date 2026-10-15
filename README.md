@@ -76,6 +76,11 @@ src/
   imports.js, imports.css  Import screens: templates menu, choose file, match columns, check rows, history and undo
   importlogic.js           Templates, column matching, checking rows, undo plans (pure, unit-tested)
   xlsx.js                  Reads and writes .xlsx and .csv with no extra packages (unit-tested)
+  pdfdoc.js                Export PDF: field layout, text wrapping, table columns, file names (pure, unit-tested)
+  pdfdraw.js               Export PDF: draws the document with pdf-lib (unit-tested)
+  pdfexport.js             Export PDF: fetches photos, loads pdf-lib on first use, downloads the file
+  exportset.js             Administration → PDF exports: company name and logo
+  vendor/pdf-lib.min.js    pdf-lib 1.17.1 (MIT), bundled unchanged; loaded only when someone exports
   app.js                   Navigation, record screens, form designer
   admin.js                 Security groups and users screens (admins only)
   auth.js                  Sign-in screen: Google, email and password, password reset
@@ -102,6 +107,7 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | `profiles/{uid}` | `displayName` (readable by everyone signed in, for "Created by") | self |
 | `listViews/{id}` | `formId, name, ownerId, shared, cols[], sort{key, dir}, filters{fieldId: [options]}, density, createdAt, updatedAt` | owner (private); admins (shared, and `dflt-<formId>`) |
 | `imports/{id}` | `formId, formName, fileName, ownerId, createdAt, stamp, status, added[], updated[], counts{}, finishedAt, undoneAt, undoneBy, undo{}` | admins |
+| `settings/exports` | `companyName, logo` (PNG or JPEG data URL, under 600 KB)`, updatedAt, updatedBy`: the top of exported PDFs | admins (everyone let in reads it) |
 | `imports/{id}/before/{recordId}` | `values, parentId, parentFormId, updatedAt, updatedBy`: a record as it was before the import changed it | admins |
 
 Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Signatures are stored inline as small PNG data URLs.
@@ -223,6 +229,22 @@ Each form's list can be set up from the list itself.
 
 A view only decides how the list looks. It never shows anyone records they couldn't already see.
 
+## Export PDF
+
+**Export PDF** in a saved record's top bar downloads it as a tidy document, for example `Site visits - Smith house.pdf`. Anyone who can see the record can export it.
+
+- **Top:** the company name and logo from **Administration → PDF exports** (if set), then the form's name, the record's title, who created it and when, the last update, the owner, and its parent.
+- **Fields** in the form's order and layout: half-width fields side by side, section headings as headings (with their help text). Values print as the app shows them: CAD currency, written-out dates, Yes/No, ratings as stars, colours as a swatch, linked records by name, calculation results. Empty fields print empty. Long text prints in full and runs onto the next page if it needs to.
+- **Photos and signatures** print as pictures (photos are turned upright and scaled down). Other files are listed by name and size. A photo that can't be read prints as its name, and the message after the download says so.
+- **Grids, child records and Tasks** follow as tables, in the form's section order: grids with their columns and totals, child records with their title and list columns, and the Cadence tasks you can see. Long tables continue on the next page with their headings repeated.
+- Every page has the export date, who exported it and "Page 1 of 3". Pages are US Letter.
+- Unsaved changes: it asks you to save first, so the PDF matches what's saved.
+- The standard PDF fonts are used, which cover English and French. Other characters (emoji, symbols, other scripts) print as `?`.
+
+**Administration → PDF exports** (admins) sets the company name and logo. The logo is trimmed of empty space, resized and saved in `settings/exports` (PNG keeps a transparent background). The rule for it is in the Cadence folder.
+
+**Photos need one Storage setting (CORS)** so the browser can read them into a PDF. Without it, PDFs list photos by name. See "Let PDFs include photos" under Setup.
+
 ## Importing records (admins)
 
 Admins see **Import and templates** at the top of each form's list.
@@ -325,6 +347,20 @@ Removing runs on the server (the `removeAccount` function in the Cadence folder)
 
 ---
 
+### 6. Let PDFs include photos (once)
+
+Photos live in Cloud Storage, which by default doesn't let web pages read files' contents. In Cloud Shell (project `tasks-2ae9d`):
+
+```sh
+gcloud storage buckets list --format="value(name)"          # shows the bucket, e.g. tasks-2ae9d.firebasestorage.app
+cat > cors.json <<'JSON'
+[{"origin": ["https://YOUR-FORMWRIGHT-ADDRESS"], "method": ["GET"], "maxAgeSeconds": 3600}]
+JSON
+gcloud storage buckets update gs://BUCKET-NAME --cors-file=cors.json
+```
+
+Use Formwright's address exactly as the browser shows it, with no slash at the end (add both the `.web.app` and `.firebaseapp.com` addresses if people use both). This only lets those pages read files they already have a link to; the Storage rules still decide who gets a link.
+
 ## Local development with emulators
 
 The emulators and rules are configured in the Cadence folder. Start them there, under Formwright's demo project name:
@@ -371,7 +407,7 @@ The security rules tests, including Formwright's, are in the Cadence folder unde
 |---|---|
 | `FIREBASE_PROJECT_ID` | `tasks-2ae9d` |
 | `FIREBASE_HOSTING_SITE` | Formwright's Hosting site name, for example `cadence-forms` |
-| `VITE_CADENCE_URL` | Cadence's address, for example `https://you.github.io/cadence/` |
+| `VITE_CADENCE_URL` | Cadence's address, for example `https://cadence-tasks.web.app/` |
 | `VITE_FIREBASE_AUTH_DOMAIN` | Cadence's `authDomain` |
 | `VITE_FIREBASE_STORAGE_BUCKET` | Cadence's `storageBucket` |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Cadence's `messagingSenderId` |

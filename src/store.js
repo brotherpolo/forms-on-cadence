@@ -16,7 +16,7 @@ import {
   deleteDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, getBlob } from 'firebase/storage';
 import { isAdmin, formLevel, effectiveAccess, withInherited } from './access.js';
 import { clone } from './util.js';
 
@@ -276,6 +276,37 @@ export async function saveProfileName(userId, displayName) {
 /** The dashboard that opens when you start Formwright ('' for none). */
 export async function setHomeDashboard(id) {
   await setDoc(doc(db, 'profiles', store.user.uid), { homeDashboard: String(id || '').slice(0, 100) }, { merge: true });
+}
+
+/* ---------- PDF exports: company name and logo (settings/exports) ---------- */
+
+let exportSettings = null; // read once per visit; an admin's save refreshes it
+/** { companyName, logo } for PDF exports ({} when none are set or they can't be read). */
+export async function getExportSettings(fresh = false) {
+  if (exportSettings && !fresh) return exportSettings;
+  try {
+    const s = await getDoc(doc(db, 'settings', 'exports'));
+    exportSettings = s.exists() ? s.data() : {};
+  } catch (e) {
+    console.warn('[formwright] export settings', e);
+    return {};
+  }
+  return exportSettings;
+}
+export async function saveExportSettings({ companyName, logo }) {
+  const data = { companyName: String(companyName || '').trim().slice(0, 120), logo: logo || null, updatedAt: Date.now(), updatedBy: store.user.uid };
+  await setDoc(doc(db, 'settings', 'exports'), data);
+  exportSettings = data;
+}
+
+/** An uploaded file's contents (for photos in a PDF), through Storage so its rules apply. */
+export async function fileBlob(v) {
+  if (v.path) {
+    try { return await getBlob(ref(storage, v.path)); } catch (e) { if (!v.url) throw e; }
+  }
+  const r = await fetch(v.url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.blob();
 }
 
 /* ---------- Cadence tasks linked to a record ---------- */

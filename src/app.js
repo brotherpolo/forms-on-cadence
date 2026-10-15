@@ -20,11 +20,13 @@ import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLab
 import { FX } from './formulas.js';
 import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './access.js';
 import * as admin from './admin.js';
+import { leave as exportLeave } from './exportset.js';
+import { fieldItem } from './pdfdoc.js';
 import { signOutUser } from './auth.js';
 import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
 import examples from './examples.json';
 
-const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'import', 'imports']);
+const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'import', 'imports', 'exports']);
 
 // other words people search field types by
 const TYPE_WORDS={text:'short single line string name title',textarea:'long paragraph notes description multi line memo comments',email:'mail address',phone:'telephone mobile cell number',url:'website link web address',location:'address map gps place',number:'integer whole count quantity',decimal:'float number fraction',currency:'money price cost dollar amount',percent:'percentage rate',rating:'stars score',range:'slider scale',formula:'calculation calculated computed formula sum total',date:'day calendar',time:'clock hour',datetime:'timestamp date time when',checkbox:'yes no toggle boolean switch tick check',select:'dropdown choice pick list menu options',radio:'single choice option buttons one of',multiselect:'multiple choice checkboxes tags many',file:'upload attachment document pdf',image:'photo picture camera',signature:'sign autograph',color:'colour',relation:'link to record lookup reference relationship connect',heading:'section heading title divider group fold'};
@@ -369,7 +371,8 @@ function renderSide(){
     <button class="nav${view.name==='designer'||view.name==='formEdit'?' on':''}" data-act="nav-designer"><span class="glyph navg">⚙</span><span class="t">Form designer</span><span class="n">${store.forms.length}</span></button>
     <button class="nav${view.name==='groups'||view.name==='groupEdit'?' on':''}" data-act="nav-groups"><span class="glyph navg">◫</span><span class="t">Security groups</span><span class="n">${store.groups.length}</span></button>
     <button class="nav${view.name==='users'?' on':''}" data-act="nav-users"><span class="glyph navg">☺</span><span class="t">Users</span><span class="n">${store.users.length}</span></button>
-    <button class="nav${view.name==='imports'?' on':''}" data-act="nav-imports"><span class="glyph navg">⇪</span><span class="t">Import history</span><span class="n">${store.imports.length}</span></button>`:''}
+    <button class="nav${view.name==='imports'?' on':''}" data-act="nav-imports"><span class="glyph navg">⇪</span><span class="t">Import history</span><span class="n">${store.imports.length}</span></button>
+    <button class="nav${view.name==='exports'?' on':''}" data-act="nav-exports"><span class="glyph navg">⇩</span><span class="t">PDF exports</span></button>`:''}
     <div class="side-foot"><div class="who"><b>${esc(name)}</b><span>${adm?'Administrator':'Member'}</span></div>${themeButton()}<button class="btn sm ghost" data-act="sign-out">Sign out</button></div>`;
   if(fsFocus!=null){const q=$('#fs-q');if(q){q.focus({preventScroll:true});try{q.setSelectionRange(fsFocus,fsFocus)}catch(e){}paintFormResults();}}
 }
@@ -535,6 +538,7 @@ function viewRecord(form){
   <div class="recbar" role="toolbar" aria-label="${esc(itemName(form))} actions">
     ${rec&&!ro?`<button class="btn danger${ui.confirm===delKey?' armed':''}" data-act="del-record">${ui.confirm===delKey?(kids?`Tap again to delete (${kids} child record${kids>1?'s':''} stay)`:'Tap again to delete'):'Delete'}</button>`:''}
     <span class="grow" id="dirtynote" role="status">${rdraft.dirty?'Unsaved changes':ro?'Read only':''}</span>
+    ${rec?`<button class="btn" data-act="export-pdf" id="pdf-btn"${ui.pdfBusy?' disabled':''} title="Download this ${esc(itemName(form).toLowerCase())} as a PDF">${ui.pdfBusy?'Making PDF…':'Export PDF'}</button>`:''}
     <button class="btn ghost" data-act="back">${rdraft.dirty?'Discard':'Back'}</button>
     ${ro?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
   </div>
@@ -556,6 +560,57 @@ function recordMeta(rec){
   let s=`Created by ${esc(by)}`;
   if(rec.updatedAt)s+=` · edited ${esc(when(rec.updatedAt))}`+(rec.updatedBy&&rec.updatedBy!==rec.ownerId?` by ${esc(personName(rec.updatedBy))}`:'');
   return s;
+}
+
+/* ---------- Export PDF ----------
+   The record as a document: its fields in order, then its grids, child records and tasks in the
+   form's section order. Only what this person can see is included (store.records already is). */
+const realName=id=>store.profiles[id]?.displayName||(id===store.user?.uid?(store.profiles[id]?.displayName||store.user?.displayName||'you'):'someone');
+const longDate=t=>new Date(t).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+function pdfText(f,v){if(f.type==='rating')return isEmpty(v)?'':`${v} of ${f.max||5}`;if(f.type==='textarea')return isEmpty(v)?'':String(v);try{return fmt(f,v)}catch(e){return String(v??'')}}
+const pdfNum=f=>(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating';
+function pdfModel(form,rec){
+  const items=(form.fields||[]).map(f=>{const v=f.type==='heading'?null:valOf(f,rec,form);return fieldItem(f,v,f.type==='heading'?'':pdfText(f,v));});
+  const sections=[];
+  const grels=gridRels(form),gmap=Object.fromEntries(grels.map(g=>[g.cf.id,g]));
+  const kids=Object.fromEntries((form.children||[]).filter(c=>c.display!=='grid').map(c=>formById(c.formId)).filter(cf=>cf&&canViewForm(store.me,cf.id)).map(cf=>[cf.id,cf]));
+  sectionOrder(form).forEach(k=>{
+    if(gmap[k]){
+      const {rel,cf}=gmap[k],cols=gridCols(rel,cf),g=rdraft.grids?.[cf.id];
+      const rows=g?sortRowsGrid(g,cf,rdraft):[];
+      const totals=cols.map(f=>gridTotal(cf,f,rdraft,rows));
+      const total=rows.length>1&&totals.some(t=>t!=null)?cols.map((f,i)=>totals[i]==null?(i===0?'Total':''):pdfText(f,totals[i])):null;
+      sections.push({title:cf.name,count:rows.length,cols:cols.map(f=>({label:f.label,num:pdfNum(f)})),rows:rows.map(r=>cols.map(f=>pdfText(f,valOf(f,rowRec(r,cf,rdraft),cf)))),total,empty:`No ${cf.name.toLowerCase()}.`});
+    }else if(kids[k]){
+      const cf=kids[k],tf=titleFieldOf(cf);
+      const cols=(cf.fields||[]).filter(f=>f.inList&&!NOCOL.has(f.type)&&!['file','image'].includes(f.type)&&f.id!==tf?.id).slice(0,5);
+      const rs=store.records.filter(r=>r.parentId===rec.id&&r.formId===cf.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+      sections.push({title:cf.name,count:rs.length,cols:[{label:tf?.label||itemName(cf)},...cols.map(f=>({label:f.label,num:pdfNum(f)}))],rows:rs.map(r=>[recTitle(r,cf),...cols.map(f=>pdfText(f,valOf(f,r,cf)))]),total:null,empty:`No ${cf.name.toLowerCase()} for this ${itemName(form).toLowerCase()}.`});
+    }else if(k===TASKS_KEY&&tw.recordId===rec.id&&tw.status==='ready'){
+      const ts=sortTasks(tw.tasks);
+      sections.push({title:'Tasks',count:ts.length,cols:[{label:'Task'},{label:'Due'},{label:'Owner'},{label:'Assigned to'},{label:'Status'}],
+        rows:ts.map(t=>[t.title||'Untitled task',t.due?longDate(t.due+'T00:00'):'',t.ownerName||'',t.assigneeName||'',t.done?'Done':'Open']),total:null,empty:`No tasks for this ${itemName(form).toLowerCase()}.`});
+    }
+  });
+  const parent=rec.parentId?recById(rec.parentId):null,pform=parent?formById(parent.formId):null;
+  const meta=[rec.createdAt?`Created ${longDate(rec.createdAt)} by ${realName(rec.createdBy||rec.ownerId)}`:'',
+    rec.updatedAt&&rec.updatedAt!==rec.createdAt?`Last updated ${longDate(rec.updatedAt)}${rec.updatedBy?' by '+realName(rec.updatedBy):''}`:'',
+    `Owner ${realName(rec.ownerId)}`];
+  const now=new Date();
+  return {accent:colorOf(form),formName:form.name,title:recTitle(rec,form),meta,parent:parent&&pform?`${pform.name}: ${recTitle(parent,pform)}`:null,items,sections,
+    stamp:`Exported ${now.toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} by ${realName(store.user?.uid)}`};
+}
+async function exportPdf(){
+  const rec=view.recordId?recById(view.recordId):null,form=rec?formById(rec.formId):null;
+  if(!rec||!form||ui.pdfBusy)return;
+  if(rdraft?.dirty){toast('Save your changes first, so the PDF matches what’s saved.');return;}
+  ui.pdfBusy=true;const paint=()=>{const b=$('#pdf-btn');if(b){b.disabled=!!ui.pdfBusy;b.textContent=ui.pdfBusy?'Making PDF…':'Export PDF';}};paint();
+  try{
+    const {exportRecordPdf}=await import('./pdfexport.js');
+    const r=await exportRecordPdf(pdfModel(form,rec));
+    toast(r.missing?`Downloaded ${r.name}. ${r.missing} picture${r.missing>1?'s':''} couldn’t be included.`:`Downloaded ${r.name}`);
+  }catch(e){console.error('[formwright] PDF',e);toast(/Failed to fetch|dynamically imported|Importing a module/i.test(String(e?.message))?'Couldn’t load the PDF maker. Check your connection and try again.':'Couldn’t make the PDF. Try again.');}
+  finally{ui.pdfBusy=false;paint();}
 }
 
 /* ---------- Sub-form grids ----------
@@ -1168,6 +1223,7 @@ document.addEventListener('click',async e=>{
     case 'nav-groups':go({name:'groups'});break;
     case 'nav-users':go({name:'users'});break;
     case 'nav-imports':go({name:'imports'});break;
+    case 'nav-exports':if(view.name!=='exports')exportLeave();go({name:'exports'});break;
     case 'theme':{const t=applyTheme(document,nextTheme(readTheme(localStorage)),localStorage);renderSide();toast(themeLabel(t)==='Auto'?'Theme: Auto (follows this device)':'Theme: '+themeLabel(t)+' on this device');$('[data-act="theme"]')?.focus({preventScroll:true});break;}
     case 'sign-out':if(!guard())return;await signOutUser();break;
     case 'back':back();break;
@@ -1224,6 +1280,7 @@ document.addEventListener('click',async e=>{
     case 'task-done':toggleTask(id);break;
     case 'task-open':if(cadenceUrl)window.open(cadenceLink(cadenceUrl,{task:id}),'cadence');break;
     case 'add-task':if(cadenceUrl&&view.recordId)window.open(cadenceLink(cadenceUrl,{addTaskFor:view.recordId}),'cadence');break;
+    case 'export-pdf':exportPdf();break;
     case 'del-record':{const k='rec-'+view.recordId;if(ui.confirm!==k){ui.confirm=k;renderMain();return;}ui.confirm=null;const rid=view.recordId;rdraft.dirty=false;try{await store.del('records',rid);toast('Deleted');}catch(err){toast('Delete failed. Try again.');}break;}
     case 'rate':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);const n=+el.dataset.n;d.values[f.id]=d.values[f.id]===n?0:n;markDirty(d);repaint(d,f);break;}
     case 'file-clear':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);d.values[f.id]=null;markDirty(d);repaint(d,f);break;}
