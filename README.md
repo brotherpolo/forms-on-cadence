@@ -62,6 +62,7 @@ src/
   formulas.js              Formula parser and evaluator (no eval)
   formtext.js              Fields as text, change summaries, version files (pure, unit-tested)
   formver.js               Fields → Text view, History tab, drafts, Make active
+  homelogic.js             Dashboard shortcut tiles and which dashboard Home shows (pure, unit-tested)
   workflow.js              Workflow stages: what each shows, who works on it, checks (pure, unit-tested)
   wfdesign.js              Form designer → Workflow tab
   route.js                 Web addresses for records, form lists and reports (pure)
@@ -121,6 +122,7 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | `records/{id}` | `formId, values{fieldId: value}, parentId, parentFormId, ownerId, createdBy, createdAt, updatedAt, updatedBy`; `nums{fieldId: number}` and `autoLog[]` from the server; `stage, assignee, assigneeGroup, stageAt` with a workflow | per access; at a workflow stage only its assignee or admins (`nums`, `autoLog`: server only) |
 | `records/{id}/stages/{id}` | `at, by, from, fromName, to, toName, label, comment, assignee, assigneeGroup`: stage history | whoever moves it, as themselves; never changed |
 | `forms/{id}/versions/{id}` | `n, at, by, kind (saved, draft, loaded, activated, baseline), note, from, fromN, summary[], form{…}`: version history; `forms/{id}.activeVersion` names the live one | admins (never changed or deleted) |
+| `settings/home` | `dashboardId, updatedAt, updatedBy`: the dashboard Home shows for anyone without their own | admins (everyone let in reads it) |
 | `groups/{id}` | `name, description, access{formId or "*": {view, edit}}` | admins |
 | `users/{uid}` | `email, displayName, role, groups[], access{…}, createdAt` | self on first sign-in; admins after |
 | `profiles/{uid}` | `displayName` (readable by everyone signed in, for "Created by") | self |
@@ -171,6 +173,14 @@ Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Si
 **Old reports:** the first time you open the app after this update, each report canvas you made becomes a dashboard of the same name, and each of its widgets becomes a saved report. A shared report made by someone else is converted the next time its owner opens Formwright.
 
 Stored in `reportDefs/{id}` (`name, ownerId, shared, groups, def`) and `dashboards/{id}` (`name, ownerId, shared, groups, tiles, filters`). Home is `homeDashboard` on `profiles/{uid}`. The rules are in the Cadence folder.
+
+
+### Home and shortcuts
+
+- **Home** (top of the sidebar) shows your home dashboard: the one you chose with **Set as my home**, or else the one an admin made **Everyone’s default home** (`settings/home`, admins only; the dashboard must be shared). With neither, Home says how to choose one. Formwright opens on Home.
+- **Shortcut tiles** (Edit dashboard → **+ Shortcut**) open part of Formwright: a form's list (optionally with a saved view, chosen on the tile while editing; a deleted view falls back to the plain list), a new record, Home, My work, Dashboards, Reports, or an administration screen. Each shows the form's badge or the sidebar's symbol, its name and a live count. They start a quarter wide and two cells tall, and resize by the corner like any tile; four cells or taller adds a line saying where it goes. Stored on the tile as `link: { to: 'list'|'new'|'page', form, view, page }` (`src/homelogic.js`, unit-tested).
+- **Who sees them:** shortcuts to administration are left out for non-admins, and shortcuts to forms someone can't see (or can't add to) are left out for them; the remaining tiles close up. Admin shortcuts are marked "Admins only" while editing.
+- **KPI tiles** keep the title and count at the top; the number and what it measures sit centred in the space below and grow with the tile. "Number of …" uses the plural ("Number of invoices").
 
 ## Sub-forms (grids)
 

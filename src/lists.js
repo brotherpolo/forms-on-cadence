@@ -60,7 +60,8 @@ function sync(c) {
   const { form, views } = c;
   if (LV.formId !== form.id) {
     Object.assign(LV, { formId: form.id, pop: null, sel: new Set(), naming: null, confirm: false, confirmView: false, awaitId: null });
-    const want = remembered(form.id);
+    const want = LV.force && LV.force.formId === form.id ? LV.force.viewId : remembered(form.id);
+    LV.force = null;
     const v = views.find((x) => x.id === want) || views[0];
     LV.viewId = v.id; LV.cfg = structuredClone(v.cfg); LV.base = structuredClone(v.cfg);
     // Saved views may still be on their way: switch to the remembered one when it arrives.
@@ -531,6 +532,13 @@ function undoBar(label) {
 window.addEventListener('pagehide', () => { if (pending) { clearTimeout(pending.timer); pending = null; } });
 
 /** Forget per-form state on sign-out. */
+/** Open a form's list with a saved view (a dashboard shortcut): remembered as the one to show next. */
+export function useView(formId, viewId) {
+  remember(formId, viewId);
+  LV.force = { formId, viewId };
+  if (LV.formId === formId) LV.formId = null; // pick it up on the next draw
+}
+
 export function resetLists() {
   if (pending) { clearTimeout(pending.timer); pending = null; undoBar(null); }
   Object.assign(LV, { formId: null, viewId: null, cfg: null, base: null, pop: null, sel: new Set(), naming: null, confirm: false, confirmView: false, awaitId: null, busy: false });

@@ -7,9 +7,10 @@
 // allowed to see (store.records already holds only those).
 import './reports.css';
 import './dash.css';
-import { store, saveReportDef, deleteReportDef, saveDashboard, deleteDashboard, setHomeDashboard, writeMigration } from './store.js';
-import { canViewForm, isAdmin } from './access.js';
-import { esc, uid, clone, toast, badge } from './ui.js';
+import { store, saveReportDef, deleteReportDef, saveDashboard, deleteDashboard, setHomeDashboard, setDefaultHome, writeMigration } from './store.js';
+import { linkInfo, linkChoices, linkFromKey, linkKey, visibleTiles, homeDashboardId, LINK_SIZE } from './homelogic.js';
+import { canViewForm, canCreate, isAdmin } from './access.js';
+import { esc, uid, clone, toast, badge, colorOf } from './ui.js';
 import { REPORT_COLS, REPORT_DEFAULT, DASH_COLS, DASH_DEFAULT, readCols, saveCols, toggleCol, moveCol, searchRows, sortRows, nextSort } from './catalog.js';
 import {
   fieldOf, valueOf, textOf, kindOf, chainOf, measureOf, bucketsOf, niceStep, refLabel, autoTitle, titleFieldOf, parentsOf,
@@ -21,7 +22,7 @@ import {
   canvasTiles, gridTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_COLS, GRID, MIN_W, minH,
 } from './dashlogic.js';
 
-let H = { fmt: null, valOf: null, recTitle: null, go: null, openRecord: null, renderMain: null };
+let H = { fmt: null, valOf: null, recTitle: null, go: null, openRecord: null, renderMain: null, openLink: null, linkEnv: () => ({}) };
 export function initReports(helpers) { H = { ...H, ...helpers }; }
 
 const D = {
@@ -64,6 +65,8 @@ const dashById = (id) => store.dashboards.find((d) => d.id === id) || null;
 const canChange = (item) => !!item && (item.ownerId === me() || (admin() && item.shared));
 const nameOf = (u) => store.profiles[u]?.displayName || (u === me() ? 'you' : 'someone');
 const homeId = () => store.profiles[me()]?.homeDashboard || '';
+/** The dashboard Home shows for this person: their own home, else the default an admin chose. */
+export const effectiveHome = () => homeDashboardId(homeId(), store.homeDefault || '', (id) => { if (id === homeId() || !store.dashReady) return true; const d = dashById(id); return !!d && visibleTo(d, store.me, me()); }); // your own choice always; the default only if you can see it
 const refKey = (r) => (r ? r.form + '|' + r.id : '');
 const refOf = (k) => { const [form, id] = String(k || '').split('|'); return form && id ? { form, id } : null; };
 // Redraw after the current event finishes: a field losing focus while the page is being
@@ -127,7 +130,7 @@ function both(c, def, v) {
 function measureLabel(c, def) {
   const m = def.measure || { fn: 'count' };
   const form = c.formById(def.form);
-  if (m.fn === 'count' || !m.ref) return 'Number of ' + (form ? form.name.toLowerCase() : 'records');
+  if (m.fn === 'count' || !m.ref) return 'Number of ' + (form ? nounOf(form, 2) : 'records');
   const f = fieldOf(c, m.ref);
   return (m.fn === 'avg' ? 'Average ' : 'Total ') + (f ? f.label.toLowerCase() : 'value');
 }
@@ -534,7 +537,7 @@ function dashRow(x, home) {
   const reps = (x.tiles || []).filter((t) => t.report).map((t) => reportById(t.report)?.name).filter(Boolean);
   return { id: x.id, name: x.name || 'Dashboard', cells: {
     count: { text: String(reps.length), sort: reps.length },
-    home: { text: x.id === home ? 'Home' : '', sort: x.id === home ? 'Home' : '' },
+    home: { text: x.id === home ? 'Home' : x.id === store.homeDefault ? 'Everyone’s default' : '', sort: x.id === home ? 'Home' : x.id === store.homeDefault ? 'Default' : '' },
     sharing: { text: sharingText(x) },
     updated: dateCell(x.updatedAt),
     reports: { text: reps.join(', ') },
@@ -757,14 +760,14 @@ async function saveDraft() {
   repaint();
 }
 
-async function addTile(did, reportId, text) {
+async function addTile(did, reportId, text, link) {
   const editing = D.edit && D.did === did;
   const x = editing ? D.edit : dashById(did); if (!x) return;
   const tiles = editing ? canvasTiles(x.tiles || []) : gridTiles(x.tiles || [], x.filters);
   const r = reportById(reportId) || (D.draft && D.draft.id === reportId ? D.draft : null);
-  const size = tileSize(text ? 'text' : r?.def?.type);
+  const size = link ? LINK_SIZE : tileSize(text ? 'text' : r?.def?.type);
   const at = placeTile(tiles, size.w, size.h);
-  tiles.push(text ? { id: uid('t'), text: { title: 'Notes', body: '' }, ...size, ...at } : { id: uid('t'), report: reportId, ...size, ...at });
+  tiles.push(link ? { id: uid('t'), link, ...size, ...at } : text ? { id: uid('t'), text: { title: 'Notes', body: '' }, ...size, ...at } : { id: uid('t'), report: reportId, ...size, ...at });
   if (editing) { D.edit.tiles = tiles; D.edit.dirty = true; repaint(); return; }
   try { await saveDashboard(did, { ...dashData(x), tiles, updatedAt: Date.now() }); toast('Added to ' + x.name); }
   catch (e) { toast('Couldn’t change that dashboard.'); }
@@ -817,8 +820,12 @@ export function viewDashboard(id) {
   const may = canChange(src);
   const fv = filterState(x);
   const extra = extraFor(x, fv);
-  const placed = edit ? canvasTiles(x.tiles || []) : gridTiles(x.tiles || [], x.filters);
-  const home = homeId() === x.id;
+  let placed = edit ? canvasTiles(x.tiles || []) : gridTiles(x.tiles || [], x.filters);
+  if (!edit) { // shortcuts this person can't use (admin screens, forms they can't see) are left out, and the rest close up
+    const vis = visibleTiles(placed, H.linkEnv());
+    if (vis.length < placed.length) placed = resolveCanvas(vis, null, true);
+  }
+  const home = homeId() === x.id, isDefault = (store.homeDefault || '') === x.id;
   const floatUp = !!x.filters?.floatUp;
   const tiles = readingOrder(placed).map((t) => tileHTML(c, x, t, extra, edit)).join('');
   const cvRows = Math.max(1, canvasHeight(placed) + (edit ? 6 : 0));
@@ -841,16 +848,17 @@ export function viewDashboard(id) {
   return `<div id="dbx" class="db-dash rp${edit ? ' can-edit' : ''}">
   <div class="db-head">
     ${edit ? `<input id="db-name" class="db-name" value="${esc(x.name)}" aria-label="Dashboard name" data-dv="dname">` : `<h1 class="db-title">${esc(x.name)}</h1>`}
-    <button type="button" class="db-home${home ? ' on' : ''}" data-d="sethome" data-v="${home ? '' : esc(x.id)}" aria-pressed="${home}">${home ? 'Home' : 'Set as home'}</button>
+    <button type="button" class="db-home${home ? ' on' : ''}" data-d="sethome" data-v="${home ? '' : esc(x.id)}" aria-pressed="${home}">${home ? 'My home' : 'Set as my home'}</button>
+    ${admin() ? `<button type="button" class="db-home${isDefault ? ' on' : ''}" data-d="setdefhome" data-v="${isDefault ? '' : esc(x.id)}" aria-pressed="${isDefault}" title="What Home shows for anyone who hasn’t chosen their own">${isDefault ? 'Everyone’s default home' : 'Make everyone’s default home'}</button>` : isDefault ? '<span class="chip">Everyone’s default home</span>' : ''}
     ${x.shared ? `<span class="chip">Shared${(x.groups || []).length ? ' with ' + (x.groups || []).map((g) => esc(store.groups.find((y) => y.id === g)?.name || 'a group')).join(', ') : ''}</span>` : ''}
     <span class="grow"></span>
     ${edit ? `${D.confirm === 'deldash' ? `<button class="btn danger armed" data-d="deldash">Tap again to delete</button>` : `<button class="btn danger" data-d="deldash">Delete</button>`}
-      <button class="btn" data-d="addtext">+ Text block</button><button class="btn${D.picker ? ' on' : ''}" data-d="picker">+ Add report</button>
+      <button class="btn" data-d="addtext">+ Text block</button><button class="btn${D.picker === 'links' ? ' on' : ''}" data-d="linkpicker">+ Shortcut</button><button class="btn${D.picker === true ? ' on' : ''}" data-d="picker">+ Add report</button>
       <button class="btn ghost" data-d="canceledit">Cancel</button><button class="btn primary" data-d="savedash">Save dashboard</button>`
       : may ? `<button class="btn" data-d="editdash">Edit dashboard</button>` : `<span class="chip">View only</span>`}
   </div>
   ${edit && admin() ? `<div class="panel db-sharebar">${sharingHTML(x, 'dash')}</div>` : ''}
-  ${edit && D.picker ? pickerHTML(x) : ''}
+  ${edit && D.picker === 'links' ? linkPickerHTML(x) : edit && D.picker ? pickerHTML(x) : ''}
   <div class="db-filters" role="group" aria-label="Dashboard filters">
     <span class="db-lab">Period</span><div class="db-seg">${PERIODS.map(([k, l]) => `<button type="button" class="${fv.period === k ? 'on' : ''}" aria-pressed="${fv.period === k}" data-d="period" data-v="${k}">${l}</button>`).join('')}</div>
     ${fieldFilters}${addFilter}
@@ -858,7 +866,7 @@ export function viewDashboard(id) {
   </div>
   ${edit ? `<div class="db-cvbar"><label class="switch db-float"><input type="checkbox" data-dv="float"${floatUp ? ' checked' : ''}><span class="tr"></span><span>Float items up</span></label><p class="help db-cvhelp">Drag an item by its handle to move it, or drag its bottom-right corner to resize it. Each dot is one step; 24 across. Items in the way move down. With a handle focused, arrow keys move the item and Shift + arrow keys resize it.</p></div>` : ''}
   ${!edit && placed.length ? holdHint(x.id) : ''}
-  ${placed.length ? `<div class="db-cv${edit ? ' edit' : ''}${edit ? '' : ' can-drill'}" id="db-cv" style="--rows:${cvRows}"><div class="db-ghost" id="db-ghost" hidden></div>${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
+  ${placed.length ? `<div class="db-cv${edit ? ' edit' : ''}${edit ? '' : ' can-drill'}" id="db-cv" style="--rows:${cvRows}"><div class="db-ghost" id="db-ghost" hidden></div>${tiles}</div>` : `<div class="panel empty"><h2>Nothing here yet</h2><p>${may ? 'Add saved reports, shortcuts or a text block.' : 'The owner hasn’t added anything yet.'}</p>${may && !edit ? '<button class="btn primary" data-d="editdash">Add reports</button>' : ''}</div>`}
   </div>${edit ? '' : drillHTML('d:' + x.id)}`;
 }
 
@@ -882,11 +890,44 @@ function pickerHTML(x) {
     ${list.length ? `<div class="db-plist">${list.map((r) => `<button type="button" class="db-pick" data-d="pick" data-v="${esc(r.id)}"${have.has(r.id) ? ' disabled' : ''}><b>${esc(r.name)}</b><small>${esc((TYPES.find((t) => t[0] === r.def?.type) || ['', ''])[1])}${c.formById(r.def?.form) ? ' · ' + esc(c.formById(r.def.form).name) : ''}${have.has(r.id) ? ' · already here' : ''}</small></button>`).join('')}</div>` : '<p class="note">No saved reports yet. Make one with <b>New report</b>.</p>'}</div>`;
 }
 
+/** The shortcut picker: forms (their list, or a new record), insights, and, for admins, administration. */
+function linkPickerHTML(x) {
+  const env = H.linkEnv();
+  const forms = ctx().forms.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+  const groups = linkChoices(env, forms);
+  const have = new Set((x.tiles || []).filter((t) => t.link).map((t) => linkKey(t.link)));
+  return `<div class="panel db-picker db-lpick"><div class="db-ph"><b>Add a shortcut</b><span class="help">A small tile that opens part of Formwright. Resize it by its corner like any tile.</span></div>
+    ${groups.map((g) => `<section><h3 class="db-lgh">${esc(g.title)}${g.admin ? ' <span class="chip warn">Only administrators see these</span>' : ''}</h3><div class="db-plist">${g.items.map((i) => `<button type="button" class="db-pick db-lp" data-d="addlink" data-v="${esc(i.key)}"${have.has(i.key) ? ' disabled' : ''}>${linkIcon(i)}<span><b>${esc(i.title)}</b><small>${esc(i.sub)}${have.has(i.key) ? ' · already here' : ''}</small></span></button>`).join('')}</div></section>`).join('')}</div>`;
+}
+const linkIcon = (i, big) => (i.form ? (i.glyph ? `<span class="db-lic plus" style="background:${esc(colorOf(i.form))}" aria-hidden="true">${esc(i.glyph)}</span>` : badge(i.form)) : `<span class="glyph navg db-lic" aria-hidden="true">${esc(i.glyph)}</span>`).replace('class="', `class="${big ? 'big ' : ''}`);
+
+/** A shortcut tile: icon, name and a live count; tall enough, a line saying where it goes. */
+function linkTileHTML(x, t, edit) {
+  const env = H.linkEnv();
+  const i = linkInfo(t.link, env);
+  const label = i ? i.title : 'Shortcut';
+  const grip = edit ? `<button type="button" class="db-grip" data-cv="move" data-v="${esc(t.id)}" aria-label="Move ${esc(label)}. Arrow keys move it; Shift and arrow keys resize it." title="Drag to move"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="6" r="1.8"/><circle cx="16" cy="6" r="1.8"/><circle cx="8" cy="12" r="1.8"/><circle cx="16" cy="12" r="1.8"/><circle cx="8" cy="18" r="1.8"/><circle cx="16" cy="18" r="1.8"/></svg></button>` : '';
+  const del = edit ? `<button type="button" class="ibtn" data-d="tdel" data-v="${esc(t.id)}" aria-label="Remove ${esc(label)} from this dashboard">✕</button>` : '';
+  const rz = edit ? `<button type="button" class="db-rz" data-cv="rz" data-v="${esc(t.id)}" aria-label="Resize ${esc(label)}, now ${t.w} columns by ${t.h} rows" title="Drag to resize"></button><span class="db-badge" hidden></span>` : '';
+  const open = `<article class="rp-w db-tile db-sc${t.h >= 4 ? ' tall' : ''}" data-tile="${esc(t.id)}" style="${tileBox(t)}" aria-label="${esc(label)}">`;
+  if (!i) return `${open}<div class="rp-wh">${grip}<div class="rp-wt"><p class="rp-empty">This shortcut points at a form that was deleted.</p></div>${del}</div>${rz}</article>`;
+  const body = `${linkIcon(i, t.h >= 4)}<span class="db-lt"><b>${esc(i.title)}</b><small>${esc(i.sub)}</small>${t.h >= 4 ? `<span class="db-ld">${esc(i.desc)}</span>` : ''}</span>`;
+  if (!edit) return `${open}<button type="button" class="db-lgo" data-d="golink" data-v="${esc(t.id)}">${body}<span class="db-lch" aria-hidden="true">›</span></button></article>`;
+  // editing: a form list can open with a saved view
+  let viewPick = '';
+  if (t.link.to === 'list') {
+    const views = (store.listViews || []).filter((v) => v.formId === t.link.form).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    if (views.length) viewPick = `<label class="db-lview"><span class="sr">Open with view</span><select class="in" data-dv="linkview" data-v="${esc(t.id)}"><option value="">Open with: the usual list</option>${views.map((v) => `<option value="${esc(v.id)}"${v.id === t.link.view ? ' selected' : ''}>Open with: ${esc(v.name)}</option>`).join('')}</select></label>`;
+  }
+  return `${open}<div class="rp-wh">${grip}<div class="db-lbody">${body}</div>${i.admin ? '<span class="chip warn db-ladm">Admins only</span>' : ''}${del}</div>${viewPick}${rz}</article>`;
+}
+
 // Positions are in cells; CSS turns them into sizes from the canvas's width (dash.css).
 function tileBox(t) { return `--x:${t.x};--y:${t.y};--w:${t.w};--h:${t.h}`; }
 function setBox(el, t) { el.style.setProperty('--x', t.x); el.style.setProperty('--y', t.y); el.style.setProperty('--w', t.w); el.style.setProperty('--h', t.h); }
 
 function tileHTML(c, x, t, extra, edit) {
+  if (t.link) return linkTileHTML(x, t, edit);
   const label = t.text ? t.text.title || 'Text block' : reportById(t.report)?.name || 'Report';
   const grip = edit ? `<button type="button" class="db-grip" data-cv="move" data-v="${esc(t.id)}" aria-label="Move ${esc(label)}. Arrow keys move it; Shift and arrow keys resize it." title="Drag to move"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="6" r="1.8"/><circle cx="16" cy="6" r="1.8"/><circle cx="8" cy="12" r="1.8"/><circle cx="16" cy="12" r="1.8"/><circle cx="8" cy="18" r="1.8"/><circle cx="16" cy="18" r="1.8"/></svg></button>` : '';
   const del = edit ? `<button type="button" class="ibtn" data-d="tdel" data-v="${esc(t.id)}" aria-label="Remove ${esc(label)} from this dashboard">✕</button>` : '';
@@ -998,7 +1039,17 @@ document.addEventListener('click', async (e) => {
       try { await deleteDashboard(id); if (homeId() === id) await setHomeDashboard(''); D.edit = null; toast('Dashboard deleted. Its reports are kept.'); H.go({ name: 'dashboards' }); } catch (err) { toast('Couldn’t delete the dashboard.'); }
       break;
     }
-    case 'picker': D.picker = !D.picker; repaint(); break;
+    case 'picker': D.picker = D.picker === true ? false : true; repaint(); break;
+    case 'linkpicker': D.picker = D.picker === 'links' ? false : 'links'; repaint(); break;
+    case 'addlink': { const l = linkFromKey(v); if (l) await addTile(D.did, null, false, l); break; }
+    case 'golink': { const x = dashById(D.did); const t = (gridTiles(x?.tiles || [], x?.filters)).find((y) => y.id === v); const i = t && linkInfo(t.link, H.linkEnv()); if (i && i.ok) H.openLink(i.go); break; }
+    case 'setdefhome': {
+      if (!admin()) return;
+      const x = dashById(v);
+      if (v && x && !x.shared) { toast('Share this dashboard with everyone first (Edit dashboard → Sharing), so others can see it.'); return; }
+      try { await setDefaultHome(v); toast(v ? 'Home now shows this dashboard for anyone who hasn’t chosen their own' : 'No default home now'); } catch (err) { toast(err?.code === 'permission-denied' ? 'Saving was refused: deploy the latest Cadence security rules.' : 'Couldn’t save that. Try again.'); }
+      break;
+    }
     case 'pick': await addTile(D.did, v); break;
     case 'addtext': await addTile(D.did, null, true); break;
     case 'newrepfor': D.returnTo = D.did; if (D.edit?.dirty) await saveEdit(); D.edit = null; startNewReport(); break;
@@ -1041,6 +1092,7 @@ document.addEventListener('change', (e) => {
     case 'dash-shared': if (D.edit) { D.edit.shared = t.checked; D.edit.dirty = true; repaint(); } break;
     case 'dash-group': if (D.edit) { D.edit.groups = t.checked ? [...new Set([...(D.edit.groups || []), t.value])] : (D.edit.groups || []).filter((g) => g !== t.value); D.edit.dirty = true; repaint(); } break;
     case 'float': if (D.edit) { D.edit.filters = { ...(D.edit.filters || { period: 'all', fields: [] }), floatUp: t.checked }; D.edit.tiles = resolveCanvas(canvasTiles(D.edit.tiles), null, t.checked); D.edit.dirty = true; repaint(); } break;
+    case 'linkview': editTiles((tiles) => { const tile = tiles.find((y) => y.id === t.dataset.v); if (tile && tile.link) { if (t.value) tile.link = { ...tile.link, view: t.value }; else { const { view, ...rest } = tile.link; tile.link = rest; } } }); break;
     case 'addfilter': if (D.edit && t.value) { D.edit.filters = { ...(D.edit.filters || { period: 'all' }), fields: (D.edit.filters?.fields || []).concat(refOf(t.value)) }; D.edit.dirty = true; repaint(); } break;
   }
 });

@@ -291,3 +291,37 @@ button.db-li:hover{background:var(--accent-soft)}
   .ct-tbl td.num{text-align:left}
   .ct-name{font-size:15px;margin-bottom:4px}
 }
+
+/* Shortcut tiles: an icon, a name and a live count; the description shows once the tile is tall */
+.db-tile.db-sc{padding:0}
+.db-lgo{all:unset;box-sizing:border-box;width:100%;height:100%;display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;border-radius:inherit}
+.db-lgo:hover{background:var(--sunk)}
+.db-lgo:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.db-sc.tall .db-lgo{flex-direction:column;align-items:flex-start;justify-content:flex-start;padding:16px}
+.db-sc.tall .db-lch{display:none}
+.db-lt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.db-lt b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.db-lt small{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.db-sc.tall .db-lt b{font-size:16px}
+.db-ld{margin-top:6px;font-size:13px;color:var(--muted);line-height:1.4;white-space:normal}
+.db-lch{color:var(--muted);font-size:20px;line-height:1}
+.db-lic{flex:none}
+.db-lic.plus{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:#fff;font:700 17px/1 var(--display)}
+.db-sc .badge,.db-sc .db-lic{width:34px;height:34px;font-size:15px}
+.db-sc .big.badge,.db-sc .big.db-lic{width:44px;height:44px;font-size:19px;border-radius:10px}
+.db-sc .rp-wh{padding:8px 10px;margin:0;align-items:center}
+.db-lbody{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
+.db-ladm{flex:none}
+.db-lview{display:block;padding:0 10px 8px}
+.db-lview .in{width:100%;box-sizing:border-box;min-height:32px;font-size:13px}
+.db-lpick section{display:flex;flex-direction:column;gap:6px}
+.db-lgh{margin:6px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:flex;gap:8px;align-items:center}
+.db-lp{display:flex !important;flex-direction:row !important;align-items:center;gap:10px}
+.db-lp > span:last-child{display:flex;flex-direction:column;min-width:0}
+@media (max-width:760px){.db-tile.db-sc{min-height:0}.db-sc.tall .db-lgo{flex-direction:row;align-items:center;padding:10px 14px}.db-sc .db-ld{display:none}.db-sc.tall .db-lch{display:block}.db-sc .big.badge,.db-sc .big.db-lic{width:34px;height:34px;font-size:15px}}
+
+/* KPI tiles: title and count at the top; the number and what it measures centred in the space below */
+.db-t-kpi .rp-wb{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px}
+.db-tile.db-t-kpi button.rp-kpi{align-self:center;text-align:center;font-size:clamp(1.2rem,min(14cqw,46cqh),4.2rem)}
+.db-t-kpi .rp-kpisub{text-align:center;max-width:100%}
+.db-t-kpi .db-kd{align-self:center}

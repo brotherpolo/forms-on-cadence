@@ -409,7 +409,7 @@ export function usedOn(dashboards, reportId) {
 export const CANVAS_COLS = 24;
 export const GRID = 24;
 export const MIN_W = 3;
-export const minH = (t) => (t && t.text ? 2 : 3);
+export const minH = (t) => (t && (t.text || t.link) ? 2 : 3); // text blocks and shortcuts can be short
 const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 const clampTile = (t) => {
   const w = Math.max(MIN_W, Math.min(CANVAS_COLS, Math.round(t.w ?? 12)));

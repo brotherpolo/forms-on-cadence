@@ -39,6 +39,7 @@ export const store = {
   reportDefs: [], // saved reports: mine and shared ones
   dashboards: [], // dashboards: mine and shared ones
   dashReady: false,
+  homeDefault: '', // settings/home: the dashboard Home shows for anyone without their own
   listViewsReady: false,
   imports: [], // admins: past imports, newest first
   automations: [], automationsError: null, // admins: Administration → Automations
@@ -162,6 +163,11 @@ export function startData(user) {
     changed();
   }));
   pair('listViews', 'list views', (list, ok) => { store.listViews = list; store.listViewsReady = ok; changed(); });
+  // the dashboard Home shows for anyone who hasn't picked their own (settings/home, set by an admin)
+  memberParts.push({
+    start: () => onSnapshot(doc(db, 'settings', 'home'), (s) => { store.homeDefault = s.exists() ? String(s.data().dashboardId || '') : ''; store.homeDefaultReady = true; changed(); }, () => { store.homeDefault = ''; store.homeDefaultReady = true; changed(); }),
+    empty: () => { store.homeDefault = ''; store.homeDefaultReady = true; },
+  });
 }
 
 export function stopData() {
@@ -177,7 +183,7 @@ export function stopData() {
   recordsByForm.clear();
   if (assignedSub) { assignedSub(); assignedSub = null; }
   assigned = [];
-  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, imports: [], reportDefs: [], dashboards: [], dashReady: false });
+  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, imports: [], reportDefs: [], dashboards: [], dashReady: false, homeDefault: '', homeDefaultReady: false });
   store.recordsLoading.clear();
 }
 
@@ -298,6 +304,11 @@ function flattenRecords() {
 /** Update the display name other people see. */
 export async function saveProfileName(userId, displayName) {
   await setDoc(doc(db, 'profiles', userId), { displayName: String(displayName).slice(0, 120) }, { merge: true });
+}
+
+/** Admins: the dashboard Home shows for anyone who hasn't chosen their own ('' for none). */
+export async function setDefaultHome(id) {
+  await setDoc(doc(db, 'settings', 'home'), { dashboardId: String(id || '').slice(0, 100), updatedAt: Date.now(), updatedBy: store.user.uid });
 }
 
 /** The dashboard that opens when you start Formwright ('' for none). */

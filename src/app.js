@@ -10,8 +10,10 @@ import { runImport, rewriteValues, moveStage, watchStages } from './store.js';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
+import { effectiveHome } from './dash.js';
+import { nounOf as nounOfForm } from './dashlogic.js';
 import { initReports, closeCatalogPop, viewReportsList, viewReport, reportName, leaveReport, reportBusy, viewDashboards, viewDashboard, dashName, maybeMigrate, reportDirty, dashDirty, forgetDrafts, counts, drillNav, fitTiles } from './dash.js';
-import { initLists, viewRecords, afterRecords, resetLists } from './lists.js';
+import { initLists, viewRecords, afterRecords, resetLists, useView } from './lists.js';
 import { initAttach, openPickChildren, closeAttach } from './attach.js';
 import { titleSortOf, columnCatalog, defaultConfig, cellOf, defaultViewId } from './listlogic.js';
 import { storeKey as subStoreKey, readSubs, prefsOf, setPrefs, colsFor, toggleCol as subToggle, moveCol as subMove, nextSort as subNext, limitRows, sortByVal, TASK_COLS, TASK_DEFAULT, taskCell } from './sublogic.js';
@@ -178,10 +180,30 @@ export function go(v,push=true){ui.subPop=null;ui.anEdit=null;if(!ui.cascade?.bu
 // The in-app Back button goes through the browser's history, so it and the phone's back button always agree
 export function back(){if(backPending)return;if(hist.length&&history.state&&history.state.b===BOOT&&history.state.fw===hist.length){backPending=true;setTimeout(()=>{backPending=false;},600);history.back();return;}if(!guard())return;const v=hist.pop();if(v){if(v.name==='record')rdraft=null;go(v,false)}else home()}
 function sidebarForms(){return store.forms.filter(f=>f.showInSidebar&&canViewForm(store.me,f.id)).sort(byOrder);}
+/** Home in the sidebar is on while its dashboard (or the empty Home page) is showing. */
+const onHome=()=>view.name==='home'||(view.name==='dashboard'&&!!view.dashboardId&&view.dashboardId===effectiveHome());
+/** Home in the sidebar: the home dashboard, or a page saying how to choose one. */
+function goHome(){const id=effectiveHome();if(id)go({name:'dashboard',dashboardId:id});else go({name:'home'});}
+/** Where a dashboard shortcut leads. */
+function openLink(g){
+  if(!g)return;
+  if(g.name==='records'){if(g.viewId)useView(g.formId,g.viewId);go({name:'records',formId:g.formId});return;}
+  if(g.name==='new'){const f=formById(g.formId);if(f&&canCreate(store.me,f.id))goRec(newRecordDraft(f,null),{name:'record',formId:f.id,recordId:null});return;}
+  if(g.name==='home'){goHome();return;}
+  if(g.name==='exports'&&view.name!=='exports')exportLeave();
+  go({name:g.name});
+}
+/** What dashboard shortcuts need to know about this person. */
+function linkEnv(){
+  return {formById:id=>{const f=formById(id);return f&&canViewForm(store.me,f.id)?f:null;},canView:id=>canViewForm(store.me,id),canCreate:id=>canCreate(store.me,id),isAdmin:isAdmin(store.me),
+    count:id=>store.records.filter(r=>r.formId===id).length,viewById:id=>store.listViews.find(v=>v.id===id)||null,
+    noun:(f,n)=>nounOfForm(f,n),item:f=>itemName(f),hasWorkflow:store.forms.some(f=>wfOn(f)),
+    counts:{dashboards:counts().dashboards,reports:counts().reports,mywork:myWorkCount()}};
+}
 export function home(){
   const fs=sidebarForms();
   ui.leaveOk=true;
-  const hd=store.profiles[store.user?.uid]?.homeDashboard;
+  const hd=effectiveHome();
   if(hd){go({name:'dashboard',dashboardId:hd},false);return;}
   if(fs.length)go({name:'records',formId:fs[0].id},false);
   else if(isAdmin(store.me))go({name:'designer'},false);
@@ -317,12 +339,12 @@ function onData(){
     if(!(history.state&&history.state.b===BOOT)){history.replaceState(st(-1),'',location.href);history.pushState(st(0),'',location.href);}
     const r=parseRoute(location.hash);
     home();
-    homeCheck=!r&&!store.profiles[store.user?.uid];
+    homeCheck=!r&&!store.profiles[store.user?.uid]?.homeDashboard; // no home of your own yet: look again once the default home arrives
     if(r&&!openRoute(r))pendingRoute=r;
     return;
   }
   // the home dashboard is on the profile, which can arrive after the first screen
-  if(homeCheck&&store.profiles[store.user?.uid]){homeCheck=false;if(!hist.length&&store.profiles[store.user.uid].homeDashboard&&view.name!=='dashboard'&&!dirty()){home();return;}}
+  if(homeCheck&&store.profiles[store.user?.uid]&&store.dashReady&&store.homeDefaultReady){homeCheck=false;if(!hist.length&&effectiveHome()&&view.name!=='dashboard'&&!dirty()){home();return;}}
   if(pendingRoute&&openRoute(pendingRoute))pendingRoute=null;
   if(ADMIN_VIEWS.has(view.name)&&!isAdmin(store.me)){ui.leaveOk=true;home();return;}
   if((view.name==='records'||view.name==='record')&&!canViewForm(store.me,view.formId)){ui.leaveOk=true;home();return;}
@@ -384,8 +406,9 @@ function renderSide(){
       <div id="fs-res" class="fs-res" role="listbox" aria-label="Forms"${fsShown()?'':' hidden'}>${formResults()}</div>
     </div>
     <div class="navlabel" style="margin-top:12px">Insights</div>
+    <button class="nav${onHome()?' on':''}" data-act="nav-home"${onHome()?' aria-current="page"':''}><span class="glyph navg">⌂</span><span class="t">Home</span></button>
     ${store.forms.some(f=>wfOn(f))?`<button class="nav${view.name==='mywork'?' on':''}" data-act="nav-mywork"><span class="glyph navg">☰</span><span class="t">My work</span><span class="n">${myWorkCount()||''}</span></button>`:''}
-    <button class="nav${view.name==='dashboards'||view.name==='dashboard'?' on':''}" data-act="nav-dashboards"><span class="glyph navg">▦</span><span class="t">Dashboards</span><span class="n">${counts().dashboards}</span></button>
+    <button class="nav${(view.name==='dashboards'||view.name==='dashboard')&&!onHome()?' on':''}" data-act="nav-dashboards"><span class="glyph navg">▦</span><span class="t">Dashboards</span><span class="n">${counts().dashboards}</span></button>
     <button class="nav${view.name==='reports'||view.name==='report'?' on':''}" data-act="nav-reports"><span class="glyph navg">▤</span><span class="t">Reports</span><span class="n">${counts().reports}</span></button>
     ${adm?`<div class="navlabel" style="margin-top:12px">Administration</div>
     <button class="nav${view.name==='designer'||view.name==='formEdit'?' on':''}" data-act="nav-designer"><span class="glyph navg">⚙</span><span class="t">Form designer</span><span class="n">${store.forms.length}</span></button>
@@ -415,6 +438,7 @@ function renderMain(){
   else if(view.name==='formEdit'){title='Edit form';h=viewFormEdit();}
   else if(admin.handles(view)){const r=admin.renderView(view);title=r.title;h=r.html;}
   else if(view.name==='welcome'){title='Formwright';h=viewWelcome();}
+  else if(view.name==='home'){title='Home';h=`<div class="head"><div class="ttl"><div><h1>Home</h1><p class="sub">Home shows a dashboard: your own, or the one an administrator picked for everyone.</p></div></div></div><div class="panel empty"><h2>No home dashboard yet</h2><p>Open a dashboard and press <b>Set as my home</b>.${isAdmin(store.me)?' To give everyone a Home, share a dashboard and press <b>Make everyone’s default home</b>.':''}</p><button class="btn primary" data-act="nav-dashboards">Dashboards</button></div>`;}
   $('#topttl').textContent=title||'Formwright';
   const ae=document.activeElement,ks=ae&&ae.dataset?.ksearch?[ae.dataset.ksearch,ae.selectionStart]:null; // a redraw while searching keeps the cursor in the box
   m.innerHTML=`<div class="wrap${wide?' wide':''}${wide==='full'?' full':''}">${h}</div>`;
@@ -1941,6 +1965,7 @@ document.addEventListener('click',async e=>{
     case 'nav-designer':go({name:'designer'});break;
     case 'nav-reports':go({name:'reports'});break;
     case 'nav-dashboards':go({name:'dashboards'});break;
+    case 'nav-home':goHome();break;
     case 'nav-groups':go({name:'groups'});break;
     case 'nav-users':go({name:'users'});break;
     case 'nav-imports':go({name:'imports'});break;
@@ -2385,7 +2410,7 @@ document.addEventListener('pointercancel',endFmDrag);
 /* ---------- Lifecycle (called from main.js) ---------- */
 export function startApp(){
   booted=false;pendingRoute=null;view={name:'loading'};hist=[];rdraft=fdraft=pdraft=null;
-  initReports({fmt,valOf,recTitle,go,renderMain,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
+  initReports({fmt,valOf,recTitle,go,renderMain,openLink,linkEnv,openRecord:(id)=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
   initLists({ruleImpact,applyRuleChange,fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,withFormulas,search:()=>ui.search});
   initAudit({fmt,formById,recById,recTitle:(r,f)=>recTitle(r,f),go,renderMain});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
