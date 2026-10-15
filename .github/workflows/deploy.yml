@@ -78,6 +78,14 @@ jobs:
         env:
           SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: printf '%s' "$SA_JSON" > "$RUNNER_TEMP/sa.json"
+      # A copy of the whole database from just before this update. If it fails, nothing is
+      # deployed. Kept 90 days (a rule on the bucket); see README, Backups.
+      - name: Back up the database first
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+          PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
+          BUCKET: ${{ vars.BACKUP_BUCKET || 'tasks-2ae9d-db-exports' }}
+        run: node scripts/backup-db.mjs "gs://$BUCKET/before-deploy" "formwright-${GITHUB_SHA::7}" "$PROJECT"
       - name: Deploy Hosting (web pages only)
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
