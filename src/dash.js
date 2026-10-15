@@ -428,9 +428,17 @@ export function fitTiles() {
     tile.classList.remove('compact', 'tight');
     tile.querySelectorAll('[data-fit-hid]').forEach((el) => { el.hidden = false; delete el.dataset.fitHid; });
     tile.querySelectorAll('.db-more').forEach((el) => el.remove());
+    tile.querySelectorAll('.rp-kpi').forEach((k) => { k.style.fontSize = ''; });
     const hide = (el) => { if (el && !el.hidden) { el.hidden = true; el.dataset.fitHid = '1'; } };
     if (loose) { phoneCard(tile, wb, hide); return; }
-    // numbers that don't fit their space switch to the short form (CA$91.5k)
+    // a KPI number keeps its full size unless it doesn't fit across; then it shrinks, down to about half
+    wb.querySelectorAll('.rp-kpi').forEach((k) => {
+      k.style.fontSize = '';
+      let fs = parseFloat(getComputedStyle(k).fontSize) || 0;
+      const min = Math.max(16, fs * 0.5);
+      while (k.scrollWidth > k.clientWidth + 1 && fs > min) { fs = Math.max(min, fs * 0.92); k.style.fontSize = fs + 'px'; }
+    });
+    // numbers that still don't fit switch to the short form (CA$91.5k)
     if ([...wb.querySelectorAll('.rp-kpi, .db-pivot .db-cellb')].some((e) => e.scrollWidth > e.clientWidth + 1)) tile.classList.add('compact');
     // a KPI drops its extras, smallest first
     for (const sel of ['.db-kd', '.rp-kpisub']) if (over()) hide(wb.querySelector(sel));

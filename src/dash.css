@@ -322,7 +322,8 @@ button.db-li:hover{background:var(--accent-soft)}
 
 /* KPI tiles: title and count at the top; the number and what it measures centred in the space below */
 .db-t-kpi .rp-wb{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px}
-.db-tile.db-t-kpi button.rp-kpi{align-self:center;text-align:center;font-size:clamp(1.2rem,min(14cqw,46cqh),4.2rem)}
+/* the same size on every KPI tile of the same height; fitTiles() shrinks a number only if it doesn't fit across */
+.db-tile.db-t-kpi button.rp-kpi{align-self:center;text-align:center;font-size:clamp(1.2rem,42cqh,3.6rem)}
 .db-t-kpi .rp-kpisub{text-align:center;max-width:100%}
 .db-t-kpi .db-kd{align-self:center}
 .db-starter{margin:-4px 0 4px}
