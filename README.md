@@ -80,13 +80,13 @@ src/
   pdfdraw.js               Export PDF: draws the document with pdf-lib (unit-tested)
   pdfexport.js             Export PDF: fetches photos, loads pdf-lib on first use, downloads the file
   exportset.js             Administration → PDF exports: company name and logo
-  vendor/pdf-lib.min.js    pdf-lib 1.17.1 (MIT), bundled unchanged; loaded only when someone exports
   app.js                   Navigation, record screens, form designer
   admin.js                 Security groups and users screens (admins only)
   auth.js                  Sign-in screen: Google, email and password, password reset
   ui.js, util.js           Shared helpers
   styles.css               All styles (light and dark)
   examples.json            Example forms an admin can load from the designer
+public/vendor/pdf-lib.min.js  pdf-lib 1.17.1 (MIT), served unchanged (the build skips public/); loaded only when someone exports a PDF
 firebase.json, .firebaserc Firebase CLI config: Hosting only, project tasks-2ae9d
 .env.example               Web app settings to copy into .env.local
 tests/unit/                Formula and permission tests (node --test)

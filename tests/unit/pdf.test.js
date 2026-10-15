@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fieldItem, fieldRows, safeText, wrapText, colWidths, fileName, fitBox, trimBox } from '../../src/pdfdoc.js';
 import { drawPdf } from '../../src/pdfdraw.js';
-import * as L from '../../src/vendor/pdf-lib.min.js';
+import * as L from '../../public/vendor/pdf-lib.min.js';
 
 const f = (type, label, width = 'half', extra = {}) => ({ type, label, width, ...extra });
 const mono = (s) => String(s).length; // every character 1 unit wide

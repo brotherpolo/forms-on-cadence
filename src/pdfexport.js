@@ -4,6 +4,8 @@
 import { getExportSettings, fileBlob } from './store.js';
 import { fileName } from './pdfdoc.js';
 
+// pdf-lib is served as a plain file from public/vendor, so the build leaves it alone
+const PDF_LIB = '/vendor/pdf-lib.min.js';
 const MAX_PX = 1600; // photos are scaled down to this, which keeps PDFs small and still sharp
 
 const isPng = (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
@@ -48,7 +50,7 @@ async function photoBytes(blob) {
  * Returns { name, missing } — missing = pictures that couldn't be included.
  */
 export async function exportRecordPdf(model) {
-  const [L, { drawPdf }, brand] = await Promise.all([import('./vendor/pdf-lib.min.js'), import('./pdfdraw.js'), getExportSettings()]);
+  const [L, { drawPdf }, brand] = await Promise.all([import(/* @vite-ignore */ PDF_LIB), import('./pdfdraw.js'), getExportSettings()]);
   const imgs = new Map();
   let missing = 0;
   const logo = dataUrlBytes(brand.logo);
