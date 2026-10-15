@@ -76,6 +76,7 @@ src/
   imports.js, imports.css  Import screens: templates menu, choose file, match columns, check rows, history and undo
   importlogic.js           Templates, column matching, checking rows, undo plans (pure, unit-tested)
   xlsx.js                  Reads and writes .xlsx and .csv with no extra packages (unit-tested)
+  audit.js, auditlogic.js  Audit trail screen; filters, wording, CSV (auditlogic pure, unit-tested)
   emaillogic.js            Email PDF: templates, addresses to suggest, checking typed ones (pure, unit-tested)
   autonum.js               Auto number: how numbers look, next number, records still to number (pure, unit-tested)
   sublogic.js, subui.js    Sections under a record: columns, sort, Show menu, task cells (sublogic pure, unit-tested)
@@ -112,6 +113,7 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | `imports/{id}` | `formId, formName, fileName, ownerId, createdAt, stamp, status, added[], updated[], counts{}, finishedAt, undoneAt, undoneBy, undo{}` | admins |
 | `settings/exports` | `companyName, logo` (PNG or JPEG data URL, under 600 KB)`, updatedAt, updatedBy`: the top of exported PDFs | admins (everyone let in reads it) |
 | `counters/{formId}__{fieldId}` | `next`, `years{YYYY: next}`: the next auto number | server only (admins read) |
+| `audit/{id}` | `at, by, byName, area, kind, formId, formName, recordId, title, targetId, targetName, changes[{key, label, type, from, to}], note, snapshot, restoredAt, restoredBy` | server only (admins read) |
 | `imports/{id}/before/{recordId}` | `values, parentId, parentFormId, updatedAt, updatedBy`: a record as it was before the import changed it | admins |
 
 Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Signatures are stored inline as small PNG data URLs.
@@ -243,6 +245,20 @@ A view only decides how the list looks. It never shows anyone records they could
 - **Existing records:** after saving the form, the field's settings show how many records have no number and **Number them now** (oldest first). Changing an existing text or number field's type to Auto number **keeps the numbers already typed in** and carries on after the highest one; clashing typed numbers are listed.
 - **Admins can change a number** (record → **Change…**), with a warning. It must not be in use on the same form, the change is noted on the record (`autoLog`), and the counter moves past it so it's never handed out again.
 - Works like any field elsewhere: as the record's title, list column, search, reports, CSV and PDF. Imports leave it to the server, and copying from a parent skips it.
+
+## Audit trail (administrators)
+
+**Administration → Audit trail** is one page with every change, newest first, kept for good:
+
+- **Records:** created (with what was filled in), changed (each field: old → new), moved to another parent, given to another owner, deleted (with a copy), restored, and PDFs emailed. Values show the way the app shows them.
+- **Admin changes:** form designs (fields added, removed, renamed or retyped, settings), security groups (access per form), accounts (first sign-in, role, groups, Cadence approval, removals), auto numbering and number changes, and PDF export settings.
+- **Filters:** form, person (or System), what kind of change, from and to dates, and a search over the loaded entries. The database applies the most specific one (record, form, person, kind) with the dates; the rest are checked on what comes back. **Load more** fetches the next 100.
+- **Put back** on a record change sets that field (or the parent, or the owner) back to its old value, asking again if it has changed since. It's an ordinary edit, so it's noted too. Signatures, photos, files and shortened long text can't be put back (only their names or the start are kept).
+- **Restore** on a deleted record (within 90 days) brings it back with the same ID, so its grid rows, child records and links reconnect. If its parent was deleted too, it comes back on its own.
+- **Export CSV**: one row per change, for what the filters show.
+- **History** in a record's top bar (admins) opens the trail for just that record.
+
+The Cadence functions write every entry (`audit/{id}`, `functions/audit.js`) as documents change, so nothing can skip it; the rules let only administrators read it and nobody write it. It needs the `audit` indexes in `firestore.indexes.json`; while they build after an install, the page says so.
 
 ## Email PDF (administrators)
 

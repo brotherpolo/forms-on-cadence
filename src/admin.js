@@ -6,9 +6,10 @@ import { store, saveGroup, deleteGroup, setUserGroups, setUserRole, setUserCaden
 import { go, render, renderMain, byOrder } from './app.js';
 import { esc, uid, clone, toast, badge } from './ui.js';
 import * as exportset from './exportset.js';
+import * as audit from './audit.js';
 import { LEVELS, NONE, PRESETS, normalize, describeLevel, levelFor, isAdmin, accessParents } from './access.js';
 
-const VIEWS = new Set(['users', 'groups', 'groupEdit', 'exports']);
+const VIEWS = new Set(['users', 'groups', 'groupEdit', 'exports', 'audit']);
 let gdraft = null;
 let confirmDel = false;
 let leaveArmed = false;
@@ -31,6 +32,7 @@ export function renderView(view) {
   if (view.name === 'groups') return { title: 'Security groups', html: viewGroups() };
   if (view.name === 'groupEdit') return { title: 'Edit group', html: viewGroupEdit() };
   if (view.name === 'exports') return { title: 'PDF exports', html: exportset.viewExports() };
+  if (view.name === 'audit') return { title: 'Audit trail', html: audit.viewAudit(view) };
   return { title: '', html: '' };
 }
 
@@ -175,6 +177,7 @@ function removedHTML() {
 
 export async function onClick(el, a, id) {
   if (a.startsWith('ex-') && (await exportset.onClick(a))) return;
+  if (a.startsWith('au-') && (await audit.onClick(a, el))) return;
   switch (a) {
     case 'u-rm': rm = { id, giveTo: '', busy: false }; renderMain(); document.querySelector('[data-urmgive]')?.focus(); return;
     case 'u-rm-cancel': rm = null; renderMain(); return;
@@ -288,6 +291,7 @@ async function saveDraft() {
 
 export function onInput(t) {
   if (exportset.onInput(t)) return;
+  if (audit.onInput(t)) return;
   if (t.dataset.gp && gdraft) {
     gdraft[t.dataset.gp] = t.value;
     setDirty();
@@ -296,6 +300,7 @@ export function onInput(t) {
 
 export async function onChange(t) {
   if (await exportset.onChange(t)) return;
+  if (audit.onChange(t)) return;
   if (t.dataset.gacc != null && gdraft) {
     const key = t.dataset.gacc;
     const dim = t.dataset.dim;

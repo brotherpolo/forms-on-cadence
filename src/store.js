@@ -15,6 +15,9 @@ import {
   updateDoc,
   deleteDoc,
   writeBatch,
+  orderBy,
+  limit,
+  startAfter,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, getBlob } from 'firebase/storage';
 import { isAdmin, formLevel, effectiveAccess, withInherited } from './access.js';
@@ -519,6 +522,28 @@ export async function emailRecord(mail) {
 /** Live list of what's been emailed from a record, newest first. Returns an unsubscribe function. */
 export function watchEmails(recordId, onNext, onError) {
   return onSnapshot(collection(db, 'records', recordId, 'emails'), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.at || 0) - (a.at || 0))), onError || (() => onNext([])));
+}
+
+/* ---------- Audit trail (admins) ---------- */
+
+/**
+ * A page of the audit trail, newest first. filter: [field, value] the database applies (or null);
+ * from/to: times; after: the last page's cursor. → { entries, cursor, more }
+ */
+export async function loadAudit({ filter = null, from = null, to = null, after = null, size = 100 } = {}) {
+  const parts = [];
+  if (filter) parts.push(where(filter[0], '==', filter[1]));
+  if (from) parts.push(where('at', '>=', from));
+  if (to) parts.push(where('at', '<', to));
+  parts.push(orderBy('at', 'desc'));
+  if (after) parts.push(startAfter(after));
+  parts.push(limit(size));
+  const s = await getDocs(query(collection(db, 'audit'), ...parts));
+  return { entries: s.docs.map((d) => ({ ...d.data(), id: d.id })), cursor: s.docs[s.docs.length - 1] || null, more: s.docs.length === size };
+}
+/** Admins: bring a deleted record back from its audit entry. */
+export async function restoreDeleted(auditId) {
+  return (await httpsCallable(fns(), 'restoreRecord')({ auditId })).data;
 }
 
 /* ---------- Writes ---------- */
