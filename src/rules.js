@@ -17,6 +17,7 @@
 //   · Clear value: while it applies, the field is empty and locked.
 //   · A hidden or cleared field counts as empty for every rule (what will be saved), so
 //     rules that depend on it are worked out again until nothing changes.
+import { shownName } from './fieldnames.js';
 import { headingOf } from './foldlogic.js';
 
 export const ACTIONS = [
@@ -221,7 +222,7 @@ export function withoutCleared(values, ids) {
 
 /** Everything a rule could point at on this form, for the designer's menus. */
 export function targetsOf(form, { grids = [], kids = [], tasks = true } = {}) {
-  const out = (form?.fields || []).map((f) => ({ key: 'f:' + f.id, label: f.label || 'Untitled field', kind: f.type === 'heading' ? 'section' : 'field', field: f }));
+  const out = (form?.fields || []).map((f) => ({ key: 'f:' + f.id, label: f.type === 'heading' ? f.label || 'Untitled section' : shownName(form, f), kind: f.type === 'heading' ? 'section' : 'field', field: f }));
   grids.forEach((cf) => out.push({ key: 'g:' + cf.id, label: cf.name, kind: 'grid' }));
   kids.forEach((cf) => out.push({ key: 'c:' + cf.id, label: cf.name, kind: 'child' }));
   if (tasks) out.push({ key: 't:tasks', label: 'Tasks', kind: 'tasks' });
@@ -310,7 +311,7 @@ export function condText(c, ctx) {
   const f = !c.src || c.src === 'self' ? (ctx.form?.fields || []).find((x) => x.id === c.field) : pf?.fields?.find((x) => x.id === c.field);
   if (!f) return 'a field that no longer exists';
   const o = opOf(f, c.op);
-  const who = pf ? `${pf.name} › ${f.label}` : f.label;
+  const who = pf ? `${pf.name} › ${f.label}` : shownName(ctx.form, f);
   if (!o) return who + ' …';
   let v = '';
   if (o.value === 'many') v = list(c.value).join(', ');

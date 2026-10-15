@@ -1,6 +1,6 @@
 // Import templates and checking imported rows. Pure functions: no DOM, no Firebase.
 //
-// A template has one column per importable field (field labels as headings), a Record ID
+// A template has one column per importable field (system names as headings), a Record ID
 // column (blank = new record, filled = update that record) and, for a form that sits under
 // another form, a column naming the parent record. Rows are checked before anything is
 // saved; each comes back as new, update, unchanged ("same") or a problem with a way to fix it.
@@ -20,6 +20,8 @@ const TEXTISH = new Set(['text', 'textarea', 'email', 'phone', 'url']);
 const TYPE_NAME = { text: 'Text', textarea: 'Long text', email: 'Email', phone: 'Phone', url: 'Website', number: 'Whole number', decimal: 'Decimal', currency: 'Currency', percent: 'Percent', rating: 'Rating', range: 'Number', date: 'Date', time: 'Time', datetime: 'Date and time', checkbox: 'Yes / No', select: 'Choice', radio: 'Choice', multiselect: 'Several choices', color: 'Color', relation: 'Link', location: 'Location' };
 
 /* ---------- small helpers ---------- */
+
+import { sysOf } from './fieldnames.js';
 
 export const norm = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 export const normTitle = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -162,7 +164,7 @@ export const parentRequired = (form, parents) => parents.some((p) => (p.children
 export function templateColumns(form, parents, itemName) {
   const cols = [{ key: 'id', label: 'Record ID', kind: 'id' }];
   if (parents.length) cols.push({ key: 'parent', label: parents.length === 1 ? itemName(parents[0]) : 'Belongs to', kind: 'parent', required: parentRequired(form, parents) });
-  (form.fields || []).filter((f) => IMPORT_TYPES.has(f.type)).forEach((f) => cols.push({ key: f.id, label: String(f.label || '').trim() || 'Field', kind: 'field', field: f, required: !!f.required }));
+  (form.fields || []).filter((f) => IMPORT_TYPES.has(f.type)).forEach((f) => cols.push({ key: f.id, label: sysOf(f) || 'Field', kind: 'field', field: f, required: !!f.required }));
   const seen = new Map();
   cols.forEach((c) => {
     const k = norm(c.label), n = (seen.get(k) || 0) + 1;
@@ -408,6 +410,7 @@ export function matchColumns(headers, cols) {
   });
   pass('exact', (c, n) => norm(c.header) === n || norm(c.name) === n);
   pass('exact', (c, n) => norm(c.label) === n || (c.field && norm(c.field.id) === n));
+  pass('exact', (c, n) => c.field && norm(c.field.label) === n); // a caption, for older templates
   pass('exact', (c, n) => c.key === 'id' && ['id', 'record id', 'recordid', 'record'].includes(n));
   pass('close', (c, n) => c.key === 'parent' && ['parent', 'belongs to', 'parent record', 'parent id'].includes(n));
   pass('close', (c, n) => { const a = norm(c.label); return a.length >= 3 && n.length >= 3 && (n.startsWith(a + ' ') || a.startsWith(n + ' ') || similar(a, n) >= 0.8); });

@@ -78,7 +78,8 @@ test('options, types and warnings', () => {
   assert.deepEqual([a.type, a.min, a.max, a.step, a.suffix], ['range', 1, 10, 0.5, 'x']);
   assert.equal(b.max, 10);
   assert.deepEqual([c.type, c.prefix, c.start, c.digits, c.year], ['autonumber', 'INV-', 100, 4, true]);
-  assert.ok(r.warnings.some((w) => /Two fields are called “Ok”/.test(w.msg)));
+  assert.deepEqual(r.given.map((g) => g.sysName), ['Ok 2'], 'a shared caption: the second gets its own system name');
+  assert.equal(r.fields[4].sysName, 'Ok 2');
   assert.ok(r.warnings.some((w) => /@old isn’t a field/.test(w.msg)));
   assert.match(textToFields('X: number, required, stars 3', { forms }).errors[0].msg, /doesn’t apply/);
   assert.match(textToFields('X: calculated, required = 1', { forms }).errors[0].msg, /can’t be required/);
@@ -102,4 +103,17 @@ test('renaming a field updates calculations that use its old name', () => {
   assert.deepEqual(r.errors, []);
   assert.equal(r.fields[1].expr, '{Total budget} * 0.13');
   assert.match(textToFields('Total budget: currency  @a\nTax: calculated = {Budgt} * 0.13  @t\n', { fields, forms }).errors[0].msg, /\{Budgt\}/);
+});
+
+test('system names: written, read, and followed by calculations', () => {
+  const fields = [{ id: 'a', type: 'text', label: 'Name', width: 'half' }, { id: 't', type: 'formula', label: 'Greeting', expr: '{Name}', width: 'half' }];
+  assert.equal(fieldLine({ id: 'a', type: 'text', label: 'Name', sysName: 'Client name', width: 'half' }), 'Name: text, system name "Client name"  @a');
+  assert.equal(fieldLine({ id: 'a', type: 'text', label: 'Name', sysName: 'Name', width: 'half' }), 'Name: text  @a', 'the same as the caption: not written');
+  const r = textToFields('Name: text, system name "Client name"  @a\nGreeting: calculated = {Name}  @t\n', { fields, forms });
+  assert.deepEqual([r.errors, r.fields[0].sysName, r.fields[1].expr], [[], 'Client name', '{Client name}']);
+  const r2 = textToFields('Name: text  @a\nName: text, system name "Contact name"\nGreeting: calculated = {Contact name} & {Name}  @t\n', { fields, forms });
+  assert.deepEqual([r2.errors, r2.given], [[], []]);
+  assert.match(textToFields('Name: text, system name ""', { forms }).errors[0].msg, /needs a name/);
+  assert.match(textToFields('Name: text, system name "{x}"', { forms }).errors[0].msg, /can’t have/);
+  assert.deepEqual(changeLines(fieldChanges([{ id: 'a', type: 'text', label: 'Name' }], [{ id: 'a', type: 'text', label: 'Name', sysName: 'Client name' }])), ['Settings changed: Name']);
 });

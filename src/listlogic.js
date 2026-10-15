@@ -12,6 +12,7 @@
 //   filters  { <fieldId>: [option, …] }    choice fields only; a record matches any ticked option
 //   density  'cozy' | 'compact'
 
+import { shownName } from './fieldnames.js';
 import { titleFieldOf } from './reportlogic.js';
 
 export const NOCOL = new Set(['heading', 'signature']);
@@ -47,14 +48,14 @@ export function columnCatalog(ctx) {
   const own = form.name || 'This form';
   fieldsOf(form)
     .filter((f) => !NOCOL.has(f.type) && f.id !== titleField?.id)
-    .forEach((f) => out.push({ key: 'f:' + f.id, label: f.label || 'Untitled field', group: own + ' fields', src: f.type === 'formula' ? 'Calculation' : 'Field', num: isNumField(f), field: f, sum: SUMMABLE.has(f.type) || (f.type === 'formula' && ['number', 'decimal', 'currency'].includes(f.format)) }));
+    .forEach((f) => out.push({ key: 'f:' + f.id, label: shownName(form, f), group: own + ' fields', src: f.type === 'formula' ? 'Calculation' : 'Field', num: isNumField(f), field: f, sum: SUMMABLE.has(f.type) || (f.type === 'formula' && ['number', 'decimal', 'currency'].includes(f.format)) }));
   const parents = ctx.parents || [];
   if (parents.length) {
     out.push({ key: 'parent', label: 'Belongs to', group: 'Parent record', src: 'Parent', num: false });
     parents.forEach((pf) =>
       fieldsOf(pf)
         .filter((f) => !NOCOL.has(f.type))
-        .forEach((f) => out.push({ key: `p:${pf.id}:${f.id}`, label: `${pf.name} › ${f.label || 'Untitled field'}`, group: 'From ' + pf.name, src: pf.name, num: isNumField(f), field: f, form: pf }))
+        .forEach((f) => out.push({ key: `p:${pf.id}:${f.id}`, label: `${pf.name} › ${shownName(pf, f)}`, group: 'From ' + pf.name, src: pf.name, num: isNumField(f), field: f, form: pf }))
     );
   }
   (ctx.children || []).forEach((cf) => out.push({ key: 'kids:' + cf.id, label: cf.name, group: 'Counts', src: 'Count', num: true, sum: true, form: cf }));

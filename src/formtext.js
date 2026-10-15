@@ -1,3 +1,4 @@
+import { sysOf, uniqueSysNames } from './fieldnames.js';
 // Form designer → Fields → Text: a form's fields and sections as plain lines, and back.
 // Pure functions (no DOM, no Firebase), unit-tested.
 //
@@ -88,6 +89,7 @@ export function fieldLine(f, { formName = () => '', withId = true } = {}) {
     if (f.year) o.push('yearly');
   }
   if (f.help) o.push('help ' + quote(f.help));
+  if (String(f.sysName || '').trim() && String(f.sysName).trim() !== f.label) o.push('system name ' + quote(String(f.sysName).trim()));
   const expr = f.type === 'formula' ? ' = ' + String(f.expr || '').replace(/\s*\n\s*/g, ' ') : '';
   return `${nameOut(f.label || 'Untitled field')}: ${o.join(', ')}${expr}${tag}`;
 }
@@ -241,7 +243,7 @@ export function textToFields(text, ctx = {}) {
       if (!f.id) f.id = id || newId();
       const wasType = prev?.type;
       Object.assign(f, { type, label, required: false, width: defaultWidth(type), inList: false, help: '' });
-      for (const k of ['placeholder', 'min', 'max', 'step', 'suffix']) delete f[k];
+      for (const k of ['placeholder', 'min', 'max', 'step', 'suffix', 'sysName']) delete f[k];
       if (type === 'decimal') f.decimals = 2; else if (type !== 'formula') delete f.decimals;
       if (type === 'currency') f.currency = 'CAD'; else if (type !== 'formula') delete f.currency;
       if (type === 'rating') f.max = 5;
@@ -253,6 +255,8 @@ export function textToFields(text, ctx = {}) {
       if (type === 'relation') f.relForm = relForm; else delete f.relForm;
       for (const p of parts.slice(1)) {
         if (!p) throw new Error('There’s an extra comma.');
+        const sn = /^system\s+name\s+(.*)$/i.exec(p);
+        if (sn) { const v = unquote(sn[1]).trim(); if (!v) throw new Error('system name needs a name in quotes, like system name "Contact name".'); if (/[{}]/.test(v)) throw new Error('A system name can’t have { or } in it.'); f.sysName = v.slice(0, 80); continue; }
         const w = /^([a-z]+(?:\s+list)?)\b\s*(.*)$/i.exec(p);
         const key = (w ? w[1] : p).toLowerCase(), val = w ? w[2] : '';
         const only = (types, what) => { if (!types.includes(type)) throw new Error(`“${key}” doesn’t apply to a ${TYPE_NAME[type]} field${what ? ' (' + what + ')' : ''}.`); };
@@ -279,7 +283,7 @@ export function textToFields(text, ctx = {}) {
             if (!FORMATS.includes(fm)) throw new Error(`“as ${val}” isn’t a way to show a result. Use one of: ${FORMATS.join(', ')}.`);
             f.format = fm; if (fm === 'currency' && !f.currency) f.currency = 'CAD'; break;
           }
-          default: throw new Error(`“${p}” isn’t understood. You can use: required, half, full, in list, help "…", placeholder "…", min, max${type === 'formula' ? ', as currency' : ''}${type === 'autonumber' ? ', prefix, start, digits, yearly' : ''}.`);
+          default: throw new Error(`“${p}” isn’t understood. You can use: required, half, full, in list, help "…", placeholder "…", system name "…", min, max${type === 'formula' ? ', as currency' : ''}${type === 'autonumber' ? ', prefix, start, digits, yearly' : ''}.`);
         }
       }
       out.push(f);
@@ -287,26 +291,31 @@ export function textToFields(text, ctx = {}) {
       errors.push({ line, msg: e.message });
     }
   });
-  // calculations must name fields that exist; duplicate names make them ambiguous
-  const labels = new Map();
-  out.forEach((f) => { if (f.type !== 'heading') { const k = f.label.trim().toLowerCase(); labels.set(k, (labels.get(k) || 0) + 1); } });
+  // every field gets a unique system name (a second "Name" becomes "Name 2"); calculations must name fields that exist
   const lineOf = (f) => { let n = 0, k = -1; for (let i = 0; i < lines.length; i++) { const s = lines[i].trim(); if (!s || s.startsWith('//')) continue; k++; if (out[k] === f) { n = i + 1; break; } } return n; };
+  let given = [];
   if (!errors.length) {
-    // a renamed field: calculations that use its old name follow it, as in the designer
+    const u = uniqueSysNames(out);
+    given = u.given;
+    u.fields.forEach((f, i) => { if (f !== out[i]) out[i] = f; });
+    const lc = (x) => String(x).trim().toLowerCase();
+    const caps = new Map();
+    out.forEach((f) => { if (f.type !== 'heading') caps.set(lc(f.label), (caps.get(lc(f.label)) || 0) + 1); });
+    const sysNames = new Set(out.filter((f) => f.type !== 'heading').map((f) => lc(sysOf(f))));
+    const names = new Set(sysNames);
+    caps.forEach((n, k) => { if (n === 1) names.add(k); }); // a caption only one field has works too
+    // a renamed field: calculations that use its old system name follow it, as in the designer
     const renamed = new Map();
-    out.forEach((f) => { const o = cur.get(f.id); if (o && o.type !== 'heading' && f.type !== 'heading' && o.label !== f.label && !labels.has(String(o.label).trim().toLowerCase())) renamed.set(String(o.label).trim().toLowerCase(), f.label); });
+    out.forEach((f) => { const o = cur.get(f.id); if (o && o.type !== 'heading' && f.type !== 'heading' && sysOf(o) !== sysOf(f) && !sysNames.has(lc(sysOf(o)))) renamed.set(lc(sysOf(o)), sysOf(f)); });
     out.forEach((f) => {
-      if (f.type === 'heading') return;
-      if (labels.get(f.label.trim().toLowerCase()) > 1) warnings.push({ line: lineOf(f), msg: `Two fields are called “${f.label}”, so a calculation can’t tell them apart.` });
-      if (f.type === 'formula' && renamed.size) f.expr = String(f.expr).replace(/\{([^}]*)\}/g, (m, n) => (renamed.has(n.trim().toLowerCase()) ? '{' + renamed.get(n.trim().toLowerCase()) + '}' : m));
-      if (f.type === 'formula') {
-        const bad = [...String(f.expr).matchAll(/\{([^}]*)\}/g)].map((x) => x[1].trim()).filter((n) => !labels.has(n.toLowerCase()));
-        if (bad.length) errors.push({ line: lineOf(f), msg: `{${bad[0]}} isn’t a field on this form.` });
-      }
+      if (f.type !== 'formula') return;
+      if (renamed.size) f.expr = String(f.expr).replace(/\{([^}]*)\}/g, (m, n) => (renamed.has(lc(n)) ? '{' + renamed.get(lc(n)) + '}' : m));
+      const bad = [...String(f.expr).matchAll(/\{([^}]*)\}/g)].map((x) => x[1].trim()).filter((n) => !names.has(lc(n)));
+      if (bad.length) errors.push({ line: lineOf(f), msg: `{${bad[0]}} isn’t a field on this form.` });
     });
   }
   errors.sort((a, b) => a.line - b.line);
-  return { fields: errors.length ? null : out, errors, warnings };
+  return { fields: errors.length ? null : out, errors, warnings, given };
 }
 
 /* ---------- what changed ---------- */
@@ -315,7 +324,7 @@ function lisLength(arr) {
   arr.forEach((x) => { let lo = 0, hi = t.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] < x) lo = mid + 1; else hi = mid; } t[lo] = x; });
   return t.length;
 }
-const SAY = ['type', 'label', 'required', 'width', 'inList', 'help', 'placeholder', 'options', 'min', 'max', 'step', 'decimals', 'currency', 'suffix', 'prefix', 'start', 'digits', 'year', 'expr', 'format', 'relForm'];
+const SAY = ['type', 'label', 'sysName', 'required', 'width', 'inList', 'help', 'placeholder', 'options', 'min', 'max', 'step', 'decimals', 'currency', 'suffix', 'prefix', 'start', 'digits', 'year', 'expr', 'format', 'relForm'];
 const DEFAULTS = {
   decimal: { decimals: 2 }, currency: { currency: 'CAD' }, rating: { max: 5 }, range: { min: 0, max: 100, step: 1 },
   autonumber: { prefix: '', start: 1, digits: 1 }, formula: { format: 'decimal', decimals: 2 },
@@ -334,7 +343,7 @@ export function fieldChanges(before = [], after = [], countValues = () => 0) {
   after.forEach((f) => { if (!b.has(f.id)) ch.added.push(f.label); });
   before.forEach((f) => { if (!a.has(f.id)) ch.removed.push({ label: f.label, heading: f.type === 'heading', values: f.type === 'heading' ? 0 : countValues(f.id) }); });
   after.forEach((f) => { const o = b.get(f.id); if (o && o.label !== f.label) ch.renamed.push([o.label, f.label]); });
-  const ren = new Map(ch.renamed.map(([o, n]) => [String(o).trim().toLowerCase(), n]));
+  const ren = new Map(after.filter((f) => b.has(f.id) && sysOf(b.get(f.id)) !== sysOf(f)).map((f) => [sysOf(b.get(f.id)).trim().toLowerCase(), sysOf(f)]));
   const follow = (e) => String(e || '').replace(/\{([^}]*)\}/g, (m, n) => (ren.has(n.trim().toLowerCase()) ? '{' + ren.get(n.trim().toLowerCase()) + '}' : m));
   ch.followed = [];
   after.forEach((f) => {

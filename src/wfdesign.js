@@ -1,6 +1,7 @@
 // Form designer → Workflow tab: stages, who each goes to, its buttons, and fields per stage.
 // The logic lives in workflow.js; this file draws the editor and handles its events.
 import { esc, uid } from './ui.js';
+import { shownName } from './fieldnames.js';
 import { FIELD_MODES, defaultMoves, checkWorkflow } from './workflow.js';
 
 let H = { setFdirty: null, renderMain: null, people: () => [], groups: () => [], sections: () => [], ui: () => ({}) };
@@ -47,7 +48,7 @@ function stageCard(f, s, i, n) {
 function fieldTable(f) {
   const st = f.workflow.stages;
   const rows = [];
-  (f.fields || []).forEach((x) => rows.push({ key: x.id, label: x.type === 'heading' ? `Section: ${x.label}` : x.label, heading: x.type === 'heading', calc: ['formula', 'autonumber'].includes(x.type) }));
+  (f.fields || []).forEach((x) => rows.push({ key: x.id, label: x.type === 'heading' ? `Section: ${x.label}` : shownName(f, x), heading: x.type === 'heading', calc: ['formula', 'autonumber'].includes(x.type) }));
   H.sections(f).forEach((x) => rows.push({ key: x.key, label: x.label, section: true }));
   const cell = (r, s, si) => {
     if (r.section || r.heading) {

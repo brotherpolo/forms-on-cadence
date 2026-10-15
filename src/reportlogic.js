@@ -15,6 +15,7 @@
 //   formById(id), recById(id), records (visible records)
 //   valOf(field, rec, form), fmt(field, value), recTitle(rec, form), profiles
 
+import { shownName } from './fieldnames.js';
 export const GRID = 12;
 export const WIDTHS = [3, 4, 6, 8, 9, 12];
 export const MAX_ROWS = 4;
@@ -270,9 +271,10 @@ export function autoTitle(ctx, w) {
 export function refLabel(ctx, ref, baseForm) {
   const f = fieldOf(ctx, ref);
   if (!f) return 'Removed field';
-  if (ref.form === baseForm) return f.label;
   const form = ctx.formById(ref.form);
-  return (form ? form.name : '?') + ' › ' + f.label;
+  const name = form ? shownName(form, f) : f.label;
+  if (ref.form === baseForm) return name;
+  return (form ? form.name : '?') + ' › ' + name;
 }
 
 export function refsOf(w) {

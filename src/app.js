@@ -36,6 +36,7 @@ import { evaluate as evalRules, toClear, withoutCleared, NO_RULES, holdsValue, p
 import { initAutos } from './autos.js';
 import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesign.js';
 import { checkWorkflow } from './workflow.js';
+import { fieldByName, sysOf, uniqueSysNames, shownName } from './fieldnames.js';
 import * as fv from './formver.js';
 import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageName, stageView, withStageField, canWork, assigneeFor, movesOf, missingToMove, waited, stageDue, dueState, dayKey } from './workflow.js';
 import { initRules, viewRules, rulesClick, rulesChange, rulesInput, rulesListHTML, parentUse, rulesCtx } from './rulesui.js';
@@ -108,7 +109,6 @@ function mapUrl(v){if(!v)return '';if(v.lat!=null&&v.lng!=null&&v.lat!==''&&v.ln
 
 /* ---------- Calculations ---------- */
 const lc=s=>String(s||'').trim().toLowerCase();
-function fieldByName(form,name){const n=lc(name);return (form?.fields||[]).find(f=>f.type!=='heading'&&(lc(f.label)===n||f.id===name));}
 function rawFor(f,rec,form,depth,check){
   if(f.type==='formula')return evalFormula(form,f,rec,depth+1,check);
   const v=rec.values?.[f.id];
@@ -859,8 +859,7 @@ async function deleteAllMail(){
   renderMain();
 }
 function fieldTextByLabel(form,rec,label){
-  const n=String(label).trim().toLowerCase();
-  const f=(form.fields||[]).find(x=>x.type!=='heading'&&String(x.label||'').trim().toLowerCase()===n);
+  const f=fieldByName(form,label); // a {placeholder}: by system name (or a caption only one field has)
   if(!f)return undefined;
   return pdfText(f,valOf(f,rec,form));
 }
@@ -1647,13 +1646,13 @@ function viewFormEdit(){
       </aside>
       <aside class="panel dz-list" aria-label="Fields in this form">
         <h2 class="dz-h">In this form (${f.fields.length})</h2>
-        ${f.fields.length?`<ol class="dz-ol">${f.fields.map((x,i)=>`<li><button class="dz-li" data-act="focus-field" data-id="${x.id}"><span class="num">${i+1}</span><span class="fname">${esc(x.label||'Untitled field')}</span><span class="ftype">${esc(T[x.type].label)}</span></button></li>`).join('')}</ol>`:`<p class="note">No fields yet.</p>`}
+        ${f.fields.length?`<ol class="dz-ol">${f.fields.map((x,i)=>`<li><button class="dz-li" data-act="focus-field" data-id="${x.id}"><span class="num">${i+1}</span><span class="fname" title="${esc(x.type==='heading'?x.label:shownName(f,x))}">${esc(x.type==='heading'?(x.label||'Untitled field'):shownName(f,x))}</span><span class="ftype">${esc(T[x.type].label)}</span></button></li>`).join('')}</ol>`:`<p class="note">No fields yet.</p>`}
       </aside>
       <main class="panel dz-canvas" data-dz-canvas aria-label="Form canvas">
         ${f.fields.length?f.fields.map((x)=>`<div class="crow" data-feid="${x.id}">
           <button type="button" class="pgrip" data-pdrag="field" data-v="${x.id}" aria-label="Move ${esc(x.label||'field')}: drag, or use the up and down arrow keys" title="Drag to move"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="6" r="1.8"/><circle cx="16" cy="6" r="1.8"/><circle cx="8" cy="12" r="1.8"/><circle cx="16" cy="12" r="1.8"/><circle cx="8" cy="18" r="1.8"/><circle cx="16" cy="18" r="1.8"/></svg></button>
           <span class="glyph" title="${esc(T[x.type].label)}">${T[x.type].glyph}</span>
-          <div class="crow-m"><b id="frl-${x.id}">${esc(x.label||'Untitled field')}${x.required?'<span class="req">*</span>':''}</b><small>${esc(T[x.type].label)}${x.type==='relation'&&formById(x.relForm)?' → '+esc(formById(x.relForm).name):''}${x.inList?' · in list':''}${f.titleField===x.id?' · title':''}${ruleTag(f,x.id)}</small></div>
+          <div class="crow-m"><b id="frl-${x.id}">${esc(x.label||'Untitled field')}${x.required?'<span class="req">*</span>':''}</b><small>${esc(T[x.type].label)}${x.type!=='heading'&&String(x.sysName||'').trim()&&String(x.sysName).trim()!==x.label?` · <span class="sysn" title="System name">${esc(String(x.sysName).trim())}</span>`:''}${x.type==='relation'&&formById(x.relForm)?' → '+esc(formById(x.relForm).name):''}${x.inList?' · in list':''}${f.titleField===x.id?' · title':''}${ruleTag(f,x.id)}</small></div>
           <button class="ibtn dz-dots" data-act="open-field" data-id="${x.id}" aria-label="Options for ${esc(x.label||'field')}">⋯</button>
         </div>`).join(''):`<p class="note dz-empty">Drag a field type here to add it.</p>`}
         <div class="dz-drop">Drop a field type here</div>
@@ -1748,13 +1747,15 @@ function fieldEditor(x){
   const inp=(p,v,attrs='')=>`<input class="in" data-prop="${p}" value="${esc(v??'')}" ${attrs}>`;
   const num=(p,v)=>inp(p,v,'type="number" step="any" inputmode="decimal" data-kind="num"');
   const sw=(p,l)=>`<label class="switch"><input type="checkbox" data-prop="${p}" data-kind="bool"${x[p]?' checked':''}><span class="tr"></span><span>${l}</span></label>`;
-  let h=P('Label',inp('label',x.label))+P('Field type',`<select class="in" data-prop="type">${TYPES.map(t=>`<option value="${t[0]}"${t[0]===x.type?' selected':''}>${t[1]}</option>`).join('')}</select>`);
+  const shared=x.type!=='heading'&&fdraft.fields.some(o=>o.id!==x.id&&o.type!=='heading'&&String(o.label).trim().toLowerCase()===String(x.label).trim().toLowerCase());
+  let h=P(x.type==='heading'?'Label':'Caption',inp('label',x.label))+P('Field type',`<select class="in" data-prop="type">${TYPES.map(t=>`<option value="${t[0]}"${t[0]===x.type?' selected':''}>${t[1]}</option>`).join('')}</select>`);
+  if(x.type!=='heading')h+=`<label class="prop full"><span>System name</span>${inp('sysName',x.sysName||'',`maxlength="80" placeholder="${esc(x.label||'')}" autocomplete="off"`)}<small class="help">${shared?'<b>Another field has this caption.</b> Give this one its own system name. ':''}What calculations, email placeholders, automations and imports call this field, such as {${esc(sysOf(x))}}. People only see the caption. Empty: the same as the caption.</small></label>`;
   h+=P(x.type==='heading'?'Description':'Help text',inp('help',x.help),'full');
   if(x.type==='formula'){
     const others=fdraft.fields.filter(o=>o.id!==x.id&&o.type!=='heading');
     h+=`<label class="prop full"><span>Formula</span><textarea class="in fx" data-prop="expr" rows="3" spellcheck="false" autocapitalize="off" placeholder="{Price} * {Quantity}">${esc(x.expr||'')}</textarea></label>
     <div class="prop full"><span id="fxc-${x.id}" class="fxcheck${fxCheck(x).ok?'':' bad'}">${fxCheck(x).msg}</span></div>
-    <div class="prop full"><span>Insert a field</span><div class="chips">${others.length?others.map(o=>`<button type="button" class="chipbtn" data-act="fx-ins" data-fid="${x.id}" data-ins="{${esc(o.label)}}">${esc(o.label)}</button>`).join(''):'<span class="help">Add other fields first.</span>'}</div></div>
+    <div class="prop full"><span>Insert a field</span><div class="chips">${others.length?others.map(o=>`<button type="button" class="chipbtn" data-act="fx-ins" data-fid="${x.id}" data-ins="{${esc(sysOf(o))}}">${esc(sysOf(o))}</button>`).join(''):'<span class="help">Add other fields first.</span>'}</div></div>
     <div class="prop full"><span>Insert a function</span><div class="chips">${['+','-','*','/','( )','SUM(','ROUND(',"IF(",'DAYS(','TODAY()','CHILDSUM(','CHILDCOUNT(','PARENT('].map(fn=>`<button type="button" class="chipbtn fn" data-act="fx-ins" data-fid="${x.id}" data-ins="${esc(fn==='( )'?'(':fn.length===1?' '+fn+' ':fn)}">${esc(fn)}</button>`).join('')}</div></div>
     <div class="prop full">${FX_REF}</div>`;
     h+=P('Show result as',`<select class="in" data-prop="format">${[['decimal','Decimal number'],['number','Number'],['currency','Currency'],['percent','Percent'],['days','Days'],['text','Text']].map(([k,l])=>`<option value="${k}"${(x.format||'decimal')===k?' selected':''}>${l}</option>`).join('')}</select>`);
@@ -1822,9 +1823,12 @@ async function saveForm(meta){
   {const wp=checkWorkflow(f,{people:new Set(store.users.map(u=>u.id)),groups:new Set(store.groups.map(g=>g.id))});if(wp.length){ui.tab='workflow';renderMain();toast('Workflow: '+wp[0]);return;}}
   if(f.workflow?.stages){f.workflow.stages.forEach(x=>{x.name=String(x.name||'').trim();x.moves=(x.moves||[]).filter(m=>m.label&&m.label.trim()&&f.workflow.stages.some(y=>y.id===m.to));});}
   f.fields.forEach(x=>{if(!x.label.trim())x.label='Untitled field';if(CHOICE.has(x.type))x.options=(x.options||[]).filter(Boolean);});
+  // system names: unique on the form; one the same as the caption isn't stored
+  f.fields.forEach(x=>{const sn=String(x.sysName||'').trim();if(!sn||sn===x.label.trim())delete x.sysName;else x.sysName=sn.slice(0,80);});
+  {const u=uniqueSysNames(f.fields);if(u.given.length){f.fields=u.fields;setTimeout(()=>toast(u.given.length===1?`Two fields were called “${u.given[0].label}”, so the second has the system name “${u.given[0].sysName}” (for calculations and placeholders).`:`${u.given.length} fields shared a name, so they got unique system names (${u.given.map(g=>g.sysName).join(', ')}).`),1600);}}
   const reEsc=t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-  Object.entries(f._labels||{}).forEach(([id,old])=>{const nf=f.fields.find(z=>z.id===id);if(!nf||!old||nf.label===old)return;f.fields.filter(z=>z.type==='formula'&&z.expr).forEach(z=>{z.expr=z.expr.replace(new RegExp('\\{\\s*'+reEsc(old)+'\\s*\\}','gi'),()=>'{'+nf.label+'}');});});
-  const renames=Object.entries(f._labels||{}).map(([id,old])=>[old,f.fields.find(z=>z.id===id)?.label]).filter(([o,n])=>o&&n&&o!==n);
+  Object.entries(f._labels||{}).forEach(([id,old])=>{const nf=f.fields.find(z=>z.id===id);if(!nf||!old||sysOf(nf)===old)return;f.fields.filter(z=>z.type==='formula'&&z.expr).forEach(z=>{z.expr=z.expr.replace(new RegExp('\\{\\s*'+reEsc(old)+'\\s*\\}','gi'),()=>'{'+sysOf(nf)+'}');});});
+  const renames=Object.entries(f._labels||{}).map(([id,old])=>{const nf=f.fields.find(z=>z.id===id);return [old,nf?sysOf(nf):null];}).filter(([o,n])=>o&&n&&o!==n);
   const q='["\']';
   const others=renames.length&&!f.isNew?store.forms.filter(o=>o.id!==f.id&&(o.fields||[]).some(z=>z.type==='formula'&&z.expr)):[];
   const nameRe=reEsc(f.name.trim());
@@ -1852,7 +1856,7 @@ async function saveForm(meta){
     for(const nf of pending){const o=clone(nf);o.name=o.name.trim();o.order=Math.max(0,...store.forms.map(x=>x.order||0))+1;o.updatedAt=Date.now();await store.put('forms',o);}
     for(const [o,v] of inheritChanges)await store.put('forms',{...o,inheritAccess:v,updatedAt:Date.now()});
   }catch(e){toast('Saving the sub-forms failed. Check your connection and try again.');return;}
-  f._labels=Object.fromEntries(f.fields.map(x=>[x.id,x.label]));
+  f._labels=Object.fromEntries(f.fields.map(x=>[x.id,sysOf(x)]));
   const out=clone(f);delete out.dirty;delete out.isNew;delete out._labels;delete out._newForms;delete out._inherit;out.name=out.name.trim();
   if(out.rules){const c=rulesCtx(f);out.rules=pruneRules(withStageField(out),{targets:c.targets,parentFields:c.parentFields});if(!out.rules.length)delete out.rules;}
   // changed rules: saved records they'd empty fields on are cleared now (with Undo) or on their next save
@@ -1935,7 +1939,7 @@ function ruleApplyDialog(){
 }
 function editForm(id){
   const src=formById(id);if(!src||!guard())return;
-  fdraft={...clone(src),fields:clone(src.fields||[]),children:clone(src.children||[]),dirty:false,isNew:false,_labels:Object.fromEntries((src.fields||[]).map(x=>[x.id,x.label]))};pdraft=null;fv.openForm(id);ui.saveMeta=null;
+  fdraft={...clone(src),fields:clone(src.fields||[]),children:clone(src.children||[]),dirty:false,isNew:false,_labels:Object.fromEntries((src.fields||[]).map(x=>[x.id,sysOf(x)]))};pdraft=null;fv.openForm(id);ui.saveMeta=null;
   go({name:'formEdit',formId:id});
 }
 
@@ -2183,6 +2187,7 @@ document.addEventListener('input',e=>{
     f[p]=k==='num'?(t.value===''?null:Number(t.value)):k==='lines'?t.value.split('\n').map(s=>s.trim()):p==='currency'?t.value.toUpperCase():t.value;
     if(p==='expr')updateFxCheck(f);
     if(f.type==='autonumber'){const ap=document.getElementById('ap-'+f.id);if(ap)ap.innerHTML=autoPrev(f);}
+    if(p==='sysName')fdraft.fields.filter(z=>z.type==='formula').forEach(updateFxCheck);
     if(p==='label'){fdraft.fields.filter(z=>z.type==='formula').forEach(updateFxCheck);const l=document.getElementById('frl-'+f.id);if(l)l.innerHTML=esc(f.label||'Untitled field')+(f.required?'<span class="req">*</span>':'');}
     setFdirty();
   }

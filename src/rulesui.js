@@ -5,6 +5,7 @@
 import { esc, uid } from './ui.js';
 import { ACTIONS, opsFor, opOf, kindOf, targetsOf, actionFits, checkRules, ruleText, ruleLabel } from './rules.js';
 import { withStageField } from './workflow.js';
+import { shownName } from './fieldnames.js';
 
 let H = { fdraft: () => null, formById: null, recById: null, parentsOf: null, recordsOf: null, recTitle: null, setFdirty: null, renderMain: null, ui: () => ({}), canSeeTasks: () => true };
 export function initRules(helpers) { H = { ...H, ...helpers }; initDrag(); }
@@ -47,7 +48,7 @@ const fieldOf = (ctx, c) => (!c.src || c.src === 'self' ? (ctx.form.fields || []
 function fieldPick(ctx, c, at) {
   const own = (ctx.form.fields || []).filter((x) => x.type !== 'heading');
   const cur = c.field ? (c.src && c.src !== 'self' ? c.src : 'self') + '|' + c.field : '';
-  const opt = (src, x) => `<option value="${esc(src + '|' + x.id)}"${cur === src + '|' + x.id ? ' selected' : ''}>${esc(x.label || 'Untitled field')}</option>`;
+  const opt = (src, x) => `<option value="${esc(src + '|' + x.id)}"${cur === src + '|' + x.id ? ' selected' : ''}>${esc(src === 'self' ? shownName(ctx.form, x) : x.label || 'Untitled field')}</option>`;
   let html = `<select class="in rl-f" ${at} data-rlc="field" aria-label="Field"><option value="">Pick a field…</option><optgroup label="This form">${own.map((x) => opt('self', x)).join('')}</optgroup>`;
   ctx.parentFields.forEach((p, id) => { html += `<optgroup label="Parent: ${esc(p.name)}">${p.fields.map((x) => opt(id, x)).join('')}</optgroup>`; });
   if (c.field && !fieldOf(ctx, c)) html += `<option value="${esc(cur)}" selected>(deleted field)</option>`;

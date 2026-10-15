@@ -1,6 +1,7 @@
 // Form designer: the Fields tab's Text view, the History tab (versions), drafts and Make active.
 // The text format and change summaries are in formtext.js (pure); storage in store.js.
 import { esc } from './ui.js';
+import { sysOf } from './fieldnames.js';
 import { newVersionId, putVersion, loadVersions } from './store.js';
 import { formToText, textToFields, fieldChanges, changeLines, formChangeLines, readVersionFile, TYPE_LIST } from './formtext.js';
 
@@ -50,7 +51,7 @@ function draftFrom(v) {
   f.id = V.formId;
   f.children = (f.children || []).filter((c) => H.formById(c.formId));
   if (saved) { f.order = saved.order; f.activeVersion = saved.activeVersion; }
-  return { ...f, fields: f.fields || [], dirty: true, isNew: false, _labels: Object.fromEntries((saved?.fields || []).map((x) => [x.id, x.label])) };
+  return { ...f, fields: f.fields || [], dirty: true, isNew: false, _labels: Object.fromEntries((saved?.fields || []).map((x) => [x.id, sysOf(x)])) };
 }
 
 /* ---------- writing versions ---------- */
@@ -121,10 +122,11 @@ export function switchHTML() {
 const CHEAT = `<details class="fxref ft-help"><summary>How to write fields</summary><div class="ft-helpb">
   <p><code>Name: type, options</code> on each line. <code># Section name</code> starts a section. Lines starting <code>//</code> are notes and are ignored.</p>
   <p><b>Types:</b> ${TYPE_LIST.map((t) => `<code>${esc(t)}</code>`).join(' ')}</p>
-  <p><b>Options:</b> <code>required</code> <code>half</code> <code>full</code> <code>in list</code> (a column in the starting list) <code>help "…"</code> <code>placeholder "…"</code> <code>min 0</code> <code>max 100</code> <code>decimals 2</code> <code>currency USD</code> · sliders: <code>step 5</code> <code>suffix "%"</code> · ratings: <code>stars 10</code> · auto numbers: <code>prefix "INV-"</code> <code>start 100</code> <code>digits 4</code> <code>yearly</code></p>
+  <p><b>Options:</b> <code>required</code> <code>half</code> <code>full</code> <code>in list</code> (a column in the starting list) <code>help "…"</code> <code>placeholder "…"</code> <code>system name "Contact name"</code> <code>min 0</code> <code>max 100</code> <code>decimals 2</code> <code>currency USD</code> · sliders: <code>step 5</code> <code>suffix "%"</code> · ratings: <code>stars 10</code> · auto numbers: <code>prefix "INV-"</code> <code>start 100</code> <code>digits 4</code> <code>yearly</code></p>
   <p><b>Choices:</b> <code>Status: dropdown [Open, In progress, Closed]</code> (also <code>single choice</code>, <code>multiple choice</code>). Put an option in quotes if it has a comma.</p>
   <p><b>Calculations:</b> <code>Total: calculated, as currency = {Price} * {Quantity}</code>. Show as decimal, number, currency, percent, days or text.</p>
   <p><b>Links:</b> <code>Client: link to Clients</code></p>
+  <p><b>Captions and system names:</b> the name before the colon is the caption people see, and several fields can share one. Calculations and {placeholders} use the <b>system name</b>, which is the caption unless you add <code>system name "…"</code>. Two fields with the same caption and no system name: the second gets one, like “Name 2”.</p>
   <p><b>The @tag</b> at the end of a line is that field’s identity. Change anything before it and it’s still the same field, with its saved values. To add a field, write a new line without a tag. Delete a line to remove the field (saved values are kept, hidden, and Version history can bring it back).</p></div></details>`;
 
 export function viewText(f) {
@@ -148,6 +150,7 @@ function applyText(f) {
   t.result = r;
   if (r.errors.length) { t.preview = null; H.renderMain(); setTimeout(() => document.querySelector('.ft-errs')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 0); return; }
   const lines = changeLines(fieldChanges(f.fields, r.fields, countValues(f.id)));
+  (r.given || []).forEach((g) => { const l = `${g.label}: system name set to “${g.sysName}”, since another field is called that. Rename it with system name "…" if you like.`; if (!lines.includes(l)) lines.push(l); });
   if (!lines.length) { t.result = null; t.preview = null; t.base = t.value; t.dirty = false; H.renderMain(); H.toast('Nothing changed.'); return; }
   t.preview = { fields: r.fields, lines, warnings: r.warnings };
   H.renderMain();

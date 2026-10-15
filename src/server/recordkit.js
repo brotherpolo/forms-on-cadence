@@ -9,6 +9,7 @@
 import { FX } from '../formulas.js';
 import { fieldItem } from '../pdfdoc.js';
 import { evaluate, NO_RULES } from '../rules.js';
+import { fieldByName } from '../fieldnames.js';
 import { withStageField, stageName, STAGE_FIELD, stageView } from '../workflow.js';
 
 const POPUP = new Set(['textarea', 'file', 'image', 'signature', 'location', 'multiselect']);
@@ -70,7 +71,7 @@ export function makeKit({ forms = [], records = [], locale = 'en-CA', timeZone =
       }
     } catch (e) { return String(v); }
   }
-  const fieldByName = (form, name) => { const n = lc(name); return (form?.fields || []).find((f) => f.type !== 'heading' && (lc(f.label) === n || f.id === name)); };
+  // by system name, ID, or a caption only one field has (fieldnames.js)
   function rawFor(f, rec, form, depth) {
     if (f.type === 'formula') return evalFormula(form, f, rec, depth + 1);
     const v = f.type === 'autonumber' ? rec.nums?.[f.id] : rec.values?.[f.id];

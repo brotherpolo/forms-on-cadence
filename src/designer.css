@@ -264,3 +264,4 @@ body.pd-on .pgrip{cursor:grabbing}
 
 .wf-due{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .wf-duein{width:76px}
+.sysn{font-family:var(--mono);font-size:11px}

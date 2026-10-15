@@ -280,6 +280,14 @@ A view only decides how the list looks. It never shows anyone records they could
 
 **Email PDF** also has an **Attach the PDF** switch (on by default); off sends just the message.
 
+## Captions and system names
+
+A field has a **caption** (what people see on the form, in lists and in the PDF) and a **system name** (what calculations, `{placeholders}`, automations, imports and Text view call it). The system name is the caption unless you set one (field settings → **System name**), so several fields can share a caption such as "Name" while each stays unique: `{Client name}`, `{Contact name}`. `src/fieldnames.js` holds the rules (pure, unit-tested):
+- Lookups go by system name, then field ID, then a caption only one field has (older calculations keep working).
+- **Save form** gives a field whose name is already taken its own system name ("Name 2") and says so; renaming one, or renaming in Text view, updates calculations that use it.
+- Where fields sit side by side (rule and report pickers, list columns, the designer outline), a shared caption shows which is which: "Name (Contact name)", or its section when it has no system name.
+- Import templates head each column with the system name; a file headed with the caption still matches.
+
 ## Text view and version history (form designer)
 
 **Fields → Visual | Text.** Text shows every field and section as one line, for big changes: add many fields at once, rename, reorder by moving lines, delete lines, or paste a list. `src/formtext.js` reads and writes the format (pure, unit-tested); `src/formver.js` is the screen. The designer always opens in Visual; the switch is hidden on phone-width screens.
@@ -290,9 +298,11 @@ Project name: text, required, in list  @p_title
 Stage: dropdown [Scoping, In progress, Done], half  @p_stage
 Budget with tax: calculated, as currency = ROUND({Budget} * 1.13, 2)  @p_tax
 Client: link to Clients
+# Contact
+Name: text, system name "Contact name"
 ```
 
-- The `@tag` is the field's ID: words before it can change and it's the same field with the same saved values. A line without a tag is a new field. Settings the text can't express are kept.
+- The `@tag` is the field's ID: words before it can change and it's the same field with the same saved values. A line without a tag is a new field. Settings the text can't express are kept. `system name "…"` sets a field's system name (see Captions and system names).
 - **Apply changes** checks every line (mistakes listed by line, with "did you mean"), then shows what will change (added, removed with how many records have values, renamed, moved, settings) before it goes into the designer. Renaming a field updates calculations that use its old name. Nothing is live until **Save form**.
 
 **Version history** (the **History** tab, admins). Every **Save form** stores a copy of the whole form (fields, sections, relationships, rules, workflow, settings) in `forms/{id}/versions/{versionId}`: `{ n, at, by, kind, note, from, fromN, summary[], form }`, and the form records which version is live in `activeVersion`. The first save after this update also stores the form as it was ("Before version history").
