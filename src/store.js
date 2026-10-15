@@ -248,7 +248,7 @@ function syncRecordSubs() {
       (s) => {
         recordsByForm.set(
           formId,
-          s.docs.map((d) => ({ ...d.data(), id: d.id }))
+          s.docs.map((d) => withNums({ ...d.data(), id: d.id }))
         );
         store.recordsLoading.delete(formId);
         flattenRecords();
@@ -418,7 +418,7 @@ export async function runImport({ id, formId, formName, fileName, counts, create
       (b) => b.set(doc(db, 'records', u.id), plain({
         formId: old.formId, values: u.values || {}, parentId: u.parentId || null, parentFormId: u.parentFormId || null,
         ownerId: old.ownerId, createdBy: old.createdBy, createdAt: old.createdAt || stamp, updatedAt: stamp, updatedBy: me,
-      })),
+      }), KEEP_NUMS),
     ]);
   });
   const total = groups.length;
@@ -457,7 +457,7 @@ export async function undoImport(imp, plan) {
     ops.push((b) => b.set(doc(db, 'records', x.id), plain({
       formId: old.formId, values: x.values || {}, parentId: x.parentId || null, parentFormId: x.parentFormId || null,
       ownerId: old.ownerId, createdBy: old.createdBy, createdAt: old.createdAt || now, updatedAt: now, updatedBy: me,
-    })));
+    }), KEEP_NUMS));
   });
   (imp.updated || []).forEach((rid) => ops.push((b) => b.delete(doc(db, 'imports', imp.id, 'before', rid))));
   await commitOps(ops);
@@ -482,7 +482,40 @@ export async function writeMigration(mig, legacyId) {
   await commitOps(ops);
 }
 
+/* ---------- Auto numbers ---------- */
+
+/**
+ * A record's auto numbers (nums, written only by the server) shown as ordinary field values,
+ * so lists, reports, search, titles and PDFs need nothing special. The server's number wins.
+ */
+export function withNums(r) {
+  if (!r || !r.nums || typeof r.nums !== 'object') return r;
+  const form = store.forms.find((f) => f.id === r.formId);
+  // only fields that are still Auto number (one changed back to text shows what's typed)
+  const keep = form ? Object.fromEntries(Object.entries(r.nums).filter(([k]) => (form.fields || []).some((f) => f.id === k && f.type === 'autonumber'))) : r.nums;
+  return { ...r, values: { ...(r.values || {}), ...keep } };
+}
+
+const fns = () => getFunctions(app, 'us-central1');
+/** Admins: number the records of a form that have none yet (keeps numbers already typed in). */
+export async function fillAutoNumbers(formId, fieldId) {
+  return (await httpsCallable(fns(), 'autoNumberFill')({ formId, fieldId })).data;
+}
+/** Admins: change one record's number (must be unique on its form). */
+export async function setAutoNumber(recordId, fieldId, value) {
+  return (await httpsCallable(fns(), 'autoNumberSet')({ recordId, fieldId, value })).data;
+}
+/** Admins: the next number a field will hand out ({ next, years } or null). */
+export async function autoCounter(formId, fieldId) {
+  try { const s = await getDoc(doc(db, 'counters', `${formId}__${fieldId}`)); return s.exists() ? s.data() : null; } catch (e) { return null; }
+}
+
 /* ---------- Writes ---------- */
+
+// A record is always written with these fields only, so the server's auto numbers (nums,
+// autoLog) on it are left as they are.
+const RECORD_FIELDS = ['formId', 'values', 'parentId', 'parentFormId', 'ownerId', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy'];
+const KEEP_NUMS = { mergeFields: RECORD_FIELDS };
 
 const plain = (o) => JSON.parse(JSON.stringify(o ?? null));
 
@@ -499,7 +532,7 @@ async function del(col, id) {
 
 /** Save a record, stamping ownership. Owner and creator never change after creation. */
 export async function putRecord(rec) {
-  await setDoc(doc(db, 'records', rec.id), recordData(rec));
+  await setDoc(doc(db, 'records', rec.id), recordData(rec), KEEP_NUMS);
 }
 
 /**
@@ -507,8 +540,8 @@ export async function putRecord(rec) {
  * IDs to delete. Up to 450 writes go in one batch, so a normal save is all-or-nothing.
  */
 export async function saveRecordBundle(rec, rows, removedIds) {
-  const ops = [(b) => b.set(doc(db, 'records', rec.id), recordData(rec))];
-  rows.forEach((r) => ops.push((b) => b.set(doc(db, 'records', r.id), recordData(r))));
+  const ops = [(b) => b.set(doc(db, 'records', rec.id), recordData(rec), KEEP_NUMS)];
+  rows.forEach((r) => ops.push((b) => b.set(doc(db, 'records', r.id), recordData(r), KEEP_NUMS)));
   removedIds.forEach((id) => ops.push((b) => b.delete(doc(db, 'records', id))));
   await commitOps(ops);
 }

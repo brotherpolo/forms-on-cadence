@@ -76,6 +76,7 @@ src/
   imports.js, imports.css  Import screens: templates menu, choose file, match columns, check rows, history and undo
   importlogic.js           Templates, column matching, checking rows, undo plans (pure, unit-tested)
   xlsx.js                  Reads and writes .xlsx and .csv with no extra packages (unit-tested)
+  autonum.js               Auto number: how numbers look, next number, records still to number (pure, unit-tested)
   sublogic.js, subui.js    Sections under a record: columns, sort, Show menu, task cells (sublogic pure, unit-tested)
   pdfdoc.js                Export PDF: field layout, text wrapping, table columns, file names (pure, unit-tested)
   pdfdraw.js               Export PDF: draws the document with pdf-lib (unit-tested)
@@ -102,13 +103,14 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | Collection | Document | Written by |
 |---|---|---|
 | `forms/{formId}` | `name, itemName, description, color, showInSidebar, order, titleField, fields[], children[]` | admins |
-| `records/{id}` | `formId, values{fieldId: value}, parentId, parentFormId, ownerId, createdBy, createdAt, updatedAt, updatedBy` | per access |
+| `records/{id}` | `formId, values{fieldId: value}, parentId, parentFormId, ownerId, createdBy, createdAt, updatedAt, updatedBy`; `nums{fieldId: number}` and `autoLog[]` from the server | per access (`nums`, `autoLog`: server only) |
 | `groups/{id}` | `name, description, access{formId or "*": {view, edit}}` | admins |
 | `users/{uid}` | `email, displayName, role, groups[], access{…}, createdAt` | self on first sign-in; admins after |
 | `profiles/{uid}` | `displayName` (readable by everyone signed in, for "Created by") | self |
 | `listViews/{id}` | `formId, name, ownerId, shared, cols[], sort{key, dir}, filters{fieldId: [options]}, density, createdAt, updatedAt` | owner (private); admins (shared, and `dflt-<formId>`) |
 | `imports/{id}` | `formId, formName, fileName, ownerId, createdAt, stamp, status, added[], updated[], counts{}, finishedAt, undoneAt, undoneBy, undo{}` | admins |
 | `settings/exports` | `companyName, logo` (PNG or JPEG data URL, under 600 KB)`, updatedAt, updatedBy`: the top of exported PDFs | admins (everyone let in reads it) |
+| `counters/{formId}__{fieldId}` | `next`, `years{YYYY: next}`: the next auto number | server only (admins read) |
 | `imports/{id}/before/{recordId}` | `values, parentId, parentFormId, updatedAt, updatedBy`: a record as it was before the import changed it | admins |
 
 Files go to Cloud Storage. The record stores `{name, size, type, path, url}`. Signatures are stored inline as small PNG data URLs.
@@ -229,6 +231,17 @@ Each form's list can be set up from the list itself.
 - **Phones:** the list shows cards with tick boxes, and menus open as a sheet at the bottom.
 
 A view only decides how the list looks. It never shows anyone records they couldn't already see.
+
+## Auto number fields
+
+**Auto number** (Numbers group in the form designer) gives every record its own number when it's first saved: invoices, quotes, work orders, anything. Settings: **Prefix** (e.g. `INV-`), **Starting number**, **Minimum digits** (zero-padded) and **Add the year** (`INV-2026-0001`, starting again each January, Toronto time).
+
+- **Given out by the server.** The Cadence functions (`autoNumberOnCreate`) hand out the next number from a counter in a transaction, so two saves at once, phones saving offline, imports and grid rows all get different numbers. The number shows a second or two after saving ("Being assigned…" until then).
+- **Nobody can type over it.** Numbers live in `records/{id}.nums`, which the rules let only the server write. Every record save writes just the record's own fields (`setDoc` with `mergeFields`), so the number is never lost.
+- **Never reused**, even after a delete. Raising the starting number moves numbering on; lowering it never goes back.
+- **Existing records:** after saving the form, the field's settings show how many records have no number and **Number them now** (oldest first). Changing an existing text or number field's type to Auto number **keeps the numbers already typed in** and carries on after the highest one; clashing typed numbers are listed.
+- **Admins can change a number** (record → **Change…**), with a warning. It must not be in use on the same form, the change is noted on the record (`autoLog`), and the counter moves past it so it's never handed out again.
+- Works like any field elsewhere: as the record's title, list column, search, reports, CSV and PDF. Imports leave it to the server, and copying from a parent skips it.
 
 ## Sections under a record (grids, child records, Tasks)
 

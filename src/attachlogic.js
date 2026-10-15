@@ -37,7 +37,7 @@ export function attachCandidates(opts) {
 export function matchingFields(parentForm, childForm) {
   const out = [];
   (childForm?.fields || []).forEach((f) => {
-    if (f.type === 'formula' || f.type === 'heading') return;
+    if (f.type === 'formula' || f.type === 'heading' || f.type === 'autonumber') return;
     const m = (parentForm?.fields || []).find((p) => p.type === f.type && lc(p.label) === lc(f.label));
     if (m) out.push([f.id, m.id]);
   });

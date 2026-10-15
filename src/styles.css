@@ -400,3 +400,17 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .ex-ttl small{display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:#3346c8}
 .ex-ttl b{font-size:19px}
 @media (max-width:520px){.recbar #pdf-btn{padding-inline:10px}}
+
+/* Auto number fields */
+.calc.auto{font-family:var(--mono);font-weight:600;letter-spacing:.01em}
+.calc.auto.muted{font-family:inherit;font-weight:400;color:var(--muted)}
+.autow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.autow .calc{flex:0 1 auto}
+.anedit{display:flex;flex-direction:column;gap:8px}
+.anwarn{margin:0;font-size:13px;line-height:1.45;background:var(--warn-soft,var(--sunk));border-radius:9px;padding:10px 12px}
+.anedit .row2{display:flex;gap:8px;flex-wrap:wrap}
+.anedit .in{flex:1 1 160px;font-family:var(--mono)}
+.autoprev{font-family:var(--mono);font-size:14px;padding:6px 0}
+.anfill{background:var(--sunk);border-radius:10px;padding:10px 12px}
+.anfill p{margin:0 0 8px}
+.gauto{font-family:var(--mono)}

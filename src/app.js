@@ -4,6 +4,7 @@ import './grids.css';
 import { readTheme, applyTheme, nextTheme, themeLabel } from './theme.js';
 // Admin screens (users and groups) live in admin.js; data access in store.js.
 
+import { fillAutoNumbers, setAutoNumber, autoCounter } from './store.js';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
@@ -24,6 +25,7 @@ import { isAdmin, formLevel, canViewForm, canCreate, canEditRecord } from './acc
 import * as admin from './admin.js';
 import { leave as exportLeave } from './exportset.js';
 import { fieldItem } from './pdfdoc.js';
+import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
 import { signOutUser } from './auth.js';
 import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
 import examples from './examples.json';
@@ -31,11 +33,11 @@ import examples from './examples.json';
 const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'import', 'imports', 'exports']);
 
 // other words people search field types by
-const TYPE_WORDS={text:'short single line string name title',textarea:'long paragraph notes description multi line memo comments',email:'mail address',phone:'telephone mobile cell number',url:'website link web address',location:'address map gps place',number:'integer whole count quantity',decimal:'float number fraction',currency:'money price cost dollar amount',percent:'percentage rate',rating:'stars score',range:'slider scale',formula:'calculation calculated computed formula sum total',date:'day calendar',time:'clock hour',datetime:'timestamp date time when',checkbox:'yes no toggle boolean switch tick check',select:'dropdown choice pick list menu options',radio:'single choice option buttons one of',multiselect:'multiple choice checkboxes tags many',file:'upload attachment document pdf',image:'photo picture camera',signature:'sign autograph',color:'colour',relation:'link to record lookup reference relationship connect',heading:'section heading title divider group fold'};
+const TYPE_WORDS={text:'short single line string name title',textarea:'long paragraph notes description multi line memo comments',email:'mail address',phone:'telephone mobile cell number',url:'website link web address',location:'address map gps place',number:'integer whole count quantity',decimal:'float number fraction',currency:'money price cost dollar amount',percent:'percentage rate',rating:'stars score',range:'slider scale',formula:'calculation calculated computed formula sum total',autonumber:'auto number automatic sequence serial counter invoice id reference numbering',date:'day calendar',time:'clock hour',datetime:'timestamp date time when',checkbox:'yes no toggle boolean switch tick check',select:'dropdown choice pick list menu options',radio:'single choice option buttons one of',multiselect:'multiple choice checkboxes tags many',file:'upload attachment document pdf',image:'photo picture camera',signature:'sign autograph',color:'colour',relation:'link to record lookup reference relationship connect',heading:'section heading title divider group fold'};
 const TYPES=[
  ['text','Short text','Aa','Text'],['textarea','Long text','¶','Text'],
  ['email','Email','@','Contact'],['phone','Phone','+1','Contact'],['url','Website','//','Contact'],['location','Location','⌖','Contact'],
- ['number','Whole number','12','Numbers'],['decimal','Decimal','1.5','Numbers'],['currency','Currency','$','Numbers'],['percent','Percent','%','Numbers'],['rating','Rating','★','Numbers'],['range','Slider','⟷','Numbers'],['formula','Calculation','ƒx','Numbers'],
+ ['number','Whole number','12','Numbers'],['decimal','Decimal','1.5','Numbers'],['currency','Currency','$','Numbers'],['percent','Percent','%','Numbers'],['rating','Rating','★','Numbers'],['autonumber','Auto number','#','Numbers'],['range','Slider','⟷','Numbers'],['formula','Calculation','ƒx','Numbers'],
  ['date','Date','D','Date & time'],['time','Time','T','Date & time'],['datetime','Date & time','DT','Date & time'],
  ['checkbox','Yes / No','✓','Choices'],['select','Dropdown','▾','Choices'],['radio','Single choice','◉','Choices'],['multiselect','Multiple choice','☰','Choices'],
  ['file','File upload','⇪','Media'],['image','Photo','▣','Media'],['signature','Signature','✎','Media'],['color','Color','◐','Media'],
@@ -78,6 +80,7 @@ function fmt(f,v){
     case 'location':return v.address||(v.lat!=null?`${v.lat}, ${v.lng}`:'');
     case 'file':case 'image':return v.name||'File';
     case 'signature':return 'Signed';
+    case 'autonumber':return String(v);
     case 'relation':{const r=recById(v);return r?recTitle(r):'(removed)';}
     case 'date':return new Date(v+'T00:00').toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
     case 'datetime':return new Date(v).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
@@ -144,7 +147,7 @@ const ui={search:'',openField:null,tab:'fields',palette:false,confirm:null,leave
 function dirty(){return (view.name==='record'&&rdraft?.dirty)||(view.name==='formEdit'&&fdraft?.dirty)||(view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId))||admin.isDirty(view)}
 function guard(){if(importRunning()){toast('The import is still running. Wait for it to finish.');return false;}if(dirty()&&!ui.leaveOk){ui.leaveOk=true;toast('You have unsaved changes. Tap again to leave without saving.');setTimeout(()=>ui.leaveOk=false,4000);return false;}ui.leaveOk=true;return true;}
 export function goRec(draft,v){if(!guard())return;rdraft=draft;go(v);}
-export function go(v,push=true){ui.subPop=null;
+export function go(v,push=true){ui.subPop=null;ui.anEdit=null;
   if(ADMIN_VIEWS.has(v.name)&&!isAdmin(store.me)){toast('Only administrators can open that.');return false;}
   if((v.name==='records'||v.name==='record')&&!canViewForm(store.me,v.formId)){toast('You don’t have access to that form.');return false;}
   if(!guard())return false;
@@ -500,7 +503,7 @@ function newRecordDraft(form,parent){
   let copied=0;
   if(parent){
     const pf=formById(parent.formId);const rel=(pf?.children||[]).find(c=>c.formId===form.id);
-    if(rel?.copy&&pf){(form.fields||[]).forEach(f=>{const m=f.type!=='formula'&&pf.fields.find(p=>p.type===f.type&&p.type!=='heading'&&p.label.trim().toLowerCase()===f.label.trim().toLowerCase());if(m&&!isEmpty(parent.values?.[m.id])){values[f.id]=clone(parent.values[m.id]);copied++;}});}
+    if(rel?.copy&&pf){(form.fields||[]).forEach(f=>{const m=f.type!=='formula'&&f.type!=='autonumber'&&pf.fields.find(p=>p.type===f.type&&p.type!=='heading'&&p.label.trim().toLowerCase()===f.label.trim().toLowerCase());if(m&&!isEmpty(parent.values?.[m.id])){values[f.id]=clone(parent.values[m.id]);copied++;}});}
     (form.fields||[]).forEach(f=>{if(f.type==='relation'&&f.relForm===parent.formId&&isEmpty(values[f.id]))values[f.id]=parent.id;});
   }
   return {formId:form.id,recordId:null,values,parentId:parent?.id||null,parentFormId:parent?.formId||null,errors:{},dirty:false,copied};
@@ -768,6 +771,7 @@ function popupSummary(f,v){
 function gridCell(cf,row,f,d,ro){
   const ids=`data-grid="${cf.id}" data-row="${row.id}" data-gf="${f.id}"`,v=row.values[f.id],val=v==null?'':esc(v),dis=ro?' disabled':'';
   const lab=` aria-label="${esc(f.label)}"`;
+  if(f.type==='autonumber'){const live=row.isNew?null:recById(row.id);const t=live?.nums?.[f.id];return `<span class="gcalc gauto">${esc(t||(row.isNew?'On save':'…'))}</span>`;}
   if(f.type==='formula'){const r=calc(cf,f,rowRec(row,cf,d));return `<span class="gcalc" id="gc-${cf.id}-${row.id}-${f.id}">${esc(r.e?'—':fmtCalc(f,r.v))}</span>`;}
   if(POPUP_TYPES.has(f.type)){const s=popupSummary(f,v);return `<button type="button" class="gpopbtn${s?' has':''}" data-act="grid-cell" data-grid="${cf.id}" data-row="${row.id}" data-fid="${f.id}">${esc(s||(ro?'—':f.type==='signature'?'Sign':'Add'))}</button>`;}
   switch(f.type){
@@ -884,7 +888,7 @@ function formFieldsHTML(form,d,scope){
 function fieldBlock(f,v,err,scope){
   if(f.type==='heading')return `<div class="fsec" id="fb-${scope}-${f.id}"><h3>${esc(f.label)}</h3>${f.help?`<p class="help">${esc(f.help)}</p>`:''}</div>`;
   const id=`in-${scope}-${f.id}`;
-  const lab=['radio','multiselect','rating','checkbox','formula'].includes(f.type)?`<span class="flabel" id="lb-${id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</span>`:`<label class="flabel" for="${id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</label>`;
+  const lab=['radio','multiselect','rating','checkbox','formula','autonumber'].includes(f.type)?`<span class="flabel" id="lb-${id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</span>`:`<label class="flabel" for="${id}">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</label>`;
   return `<div class="fld w-${f.width==='half'?'half':'full'}${err?' bad':''}" id="fb-${scope}-${f.id}">${lab}${control(f,v,id,scope)}${f.help?`<p class="help">${esc(f.help)}</p>`:''}${err?`<p class="err">${esc(err)}</p>`:''}</div>`;
 }
 function control(f,v,id,scope){
@@ -892,6 +896,7 @@ function control(f,v,id,scope){
   const mm=(f.min!=null&&f.min!==''?` min="${f.min}"`:'')+(f.max!=null&&f.max!==''?` max="${f.max}"`:'');
   const val=v==null?'':esc(v);
   switch(f.type){
+    case 'autonumber':return autoControl(f,scope);
     case 'formula':{const d=draftFor(scope);const form=d?formOfDraft(d):null;const r=form?calc(form,f,d===cdraft?rowRec(cdraft._row,form,rdraft):draftRec(d)):{e:''};return `<div class="calc${r.e?' bad':''}" id="calc-${scope}-${f.id}" aria-live="polite">${esc(r.e||fmtCalc(f,r.v)||'—')}</div><span class="fxsrc">= ${esc(f.expr||'')}</span>`;}
     case 'text':return `<input class="in" type="text" ${a} value="${val}"${ph}>`;
     case 'textarea':return `<textarea class="in" ${a}${ph}>${val}</textarea>`;
@@ -922,6 +927,24 @@ function control(f,v,id,scope){
   }
   return '';
 }
+/* ---------- Auto number fields ----------
+   The server gives the number when a record is first saved (records/{id}.nums); the app only
+   shows it. Admins can change one (Change…), with a warning; the server keeps it unique. */
+const thisYear=()=>new Date().getFullYear();
+function autoControl(f,scope){
+  if(scope==='preview'){const s=autoSettings(f);return `<div class="calc auto">${esc(formatAuto(f,s.start,thisYear()))}</div><span class="fxsrc">Given out when a record is first saved</span>`;}
+  const d=draftFor(scope);
+  const recId=scope==='record'?d?.recordId:scope==='cell'&&cdraft?._row&&!cdraft._row.isNew?cdraft._row.id:null;
+  if(!recId)return `<div class="calc auto muted">Assigned when you save</div>`;
+  const t=recById(recId)?.nums?.[f.id]||'';
+  if(!t)return `<div class="calc auto muted">Being assigned…</div>${isAdmin(store.me)?'<span class="fxsrc">Still waiting after a minute? Form designer → this field → Number them now.</span>':''}`;
+  const ed=ui.anEdit&&ui.anEdit.rec===recId&&ui.anEdit.fid===f.id?ui.anEdit:null;
+  if(!ed)return `<div class="autow"><div class="calc auto">${esc(t)}</div>${isAdmin(store.me)&&scope==='record'?`<button type="button" class="btn sm ghost" data-act="an-edit" data-fid="${f.id}">Change…</button>`:''}</div>`;
+  return `<div class="anedit" role="group" aria-label="Change ${esc(f.label)}">
+    <p class="anwarn"><b>Change this number only to fix a mistake.</b> Copies already sent or printed will still show ${esc(t)}. The new number must not be used on another ${esc(formById(d.formId)?itemName(formById(d.formId)).toLowerCase():'record')}, and the change is noted on the record.</p>
+    <div class="row2"><input class="in" data-anval="1" value="${esc(ed.value)}" maxlength="60" aria-label="New number"${ed.busy?' disabled':''}><button type="button" class="btn sm primary" data-act="an-save"${ed.busy?' disabled':''}>${ed.busy?'Saving…':'Save number'}</button><button type="button" class="btn sm ghost" data-act="an-cancel"${ed.busy?' disabled':''}>Cancel</button></div></div>`;
+}
+
 function draftRec(d){return {id:d.recordId||null,formId:d.formId,values:d.values,parentId:d.parentId||null,_draft:d.grids?d:null};}
 const scopeOf=d=>d===pdraft?'preview':d===cdraft&&cdraft?'cell':'record';
 const draftFor=scope=>scope==='record'?rdraft:scope==='cell'?cdraft:scope==='preview'?pdraft:null;
@@ -972,7 +995,7 @@ function initSig(c){
 function validate(form,vals){
   const errs={};
   (form.fields||[]).forEach(f=>{
-    if(f.type==='heading'||f.type==='formula')return;const v=vals[f.id];
+    if(f.type==='heading'||f.type==='formula'||f.type==='autonumber')return;const v=vals[f.id];
     if(f.required&&(f.type==='checkbox'?!v:isEmpty(v))){errs[f.id]=f.type==='checkbox'?'This must be switched on.':'This field is required.';return;}
     if(isEmpty(v))return;
     if(f.type==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))errs[f.id]='Enter an email like name@example.com.';
@@ -1054,6 +1077,7 @@ function newField(type){
   if(type==='rating')f.max=5;
   if(type==='formula'){f.expr='';f.format='decimal';f.decimals=2;f.inList=true;}
   if(type==='range'){f.min=0;f.max=100;f.step=1;}
+  if(type==='autonumber'){f.prefix='';f.start=1;f.digits=1;f.year=false;f.inList=true;f.label='Number';}
   if(type==='relation'){const o=store.forms.find(x=>x.id!==fdraft?.id);f.relForm=o?.id||'';f.label=o?itemName(o):'Linked record';}
   return f;
 }
@@ -1143,7 +1167,7 @@ function viewFormEdit(){
       <section class="section"><div class="section-h"><h2>Parents</h2></div><div class="panel"><p class="note">${par.length?`This form is a child of ${par.map(p=>`<b>${esc(p.name)}</b>`).join(', ')}. Its records can belong to one of their records.`:'No form lists this one as a child.'}</p></div></section>
       <section class="section"><div class="section-h"><h2>Linked by fields</h2></div><div class="panel"><p class="note">${linkers.length?'Link-to-record fields that point here: '+linkers.map(esc).join(', ')+'.':'Add a “Link to record” field to any form to point at records in another form, like a lookup.'}</p></div></section>`;
   }else if(ui.tab==='settings'){
-    const tfs=f.fields.filter(x=>['text','email','phone','url','number','select','date'].includes(x.type));
+    const tfs=f.fields.filter(x=>['text','email','phone','url','number','select','date','autonumber'].includes(x.type));
     body=`<div class="panel"><div class="settings">
       <label class="prop"><span>One record is called</span><input class="in" data-fprop="itemName" value="${esc(f.itemName||'')}" placeholder="${esc(itemName(f))}"><small class="help">Used in buttons like “New ${esc(itemName(f).toLowerCase())}”.</small></label>
       <label class="prop"><span>Record title comes from</span><select class="in" data-fprop="titleField"><option value="">First text field</option>${tfs.map(x=>`<option value="${x.id}"${x.id===f.titleField?' selected':''}>${esc(x.label)}</option>`).join('')}</select></label>
@@ -1209,10 +1233,30 @@ function fieldEditor(x){
   if(x.type==='currency')h+=P('Currency code',inp('currency',x.currency||'CAD','maxlength="3" style="text-transform:uppercase"'));
   if(x.type==='range')h+=P('Step',num('step',x.step))+P('Unit after value',inp('suffix',x.suffix,'placeholder="e.g. %"'));
   if(x.type==='rating')h+=P('Number of stars',num('max',x.max));
+  if(x.type==='autonumber')h+=autoEditor(x,P,inp,num,sw);
   if(x.type==='relation')h+=P('Links to form',`<select class="in" data-prop="relForm"><option value="">Choose a form…</option>${[...store.forms].sort(byOrder).map(o=>`<option value="${o.id}"${o.id===x.relForm?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`);
-  if(x.type!=='heading')h+=`<div class="props-sw">${x.type==='formula'?'':sw('required','Required')}${NOLIST.has(x.type)?'':sw('inList','Column in the starting list')}<label class="switch"><input type="checkbox" data-prop="width" data-kind="half"${x.width==='half'?' checked':''}><span class="tr"></span><span>Half width on wide screens</span></label></div>`;
+  if(x.type!=='heading')h+=`<div class="props-sw">${x.type==='formula'||x.type==='autonumber'?'':sw('required','Required')}${NOLIST.has(x.type)?'':sw('inList','Column in the starting list')}<label class="switch"><input type="checkbox" data-prop="width" data-kind="half"${x.width==='half'?' checked':''}><span class="tr"></span><span>Half width on wide screens</span></label></div>`;
   h+=`<div class="prop full"><span class="keyline">Field ID ${esc(x.id)}</span></div>`;
   return `<div class="fedit">${h}</div>`;
+}
+function autoPrev(x){const y=thisYear(),saved=(formById(fdraft.id)?.fields||[]).some(f=>f.id===x.id&&f.type==='autonumber'),counter=(ui.anNext||{})[fdraft.id+'|'+x.id];const n=saved&&counter?nextAuto(x,counter,y):autoSettings(x).start;return `<b>${esc(formatAuto(x,n,y))}</b>, then ${esc(formatAuto(x,n+1,y))}`;}
+/** The designer's settings for an Auto number field, its preview, and numbering existing records. */
+function autoEditor(x,P,inp,num,sw){
+  const s=autoSettings(x),y=thisYear();
+  let h=P('Prefix',inp('prefix',x.prefix,'maxlength="20" placeholder="e.g. INV-"'))+P('Starting number',num('start',x.start??1))+P('Minimum digits',num('digits',x.digits??1));
+  h+=`<div class="props-sw">${sw('year','Add the year, and start again each January')}</div>`;
+  const saved=(formById(fdraft.id)?.fields||[]).find(f=>f.id===x.id&&f.type==='autonumber');
+  const key=fdraft.id+'|'+x.id;
+  if(saved&&!(key in (ui.anNext||{}))){ui.anNext={...(ui.anNext||{}),[key]:null};autoCounter(fdraft.id,x.id).then(c=>{ui.anNext={...ui.anNext,[key]:c||{}};if(view.name==='formEdit')renderMain();});}
+  const counter=(ui.anNext||{})[key];
+  h+=`<div class="prop full"><span>${saved&&counter?'Next number':'Looks like'}</span><div class="autoprev" id="ap-${x.id}">${autoPrev(x)}</div><p class="help">Every new ${esc(itemName(fdraft).toLowerCase())} gets the next number when it's first saved. Numbers are never reused, even after a delete. Changing these settings affects new numbers only.</p></div>`;
+  const recs=store.records.filter(r=>r.formId===fdraft.id);
+  if(!recs.length)return h;
+  if(!saved)return h+`<div class="prop full"><p class="help anfill">Save the form, then come back here to number the ${recs.length} ${esc(fdraft.name.toLowerCase())} already saved${x.id&&recs.some(r=>!isEmpty(r.values?.[x.id]))?' (numbers already typed into this field are kept)':''}.</p></div>`;
+  const m=missingNumbers(recs,fdraft.id,x.id);
+  if(!m.missing)return h+`<div class="prop full"><p class="help anfill">All ${recs.length} ${esc(fdraft.name.toLowerCase())} have a number.</p></div>`;
+  const busy=ui.anBusy===x.id;
+  return h+`<div class="prop full anfill"><p><b>${m.missing} ${esc(m.missing===1?itemName(fdraft).toLowerCase():fdraft.name.toLowerCase())} ${m.missing===1?'has':'have'} no number yet.</b> ${m.typed?`${m.typed} of them already have a number typed in, which ${m.typed===1?'is':'are'} kept. `:''}The rest are numbered oldest first, carrying on after the highest number in use.</p><button type="button" class="btn sm" data-act="an-fill" data-fid="${x.id}"${busy?' disabled':''}>${busy?'Numbering…':'Number them now'}</button></div>`;
 }
 const FX_REF=`<details class="fxref"><summary>Formula reference</summary><div class="tblwrap"><table><tbody>
 <tr><td>{Field name}</td><td>The value of another field on this form. Yes/No counts as 1 or 0.</td></tr>
@@ -1370,6 +1414,20 @@ document.addEventListener('click',async e=>{
     case 'task-open':if(cadenceUrl)window.open(cadenceLink(cadenceUrl,{task:id}),'cadence');break;
     case 'add-task':if(cadenceUrl&&view.recordId)window.open(cadenceLink(cadenceUrl,{addTaskFor:view.recordId}),'cadence');break;
     case 'export-pdf':exportPdf();break;
+    case 'an-edit':{const rid=rdraft?.recordId;const t=recById(rid)?.nums?.[el.dataset.fid]||'';ui.anEdit={rec:rid,fid:el.dataset.fid,value:t,busy:false};renderMain();const i=document.querySelector('[data-anval]');if(i){i.focus();i.select();}break;}
+    case 'an-cancel':ui.anEdit=null;renderMain();break;
+    case 'an-save':{const ed=ui.anEdit;if(!ed||ed.busy)return;const v=String(ed.value||'').trim();if(!v){toast('Type the new number.');return;}if(v===(recById(ed.rec)?.nums?.[ed.fid]||'')){ui.anEdit=null;renderMain();return;}
+      ed.busy=true;renderMain();
+      try{await setAutoNumber(ed.rec,ed.fid,v);ui.anEdit=null;toast(`Number changed to ${v}`);}
+      catch(e){ed.busy=false;toast(/already-exists/.test(e?.code||'')?e.message:/not-found|404/i.test(e?.code||e?.message||'')?'The numbering service isn’t set up yet. Deploy the Cadence functions first.':'Couldn’t change it: '+(e?.message||'try again'));}
+      renderMain();break;}
+    case 'an-fill':{if(fdraft?.dirty){toast('Save the form first.');return;}const fid=el.dataset.fid,formId=fdraft?.id;if(!formId||ui.anBusy)return;
+      ui.anBusy=fid;renderMain();
+      try{const r=await fillAutoNumbers(formId,fid);
+        ui.anNext={...(ui.anNext||{})};delete ui.anNext[formId+'|'+fid];
+        toast([r.numbered?`Numbered ${r.numbered} (${r.first}${r.numbered>1?' to '+r.last:''})`:'',r.kept?`kept ${r.kept} typed number${r.kept>1?'s':''}`:'',r.duplicates?.length?`check duplicates: ${r.duplicates.slice(0,5).join(', ')}`:''].filter(Boolean).join('; ')+'.');}
+      catch(e){toast(/not-found|404/i.test(e?.code||e?.message||'')?'The numbering service isn’t set up yet. Deploy the Cadence functions first.':'Couldn’t number them: '+(e?.message||'try again'));}
+      ui.anBusy=null;renderMain();[500,1500].forEach(ms=>setTimeout(()=>{if(view.name==='formEdit'&&ui.openField)renderMain();},ms));break;}
     case 'sub-pop':{const k=el.dataset.k;ui.subPop=ui.subPop===k?null:k;renderMain();if(ui.subPop)document.querySelector('.sub-pop input:not(:disabled)')?.focus({preventScroll:true});else document.querySelector(`[data-act="sub-pop"][data-k="${CSS.escape(k)}"]`)?.focus();break;}
     case 'sub-pop-close':{const k=ui.subPop;ui.subPop=null;renderMain();if(k)document.querySelector(`[data-act="sub-pop"][data-k="${CSS.escape(k)}"]`)?.focus();break;}
     case 'sub-col-move':{const fid=rdraft?.formId;if(!fid)return;const k=el.dataset.k,c=subCols(fid,k);if(!c)return;saveSub(fid,k,{cols:subMove(c.cur,el.dataset.v,+el.dataset.dir)});renderMain();document.querySelector(`[data-act="sub-col-move"][data-k="${CSS.escape(k)}"][data-v="${CSS.escape(el.dataset.v)}"][data-dir="${el.dataset.dir}"]:not(:disabled)`)?.focus();break;}
@@ -1424,6 +1482,7 @@ document.addEventListener('click',async e=>{
   }
 });
 document.addEventListener('input',e=>{
+  if(e.target.dataset?.anval){if(ui.anEdit)ui.anEdit.value=e.target.value;return;}
   const t=e.target;
   if(t.dataset.dzq!==undefined){ui.dzq=t.value;applyDzq();return;}
   if(t.id==='fs-q'){ui.fq=t.value;ui.fi=0;paintFormResults();return;}
@@ -1437,6 +1496,7 @@ document.addEventListener('input',e=>{
     const f=fdraft.fields.find(x=>x.id===t.closest('[data-feid]').dataset.feid);const p=t.dataset.prop,k=t.dataset.kind;
     f[p]=k==='num'?(t.value===''?null:Number(t.value)):k==='lines'?t.value.split('\n').map(s=>s.trim()):p==='currency'?t.value.toUpperCase():t.value;
     if(p==='expr')updateFxCheck(f);
+    if(f.type==='autonumber'){const ap=document.getElementById('ap-'+f.id);if(ap)ap.innerHTML=autoPrev(f);}
     if(p==='label'){fdraft.fields.filter(z=>z.type==='formula').forEach(updateFxCheck);const l=document.getElementById('frl-'+f.id);if(l)l.innerHTML=esc(f.label||'Untitled field')+(f.required?'<span class="req">*</span>':'');}
     setFdirty();
   }
@@ -1487,6 +1547,7 @@ document.addEventListener('keydown',e=>{
   if(e.target?.id==='dq'&&e.key==='Escape'&&e.target.value){e.preventDefault();e.target.value='';ui.dq='';applyDq();}
 });
 document.addEventListener('pointerdown',e=>{if(ui.subPop&&!e.target.closest?.('.lv-anchor')){ui.subPop=null;renderMain();}},true);
+document.addEventListener('keydown',e=>{if(e.target?.dataset?.anval&&(e.key==='Enter'||e.key==='Escape')){e.preventDefault();document.querySelector(e.key==='Enter'?'[data-act="an-save"]':'[data-act="an-cancel"]')?.click();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ui.subPop){e.preventDefault();const k=ui.subPop;ui.subPop=null;renderMain();document.querySelector(`[data-act="sub-pop"][data-k="${CSS.escape(k)}"]`)?.focus();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cdraft){e.preventDefault();document.querySelector('[data-act="cell-close"]')?.click();}});
 function closeMenu(){$('#side').classList.remove('open');$('#scrim').classList.remove('open');}

@@ -14,7 +14,7 @@ export const LIST_LIMIT = 2000; // record titles offered as a dropdown in the te
 export const TEMPLATE_ROWS = 5000; // dropdowns and formats reach this far down the sheet
 
 export const IMPORT_TYPES = new Set(['text', 'textarea', 'email', 'phone', 'url', 'number', 'decimal', 'currency', 'percent', 'rating', 'range', 'date', 'time', 'datetime', 'checkbox', 'select', 'radio', 'multiselect', 'color', 'relation', 'location']);
-const SKIP_WHY = { formula: 'calculated', file: 'file', image: 'photo', signature: 'signature' };
+const SKIP_WHY = { formula: 'calculated', autonumber: 'numbered automatically', file: 'file', image: 'photo', signature: 'signature' };
 const NUMERIC = new Set(['number', 'decimal', 'currency', 'percent', 'range', 'rating']);
 const TEXTISH = new Set(['text', 'textarea', 'email', 'phone', 'url']);
 const TYPE_NAME = { text: 'Text', textarea: 'Long text', email: 'Email', phone: 'Phone', url: 'Website', number: 'Whole number', decimal: 'Decimal', currency: 'Currency', percent: 'Percent', rating: 'Rating', range: 'Number', date: 'Date', time: 'Time', datetime: 'Date and time', checkbox: 'Yes / No', select: 'Choice', radio: 'Choice', multiselect: 'Several choices', color: 'Color', relation: 'Link', location: 'Location' };
@@ -517,7 +517,7 @@ function checkOne(i, input, cell, idText, first, idCol) {
     const rel = (pf?.children || []).find((c) => c.formId === form.id);
     if (rel?.copy && parent) {
       (form.fields || []).forEach((f) => {
-        if (f.type === 'formula' || map.includes(f.id)) return;
+        if (f.type === 'formula' || f.type === 'autonumber' || map.includes(f.id)) return;
         const m = (pf.fields || []).find((p) => p.type === f.type && p.type !== 'heading' && String(p.label).trim().toLowerCase() === String(f.label).trim().toLowerCase());
         if (m && !isEmpty(parent.values?.[m.id]) && isEmpty(values[f.id])) values[f.id] = JSON.parse(JSON.stringify(parent.values[m.id]));
       });
