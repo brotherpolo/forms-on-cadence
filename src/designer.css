@@ -233,7 +233,34 @@ body.pd-on .pgrip{cursor:grabbing}
 .fv-say{flex:1;min-width:200px}
 @media (max-width:760px){.fv-bar{display:none}}
 .ft{display:flex;flex-direction:column;gap:10px}
-.ft-in{width:100%;font-family:var(--mono,'JetBrains Mono',ui-monospace,monospace);font-size:13px;line-height:1.6;white-space:pre;overflow:auto;tab-size:2;min-height:280px;resize:vertical}
+.ft-ed{display:flex;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);overflow:hidden;font-family:var(--mono,'JetBrains Mono',ui-monospace,monospace);font-size:13px;line-height:21px;tab-size:2}
+.ft-ed:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.ft-gut{position:relative;flex:none;width:52px;overflow:hidden;background:var(--sunk);border-right:1px solid var(--line);color:var(--tx-lineno);text-align:right;user-select:none}
+.ft-gutin{position:absolute;left:0;right:0;top:10px;will-change:transform}
+.ft-gut .tx-l{padding:0 9px 0 4px}
+.ft-gut .tx-h{color:var(--tx-head);font-weight:600;background:var(--tx-band)}
+.ft-gut .tx-bad{color:var(--danger);background:var(--danger-soft);font-weight:700;cursor:help;box-shadow:inset 3px 0 0 var(--danger)}
+.ft-code{position:relative;flex:1;min-width:0;display:flex}
+.ft-hl{position:absolute;inset:0;overflow:hidden;pointer-events:none;padding:10px 0}
+.ft-hlin{min-width:100%;width:max-content;will-change:transform}
+.ft-hl .tx-l{padding:0 12px;white-space:pre;color:var(--fg)}
+.ft-hl .tx-h{background:var(--tx-band);box-shadow:inset 0 1px 0 var(--tx-band-line),inset 0 -1px 0 var(--tx-band-line)}
+.tx-l{height:21px}
+.ft-in{position:relative;display:block;width:100%;margin:0;padding:10px 12px;border:0;outline:none;background:transparent;color:transparent;caret-color:var(--fg);font:inherit;line-height:21px;white-space:pre;overflow:auto;tab-size:2;min-height:280px;resize:vertical}
+.ft-in::selection{background:var(--tx-sel);color:transparent}
+.tx-head{color:var(--tx-head);font-weight:600}.tx-cap{font-weight:600;color:var(--fg)}.tx-punct,.tx-op{color:var(--tx-punct)}
+.tx-type{color:var(--tx-type)}.tx-kw{color:var(--tx-kw)}.tx-str{color:var(--tx-str)}.tx-opt{color:var(--tx-opt)}.tx-num{color:var(--tx-num)}
+.tx-fn{color:var(--tx-fn);font-weight:600}.tx-ref,.tx-referr{color:var(--tx-ref);background:var(--tx-ref-bg);border-radius:3px}
+.tx-tag{color:var(--tx-tag)}.tx-comment{color:var(--tx-comment);font-style:italic}
+.tx-err,.tx-referr{color:var(--danger);text-decoration:underline wavy var(--danger);text-decoration-skip-ink:none;text-underline-offset:3px}
+.ft-jump{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ft-jl{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:2px}
+.ft-chip{font:inherit;font-size:13px;padding:5px 11px;border-radius:999px;border:1px solid var(--tx-band-line);background:var(--tx-band);color:var(--tx-head);cursor:pointer;min-height:32px}
+.ft-chip:hover{border-color:var(--tx-head)}
+.ft-probs{margin-left:auto;font-size:13px;color:var(--danger);font-weight:500}
+:root{--tx-head:#2a3aa8;--tx-band:#eef0fd;--tx-band-line:#cdd3f6;--tx-punct:#7a8194;--tx-type:#0b6e72;--tx-kw:#9a4a06;--tx-str:#1d7349;--tx-opt:#7434b0;--tx-num:#b3186d;--tx-fn:#0f5c99;--tx-ref:#8a2b06;--tx-ref-bg:#fde9df;--tx-tag:#a3a8b6;--tx-comment:#6f7a5c;--tx-lineno:#9aa0b0;--tx-sel:rgba(51,70,200,.22)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--tx-head:#a9b5ff;--tx-band:#1d2242;--tx-band-line:#323a6e;--tx-punct:#8d94a6;--tx-type:#5fd4cc;--tx-kw:#f2a65e;--tx-str:#6fd6a0;--tx-opt:#c9a2ff;--tx-num:#ff8cc6;--tx-fn:#6cb6ff;--tx-ref:#ffb38a;--tx-ref-bg:#3a2418;--tx-tag:#5a6176;--tx-comment:#a0a98e;--tx-lineno:#596075;--tx-sel:rgba(132,150,255,.3)}}
+:root[data-theme="dark"]{--tx-head:#a9b5ff;--tx-band:#1d2242;--tx-band-line:#323a6e;--tx-punct:#8d94a6;--tx-type:#5fd4cc;--tx-kw:#f2a65e;--tx-str:#6fd6a0;--tx-opt:#c9a2ff;--tx-num:#ff8cc6;--tx-fn:#6cb6ff;--tx-ref:#ffb38a;--tx-ref-bg:#3a2418;--tx-tag:#5a6176;--tx-comment:#a0a98e;--tx-lineno:#596075;--tx-sel:rgba(132,150,255,.3)}
 .ft-help summary{cursor:pointer;font-weight:600;font-size:14px}
 .ft-helpb p{margin:8px 0;font-size:13px;line-height:1.6}
 .ft-helpb code{font-size:12px;background:var(--sunk);padding:1px 5px;border-radius:5px;white-space:nowrap}

@@ -3,6 +3,7 @@
 import { esc } from './ui.js';
 import { sysOf } from './fieldnames.js';
 import { newVersionId, putVersion, loadVersions } from './store.js';
+import { paint, sectionsIn } from './formtextcolor.js';
 import { formToText, textToFields, fieldChanges, changeLines, formChangeLines, readVersionFile, TYPE_LIST } from './formtext.js';
 
 let H = {};
@@ -133,14 +134,60 @@ export function viewText(f) {
   if (!V.text) V.text = { value: textOf(f), base: textOf(f), dirty: false, result: null, preview: null };
   const t = V.text, n = t.value.split('\n').length;
   const errs = t.result?.errors || [], warns = t.result?.warnings || t.preview?.warnings || [];
+  const pp = paint(t.value, { caretLine: 0, problems: liveProblems(t.value) });
   return `<div class="ft">
     ${CHEAT}
-    <textarea class="in ft-in" data-ftext="1" spellcheck="false" autocapitalize="off" autocomplete="off" rows="${Math.min(40, Math.max(14, n + 2))}" aria-label="Fields as text" wrap="off">${esc(t.value)}</textarea>
+    ${jumpHTML(t.value, pp.count)}
+    <div class="ft-ed"><div class="ft-gut" aria-hidden="true"><div class="ft-gutin">${pp.gut}</div></div><div class="ft-code"><div class="ft-hl" aria-hidden="true"><div class="ft-hlin">${pp.code}</div></div><textarea class="ft-in" data-ftext="1" spellcheck="false" autocapitalize="off" autocomplete="off" rows="${Math.min(40, Math.max(14, n + 2))}" aria-label="Fields as text" wrap="off">${esc(t.value)}</textarea></div></div>
     ${errs.length ? `<div class="panel am-warn ft-errs" role="alert"><b>${errs.length === 1 ? '1 thing to fix' : errs.length + ' things to fix'}</b><ul>${errs.map((e) => `<li><button type="button" class="linkbtn" data-fv="line" data-line="${e.line}">Line ${e.line}</button>: ${esc(e.msg)}</li>`).join('')}</ul></div>` : ''}
     ${!errs.length && warns.length ? `<div class="panel ft-warns" role="note"><ul>${warns.map((e) => `<li><button type="button" class="linkbtn" data-fv="line" data-line="${e.line}">Line ${e.line}</button>: ${esc(e.msg)}</li>`).join('')}</ul></div>` : ''}
     ${t.preview ? `<div class="panel ft-preview" role="region" aria-label="Changes to apply"><b>Apply these changes?</b><ul>${t.preview.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul><p class="help">They go into the designer. Nothing is live until you press Save form (or Save as draft).</p><div class="actions"><button type="button" class="btn ghost" data-fv="keep">Keep editing</button><button type="button" class="btn primary" data-fv="confirm" id="ft-confirm">Apply</button></div></div>` : ''}
     <div class="actions ft-acts"><span class="help grow">${t.dirty ? 'Changes not applied yet.' : 'Matches the designer.'}</span><button type="button" class="btn ghost" data-fv="reset"${t.dirty ? '' : ' disabled'}>Reset</button><button type="button" class="btn primary" data-fv="apply"${t.dirty ? '' : ' disabled'}>Apply changes</button></div>
   </div>`;
+}
+
+/* ---------- colours as you type ---------- */
+let caret = 0, painted = '', paintTimer = 0;
+/** What the parser says is wrong, by line (a quick check as you type; Apply changes says it in full). */
+function liveProblems(value) {
+  const f = H.fdraft(); if (!f) return new Map();
+  try {
+    const r = textToFields(value, { fields: f.fields, known: f.fields.map((x) => x.id), forms: H.forms().filter((x) => x.id !== f.id).concat([{ id: f.id, name: f.name }]), newId: () => 'x' + Math.random().toString(36).slice(2, 10) });
+    return new Map((r.errors || []).map((e) => [e.line, e.msg]));
+  } catch { return new Map(); }
+}
+function jumpHTML(value, count) {
+  const secs = sectionsIn(value);
+  if (!secs.length && !count) return '<div class="ft-jump" hidden></div>';
+  return `<div class="ft-jump">${secs.length ? `<span class="ft-jl">Jump to</span>${secs.map((x) => `<button type="button" class="ft-chip" data-fv="jump" data-line="${x.line}">${esc(x.name)}</button>`).join('')}` : ''}${count ? `<span class="ft-probs">${count === 1 ? '1 line needs a look' : count + ' lines need a look'}</span>` : ''}</div>`;
+}
+const caretLineOf = (ta) => (document.activeElement === ta ? ta.value.slice(0, ta.selectionStart || 0).split('\n').length : 0);
+/** Repaint the colours under the textarea (now, or soon after typing stops for the slower parser check). */
+function repaint(ta, force = false) {
+  if (!ta || !V.text) return;
+  const cl = caretLineOf(ta);
+  const key = cl + '|' + ta.value;
+  if (!force && key === painted) return;
+  painted = key; caret = cl;
+  const pp = paint(ta.value, { caretLine: cl, problems: liveProblems(ta.value) });
+  const ed = ta.closest('.ft-ed'); if (!ed) return;
+  ed.querySelector('.ft-hlin').innerHTML = pp.code;
+  ed.querySelector('.ft-gutin').innerHTML = pp.gut;
+  const j = document.querySelector('.ft .ft-jump'); const jh = jumpHTML(ta.value, pp.count);
+  if (j && j.outerHTML !== jh) j.outerHTML = jh;
+  syncScroll(ta);
+}
+function syncScroll(ta) {
+  const ed = ta.closest('.ft-ed'); if (!ed) return;
+  ed.querySelector('.ft-hlin').style.transform = `translate(${-ta.scrollLeft}px,${-ta.scrollTop}px)`;
+  ed.querySelector('.ft-gutin').style.transform = `translateY(${-ta.scrollTop}px)`;
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('scroll', (e) => { if (e.target?.dataset?.ftext) syncScroll(e.target); }, true);
+  const moved = (e) => { const ta = e.target; if (!ta?.dataset?.ftext) return; if (caretLineOf(ta) !== caret) repaint(ta); else syncScroll(ta); };
+  document.addEventListener('keyup', moved);
+  document.addEventListener('click', moved);
+  document.addEventListener('focusout', (e) => { if (e.target?.dataset?.ftext) setTimeout(() => repaint(e.target), 0); });
 }
 
 function applyText(f) {
@@ -166,12 +213,12 @@ function confirmText(f) {
   H.renderMain();
   H.toast('Applied. Press Save form to put it live, or Save as draft.');
 }
-function goLine(n) {
+function goLine(n, top = false) {
   const ta = document.querySelector('[data-ftext]'); if (!ta) return;
   const lines = ta.value.split('\n'); let s = 0;
   for (let i = 0; i < n - 1 && i < lines.length; i++) s += lines[i].length + 1;
   ta.focus(); ta.setSelectionRange(s, s + (lines[n - 1] || '').length);
-  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20; ta.scrollTop = Math.max(0, (n - 4) * lh);
+  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20; ta.scrollTop = Math.max(0, (n - (top ? 1 : 4)) * lh); repaint(ta, true);
 }
 
 /* ---------- drafts ---------- */
@@ -264,6 +311,7 @@ export function onClick(el) {
     case 'confirm': confirmText(f); return true;
     case 'reset': V.text = { value: textOf(f), base: textOf(f), dirty: false, result: null, preview: null }; H.renderMain(); return true;
     case 'line': goLine(+el.dataset.line); return true;
+    case 'jump': goLine(+el.dataset.line, true); return true;
     case 'draft-skip': V.bannerOff = true; H.renderMain(); return true;
     case 'draft-open': {
       const d = (V.list || []).find((x) => x.id === el.dataset.id); if (!d) return true;
@@ -299,6 +347,7 @@ export async function saveAsDraft() {
 export function onInput(el) {
   if (!el.dataset?.ftext || !V.text) return false;
   V.text.value = el.value;
+  repaint(el);
   const was = V.text.dirty;
   V.text.dirty = el.value !== V.text.base;
   if (V.text.dirty) H.setFdirty();

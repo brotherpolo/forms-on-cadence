@@ -61,6 +61,8 @@ src/
   access.js                Permission model (pure; mirrored by the rules)
   formulas.js              Formula parser and evaluator (no eval)
   formtext.js              Fields as text, change summaries, version files (pure, unit-tested)
+  formtextcolor.js         Text view colours, line problems and sections (pure, unit-tested)
+  fieldnames.js            Captions and system names: lookups, shared captions (pure, unit-tested)
   formver.js               Fields → Text view, History tab, drafts, Make active
   homelogic.js             Dashboard shortcut tiles and which dashboard Home shows (pure, unit-tested)
   workflow.js              Workflow stages: what each shows, who works on it, checks (pure, unit-tested)
@@ -303,6 +305,7 @@ Name: text, system name "Contact name"
 ```
 
 - The `@tag` is the field's ID: words before it can change and it's the same field with the same saved values. A line without a tag is a new field. Settings the text can't express are kept. `system name "…"` sets a field's system name (see Captions and system names).
+- **Colours as you type** (`src/formtextcolor.js`, pure, unit-tested; painted under a transparent textarea): section headings on a tinted band, captions bold, types teal, settings amber, "quoted words" green, choices purple, numbers pink, calculation `{fields}` highlighted and functions bold, `@tags` faded, `//` notes grey. Line numbers down the side; a line it doesn't understand gets a red number (hover for why) and a wavy underline, but not while you're still typing on it. **Jump to** chips, one per section, take you to its heading.
 - **Apply changes** checks every line (mistakes listed by line, with "did you mean"), then shows what will change (added, removed with how many records have values, renamed, moved, settings) before it goes into the designer. Renaming a field updates calculations that use its old name. Nothing is live until **Save form**.
 
 **Version history** (the **History** tab, admins). Every **Save form** stores a copy of the whole form (fields, sections, relationships, rules, workflow, settings) in `forms/{id}/versions/{versionId}`: `{ n, at, by, kind, note, from, fromN, summary[], form }`, and the form records which version is live in `activeVersion`. The first save after this update also stores the form as it was ("Before version history").

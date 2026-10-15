@@ -43,6 +43,9 @@ const TYPE_WORDS = [
 export const TYPE_NAME = Object.fromEntries(TYPE_WORDS.map(([k, w]) => [k, w]));
 const WORD_TYPE = new Map();
 TYPE_WORDS.forEach(([k, w, more]) => [w, ...more, k].forEach((x) => WORD_TYPE.set(x, k)));
+/** Every word Text view takes as a type, and every setting word (for colouring as you type). */
+export const TYPE_WORDS_ALL = [...WORD_TYPE.keys()];
+export const SETTING_WORDS = ['required', 'half', 'full', 'in list', 'help', 'placeholder', 'system name', 'min', 'max', 'step', 'stars', 'decimals', 'digits', 'start', 'prefix', 'yearly', 'suffix', 'currency', 'as'];
 export const TYPE_LIST = TYPE_WORDS.filter(([k]) => k !== 'relation').map(([, w]) => w).concat(['link to <form name>']);
 
 const CHOICE = new Set(['select', 'radio', 'multiselect']);
