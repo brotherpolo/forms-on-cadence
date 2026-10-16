@@ -80,6 +80,7 @@ src/
   commentlogic.js          Threads, the @ list, who's mentioned and told (pure, unit-tested)
   notices.js               Live pop-ups for new mentions and records that become yours
   docxtpl.js, docxxml.js   Word templates: reading placeholders and filling a .docx (pure, unit-tested)
+  docxgen.js               "Placeholders for <form>" Word file, and what a form's templates may use (pure, unit-tested)
   wordui.js                Export ▾, the Word templates pop-up, and a record's values for a template
   noticelogic.js           What counts as new for those pop-ups (pure, unit-tested)
   lists.js, lists.css      Records list: saved views, columns, filters, select several
@@ -444,6 +445,7 @@ A saved record's **Export ▾** button offers **PDF** (the standard layout) and 
 - **Formatted long text** keeps bold, italics, colours, headings, bullets and numbers when its placeholder is on a line of its own.
 - **Checking:** adding (or replacing) a template lists every placeholder, with the ones Formwright doesn't recognise in red; a template with a block left open can't be added. Unrecognised placeholders stay as typed in the filled document, and the export says which.
 - **How it works:** `src/docxtpl.js` reads the template's XML (first putting back placeholders Word split into pieces), finds the blocks, and fills it from a "scope" `src/wordui.js` builds from the record, its parent, links and children. Pictures are added as images in the file. Comments and tasks aren't part of it.
+- **Placeholders for a form:** **Placeholders for <form> (.docx)** in the Word templates pop-up (and **Placeholders for this form** in the form designer's Settings tab) downloads a Word file listing every placeholder a template for that form can use: its fields (with suitable options and its section headings), its parent's, linked records', each grid and child form (a ready-to-copy repeating row or lines, every field, totals), conditions from its real fields and choices, and what every record has. It's made in the browser from the form as it is now (`src/docxgen.js`); uploading it back as a template recognises everything in it.
 - **The sample:** `public/word-template-sample.docx` (linked from the pop-up) shows every option, with notes; `tests/fixtures/quote-template.docx` is the same file, used by the tests.
 - The output is `.docx`; to get a PDF, open it in Word and save as PDF.
 

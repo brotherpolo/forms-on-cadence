@@ -774,3 +774,4 @@ tr.wf-over td.title{color:var(--danger)}
 .xw-tags li:last-child{border-bottom:0}
 .xw-tags li.bad span{color:var(--danger)}
 .xw-tags li.ok code::before{content:"✓ ";color:var(--ok)}
+.xw-links{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}

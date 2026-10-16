@@ -1766,6 +1766,7 @@ function viewFormEdit(){
       <div class="prop"><span>Color</span><div class="swatches">${COLORS.map((c,i)=>`<button class="sw${(f.color??0)===i?' on':''}" style="background:${c}" data-act="set-color" data-i="${i}" aria-label="Color ${i+1}"></button>`).join('')}</div></div>
       <label class="prop full"><span>Email PDF: subject</span><input class="in" data-fprop="emailSubject" value="${esc(f.emailSubject||'')}" maxlength="200" placeholder="${esc(DEFAULT_SUBJECT)}"></label>
       <label class="prop full"><span>Email PDF: message</span><textarea class="in" data-fprop="emailMessage" rows="6" maxlength="10000" placeholder="${esc(DEFAULT_MESSAGE)}">${esc(f.emailMessage||'')}</textarea><small class="help">What <b>Email PDF</b> fills in; it can be changed before sending. Use {Field name} for any field on this form (for example {${esc((f.fields||[]).find(x=>x.type!=='heading')?.label||'Invoice #')}}), plus {Title}, {Item}, {Company}, {Sender} and {Date}. Leave empty for the standard wording shown.</small></label>
+      <div class="prop full"><span>Word templates</span><div class="xw-links"><button type="button" class="btn sm" data-act="wd-placeholders">Placeholders for this form (.docx)</button><a class="btn sm ghost" href="/word-template-sample.docx" download="Formwright quote template.docx">Sample template</a></div><small class="help">Every placeholder a Word template for this form can use, to copy into your own document${f.dirty?' (made from the form as it is on screen, so save it before using new fields)':''}. People add templates from <b>Export ▾ → Word templates…</b> on a record.</small></div>
       <div class="prop"><span>Visibility</span><label class="switch"><input type="checkbox" data-fprop="showInSidebar" data-kind="bool"${f.showInSidebar?' checked':''}><span class="tr"></span><span>Show in sidebar</span></label><small class="help">Hidden forms stay in the designer and under their parent records.</small></div>
     </div></div>
     ${f.isNew?'':`<section class="section"><div class="section-h"><h2>Delete form</h2></div><div class="panel"><div class="parentcard"><p class="grow help">Deletes the form and its ${recordsOf(f.id).length} records. Child records in other forms are kept.</p><button class="btn danger${ui.confirm==='form'?' armed':''}" data-act="del-form">${ui.confirm==='form'?'Tap again to delete':'Delete form'}</button></div></div></section>`}`;
@@ -2214,6 +2215,7 @@ document.addEventListener('click',async e=>{
     case 'wf-go':{const a=ui.wfAsk;if(!a||a.busy)return;if(a.need&&!String(a.comment||'').trim()){toast('Say why, so they know what to change.');document.querySelector('[data-wf-comment]')?.focus();return;}
       const rec=recById(a.recId),form=rec&&formById(rec.formId),t=form&&stageById(form,a.to);if(!t)return;a.busy=true;renderMain();await doWfMove(rec,form,t,a.label,a.comment);ui.wfAsk=null;renderMain();break;}
     case 'wf-who':ui.wfWho=el.dataset.v;renderMain();break;
+    case 'wd-placeholders':if(fdraft)wordui.downloadPlaceholders(fdraft);break;
     case 'nav-mywork':ui.mwTab=cmt.unreadCount()||!store.forms.some(f=>wfOn(f))?'mentions':'waiting';go({name:'mywork'});break;
     case 'mw-tab':ui.mwTab=el.dataset.v;renderMain();document.querySelector(`[data-act="mw-tab"][data-v="${CSS.escape(el.dataset.v)}"]`)?.focus();break;
     case 'cs-no':if(ui.cascade&&!ui.cascade.busy){ui.cascade=null;renderMain();}break;
@@ -2511,7 +2513,7 @@ export function startApp(){
   cmt.initComments({store,view:()=>view,recById,formById,recTitle,itemName,toast,isAdmin:()=>isAdmin(store.me),canUseTasks,foldBtn,folded,
     unfold:(fid,k)=>saveFolds(setFold(folds(),fid,k,false)),openRecord:id=>{const r=recById(id);if(!r)return;if(view.name==='record'&&view.recordId===id){renderMain();return;}goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
   wordui.initWordUI({store,view:()=>view,recById,formById,recTitle,itemName,valOf,fmt,realName,stageName,wfOn,parentsOf,calcExpr:docCalc,checkExpr:docCheck,
-    isAdmin:()=>isAdmin(store.me),toast,dirty:()=>!!rdraft?.dirty,busy:exportBusy});
+    isAdmin:()=>isAdmin(store.me),toast,dirty:()=>!!rdraft?.dirty,busy:exportBusy,gridCols});
   notices.initNotices({store,recById,formById,recTitle,stageName,groupName,wfOn,openMention:id=>cmt.openMention(id),
     openRecord:id=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});},
     openMyWork:tab=>{ui.mwTab=tab;if(view.name==='mywork')renderMain();else go({name:'mywork'});}});

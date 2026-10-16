@@ -6,6 +6,7 @@
 import { esc } from './ui.js';
 import { fieldByName } from './fieldnames.js';
 import { richBlocks } from './richtext.js';
+import { formSchema as schemaOf } from './docxgen.js';
 import { watchTemplates, addTemplate, replaceTemplateFile, renameTemplate, deleteTemplate, templateBytes, getExportSettings, fileBlob } from './store.js';
 
 // H: { store, view(), recById, formById, recTitle, itemName, valOf(f,rec,form), fmt(f,v), realName(uid),
@@ -138,44 +139,18 @@ function dlgHTML() {
     <p class="help">Make a document in Word and type field names in braces where values should go, like <code>{${esc(sampleField(form))}}</code>. Everyone who can see ${esc(form?.name || 'this form')} can use these from Export.</p>
     ${pend}
     ${W.list.length ? `<ul class="xw-list">${list}</ul>` : p ? '' : '<p class="xw-empty">No Word templates yet.</p>'}
-    ${p ? '' : `<div class="xw-add"><label class="btn primary xw-file">Add a Word template…<input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-xw-file hidden></label><a class="cm-lnk" href="${SAMPLE_URL}" download="Formwright quote template.docx">Sample template with every option</a></div>`}
+    ${p ? '' : `<div class="xw-add"><label class="btn primary xw-file">Add a Word template…<input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-xw-file hidden></label><span class="xw-links"><button type="button" class="cm-lnk" data-xw="placeholders">Placeholders for ${esc(form?.name || 'this form')} (.docx)</button><a class="cm-lnk" href="${SAMPLE_URL}" download="Formwright quote template.docx">Sample template with every option</a></span></div>`}
   </div></div>`;
 }
 const SAMPLE_URL = '/word-template-sample.docx';
 const sampleField = (form) => { const f = (form?.fields || []).find((x) => x.type !== 'heading'); return f ? f.label : 'Field name'; };
 
-/* ---------- the form, for checking ---------- */
-const SYS = new Set(['today', 'now', 'exported by', 'owner', 'created by', 'created', 'last updated', 'item name', 'form name', 'stage', 'company name', 'title']);
+/* ---------- the form, for checking (docxgen.js) ---------- */
+const schemaCtx = () => ({ formById: H.formById, parentsOf: H.parentsOf, itemName: H.itemName, checkExpr: H.checkExpr });
+export const formSchema = (form) => schemaOf(form, schemaCtx());
 const childForm = (form, name) => (form.children || []).map((c) => H.formById(c.formId)).find((cf) => cf && (norm(cf.name) === norm(name) || sing(cf.name) === sing(name) || norm(H.itemName(cf)) === norm(name)));
 const formMatch = (f, name) => norm(name) === 'parent' || norm(f.name) === norm(name) || sing(f.name) === sing(name) || norm(H.itemName(f)) === norm(name);
 function splitName(name) { const i = String(name).indexOf(':'); return i > 0 ? [name.slice(0, i).trim(), name.slice(i + 1).trim()] : null; }
-export function formSchema(form, depth = 0) {
-  const linkedSchema = (pre) => {
-    if (depth > 4) return null;
-    const rf = fieldByName(form, pre);
-    if (rf && rf.type === 'relation') { const lf = H.formById(rf.relForm); return lf ? formSchema(lf, depth + 1) : null; }
-    const pf = H.parentsOf(form.id).find((f) => formMatch(f, pre));
-    return pf ? formSchema(pf, depth + 1) : null;
-  };
-  return {
-    has(name) {
-      const f = fieldByName(form, name);
-      if (f && f.type !== 'heading') return true;
-      const sp = splitName(name);
-      if (sp) { const s = linkedSchema(sp[0]); return !!s && s.has(sp[1]); }
-      return SYS.has(norm(name));
-    },
-    list(name) { const cf = childForm(form, name); return cf ? formSchema(cf, depth + 1) : null; },
-    formula(expr) { return H.checkExpr(form, expr); },
-    image(name) {
-      const f = fieldByName(form, name);
-      if (f) return ['image', 'signature', 'file'].includes(f.type);
-      const sp = splitName(name);
-      if (sp) { const s = linkedSchema(sp[0]); return !!s && s.image(sp[1]); }
-      return norm(name) === 'logo';
-    },
-  };
-}
 
 /* ---------- the record, for filling in ---------- */
 function picture(v) {
@@ -264,6 +239,7 @@ async function onAct(b, e) {
   if (a === 'menu') { if (W.menu) closeMenu(); else openMenu(); return; }
   if (a === 'manage') { closeMenu(); W.dlg = { pending: null, armed: null, rename: null, busy: false }; paint(); root().querySelector('.xw-dlg .xw-file')?.focus(); return; }
   if (a === 'run') { closeMenu(); run(W.list.find((t) => t.id === id)); return; }
+  if (a === 'placeholders') { downloadPlaceholders(H.formById(W.formId)); return; }
   if (!W.dlg) return;
   const d = W.dlg;
   if (a !== 'delete' && d.armed) d.armed = null;
@@ -342,6 +318,15 @@ function save(bytes, name) {
   a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+/** "Placeholders for <form>.docx": every placeholder a template for this form can use. */
+export async function downloadPlaceholders(form) {
+  if (!form) return;
+  try {
+    const { placeholderModel, placeholderDocx } = await import('./docxgen.js');
+    const model = placeholderModel(form, { formById: (id) => (form.id && id === form.id ? form : H.formById(id)), parentsOf: H.parentsOf, itemName: H.itemName, wfOn: H.wfOn, gridCols: H.gridCols });
+    save(await placeholderDocx(model), `Placeholders for ${safeName(form.name || 'form')}.docx`);
+  } catch (e) { console.error('[formwright] placeholders', e); H.toast('Couldn’t make the file. Try again.'); }
 }
 const safeName = (s) => String(s || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
 let running = false;
