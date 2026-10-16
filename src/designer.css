@@ -292,3 +292,39 @@ body.pd-on .pgrip{cursor:grabbing}
 .wf-due{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .wf-duein{width:76px}
 .sysn{font-family:var(--mono);font-size:11px}
+
+/* Field type colours: each category its own hue, each type a shade of it (dzlogic.js sets the variables) */
+.glyph.tc{color:var(--gl);background:var(--glb);border-color:var(--glr)}
+.glyph.tsec{color:#fff;background:var(--accent);border-color:var(--accent);font-family:var(--display);font-weight:600}
+.pg-h{color:var(--gl,var(--muted))!important}
+.pg-h.tsec-h{color:var(--accent)!important}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .glyph.tc{color:var(--gd);background:var(--gdb);border-color:var(--gdr)}:root:not([data-theme="light"]) .pg-h{color:var(--gd,var(--muted))!important}:root:not([data-theme="light"]) .glyph.tsec{color:var(--accent-ink)}}
+:root[data-theme="dark"] .glyph.tc{color:var(--gd);background:var(--gdb);border-color:var(--gdr)}
+:root[data-theme="dark"] .pg-h{color:var(--gd,var(--muted))!important}
+:root[data-theme="dark"] .glyph.tsec{color:var(--accent-ink)}
+.glyph.sm{width:22px;height:22px;border-radius:6px;font-size:10px}
+.glyph.xs{width:18px;height:18px;border-radius:5px;font-size:9px}
+
+/* Sections on the canvas: at the left edge on a tinted band; their fields indented under a rail */
+.dz-foldbar{display:flex;align-items:center;gap:6px;margin:0 0 10px}
+.dz-foldbar .grow{flex:1}
+.crow-sec{background:var(--tx-band,#eef0fd);border-color:var(--tx-band-line,#cdd3f6);margin-top:16px}
+.dz-foldbar+.crow-sec,.dz-canvas>.crow-sec:first-child{margin-top:0}
+.crow-sec .crow-m b{font-family:var(--display);font-size:16px;font-weight:700;color:var(--tx-head,var(--accent))}
+.crow-sec.folded{margin-bottom:8px}
+.dz-fold{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;transition:transform .15s}
+.dz-fold:hover{background:var(--surface);color:var(--fg)}
+.dz-fold:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.crow-sec.folded .dz-fold{transform:rotate(-90deg)}
+.dz-mini{display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end;max-width:45%}
+.dz-more{font-size:11px;color:var(--muted);align-self:center;margin-left:2px}
+.crow.in-sec{position:relative;margin-left:30px}
+.crow.in-sec::before{content:'';position:absolute;left:-17px;top:-9px;bottom:-9px;width:2px;border-radius:1px;background:var(--tx-band-line,#cdd3f6);pointer-events:none}
+.crow.in-sec.sec-last::before{bottom:50%}
+.crow.flash{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+@media (prefers-reduced-motion: reduce){.dz-fold{transition:none}}
+@media (max-width:640px){.crow.in-sec{margin-left:18px}.crow.in-sec::before{left:-11px}.dz-mini{display:none}}
+/* the outline mirrors it */
+.dz-lsec .dz-li{font-weight:600;color:var(--tx-head,var(--accent))}
+.dz-lsec:not(:first-child){margin-top:6px}
+.dz-lin .dz-li{padding-left:22px}

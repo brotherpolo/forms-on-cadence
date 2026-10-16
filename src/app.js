@@ -38,6 +38,7 @@ import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesi
 import { checkWorkflow } from './workflow.js';
 import { fieldByName, sysOf, uniqueSysNames, shownName } from './fieldnames.js';
 import * as fv from './formver.js';
+import { typeColors, categoryStyle, canvasRows, blockOf, moveBefore, stepTarget, sectionOf, snapBefore, sectionStep } from './dzlogic.js';
 import { richEditorHTML, richViewHTML, initRichUI } from './richui.js';
 import { fromEditor, richBlocks, RICH_KEY } from './richtext.js';
 import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageName, stageView, withStageField, canWork, assigneeFor, movesOf, missingToMove, waited, stageDue, dueState, dayKey } from './workflow.js';
@@ -60,6 +61,19 @@ const TYPES=[
  ['file','File upload','⇪','Media'],['image','Photo','▣','Media'],['signature','Signature','✎','Media'],['color','Color','◐','Media'],
  ['relation','Link to record','↗','Relations'],['heading','Section heading','§','Layout']];
 const T=Object.fromEntries(TYPES.map(t=>[t[0],{label:t[1],glyph:t[2],group:t[3]}]));
+const TYCOL=typeColors(TYPES); // each type's shade of its category's colour
+const gly=(type,cls='glyph')=>`<span class="${cls}${TYCOL[type]?' tc':type==='heading'?' tsec':''}"${TYCOL[type]?` style="${TYCOL[type].style}"`:''} title="${esc(T[type]?.label||'')}">${T[type]?.glyph||'?'}</span>`;
+/* Designer: which sections are folded, per form, remembered on this device */
+let dzFold={formId:null,set:new Set()};
+function dzFolded(){
+  const id=fdraft?.id||'';
+  if(dzFold.formId!==id){let a=[];try{a=JSON.parse(localStorage.getItem('fw.dzfold.'+id)||'[]');}catch(e){}dzFold={formId:id,set:new Set(Array.isArray(a)?a:[])};}
+  const heads=new Set((fdraft?.fields||[]).filter(x=>x.type==='heading').map(x=>x.id));
+  [...dzFold.set].forEach(k=>{if(!heads.has(k))dzFold.set.delete(k);});
+  return dzFold.set;
+}
+function dzSaveFold(){try{localStorage.setItem('fw.dzfold.'+dzFold.formId,JSON.stringify([...dzFold.set]));}catch(e){}}
+function dzUnfoldFor(fid){const sec=sectionOf(fdraft?.fields,fid);if(sec&&dzFolded().has(sec)){dzFold.set.delete(sec);dzSaveFold();return true;}return false;}
 const CHOICE=new Set(['select','radio','multiselect']);
 const NUMERIC=new Set(['number','decimal','currency','percent','range','rating']);
 const PLACEHOLDER=new Set(['text','textarea','email','phone','url','number','decimal','currency','percent']);
@@ -1633,6 +1647,33 @@ function paintTryState(st){
   document.querySelectorAll('[data-trysec]').forEach(el=>{const off=st.hidden.has(el.dataset.trysec);el.classList.toggle('off',off);const b=el.querySelector('b');if(b)b.textContent=off?'hidden':'shown';});
   document.querySelectorAll('[data-rlfire]').forEach(el=>{el.hidden=!st.fired.get(el.dataset.rlfire);});
 }
+/** The designer canvas: sections at the left edge (foldable), their fields indented under them. */
+function dzCanvasHTML(f){
+  if(!f.fields.length)return `<p class="note dz-empty">Drag a field type here to add it.</p>`;
+  const folded=dzFolded(),rows=canvasRows(f.fields,folded),heads=rows.filter(r=>r.field.type==='heading');
+  const grip=x=>`<button type="button" class="pgrip" data-pdrag="field" data-v="${x.id}" aria-label="Move ${esc(x.label||'field')}: drag, or use the up and down arrow keys" title="Drag to move"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="6" r="1.8"/><circle cx="16" cy="6" r="1.8"/><circle cx="8" cy="12" r="1.8"/><circle cx="16" cy="12" r="1.8"/><circle cx="8" cy="18" r="1.8"/><circle cx="16" cy="18" r="1.8"/></svg></button>`;
+  const bar=heads.length?`<div class="dz-foldbar"><span class="help grow">${heads.length} section${heads.length===1?'':'s'}${folded.size?` · ${folded.size} folded`:''}</span><button type="button" class="btn sm ghost" data-act="dz-fold-all"${folded.size===heads.length?' disabled':''}>Collapse all</button><button type="button" class="btn sm ghost" data-act="dz-unfold-all"${folded.size?'':' disabled'}>Expand all</button></div>`:'';
+  return bar+rows.filter(r=>!r.hidden).map(r=>{
+    const x=r.field;
+    if(x.type==='heading'){
+      const kids=r.kids,shown=kids.slice(0,14);
+      return `<div class="crow crow-sec${r.folded?' folded':''}" data-feid="${x.id}">
+          ${grip(x)}
+          <button type="button" class="dz-fold" data-act="dz-fold" data-id="${x.id}" aria-expanded="${!r.folded}" aria-label="${r.folded?'Expand':'Collapse'} ${esc(x.label||'section')}" title="${r.folded?'Expand':'Collapse'}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+          ${gly('heading')}
+          <div class="crow-m"><b id="frl-${x.id}">${esc(x.label||'Untitled section')}</b><small>Section · ${r.count} field${r.count===1?'':'s'}${ruleTag(f,x.id)}</small></div>
+          ${r.folded&&kids.length?`<span class="dz-mini" aria-label="${esc(kids.map(k=>k.label).join(', '))}">${shown.map(k=>gly(k.type,'glyph xs')).join('')}${kids.length>shown.length?`<span class="dz-more">+${kids.length-shown.length}</span>`:''}</span>`:''}
+          <button class="ibtn dz-dots" data-act="open-field" data-id="${x.id}" aria-label="Options for ${esc(x.label||'section')}">⋯</button>
+        </div>`;
+    }
+    return `<div class="crow${r.section?' in-sec':''}${r.last?' sec-last':''}" data-feid="${x.id}">
+          ${grip(x)}
+          ${gly(x.type)}
+          <div class="crow-m"><b id="frl-${x.id}">${esc(x.label||'Untitled field')}${x.required?'<span class="req">*</span>':''}</b><small>${esc(T[x.type].label)}${String(x.sysName||'').trim()&&String(x.sysName).trim()!==x.label?` · <span class="sysn" title="System name">${esc(String(x.sysName).trim())}</span>`:''}${x.type==='relation'&&formById(x.relForm)?' → '+esc(formById(x.relForm).name):''}${x.inList?' · in list':''}${f.titleField===x.id?' · title':''}${ruleTag(f,x.id)}</small></div>
+          <button class="ibtn dz-dots" data-act="open-field" data-id="${x.id}" aria-label="Options for ${esc(x.label||'field')}">⋯</button>
+        </div>`;
+  }).join('');
+}
 function viewFormEdit(){
   const f=fdraft;const tabs=[['fields','Fields'],['relations','Relationships'],['rules','Rules'],['workflow','Workflow'],['settings','Settings'],['preview','Preview'],['history','History']];
   let body='';
@@ -1645,19 +1686,14 @@ function viewFormEdit(){
         <h2 class="dz-h">Field types</h2>
         <input type="search" class="in dz-q" data-dzq placeholder="Search field types" aria-label="Search field types" autocomplete="off">
         <p class="note dz-none" hidden>No field type matches.</p>
-        ${groups.map(g=>`<div class="pgroup"><span>${g}</span>${TYPES.filter(t=>t[3]===g).map(t=>`<button class="dz-chip" draggable="true" data-act="add-field" data-type="${t[0]}" data-words="${esc((t[1]+' '+t[3]+' '+(TYPE_WORDS[t[0]]||'')).toLowerCase())}" title="Drag onto the form, or tap to add"><span class="glyph">${t[2]}</span>${t[1]}</button>`).join('')}</div>`).join('')}
+        ${groups.map(g=>`<div class="pgroup"><span class="pg-h${g==='Layout'?' tsec-h':''}" style="${categoryStyle(TYPES,TYCOL,g)}">${g}</span>${TYPES.filter(t=>t[3]===g).map(t=>`<button class="dz-chip" draggable="true" data-act="add-field" data-type="${t[0]}" data-words="${esc((t[1]+' '+t[3]+' '+(TYPE_WORDS[t[0]]||'')).toLowerCase())}" title="Drag onto the form, or tap to add">${gly(t[0])}${t[1]}</button>`).join('')}</div>`).join('')}
       </aside>
       <aside class="panel dz-list" aria-label="Fields in this form">
         <h2 class="dz-h">In this form (${f.fields.length})</h2>
-        ${f.fields.length?`<ol class="dz-ol">${f.fields.map((x,i)=>`<li><button class="dz-li" data-act="focus-field" data-id="${x.id}"><span class="num">${i+1}</span><span class="fname" title="${esc(x.type==='heading'?x.label:shownName(f,x))}">${esc(x.type==='heading'?(x.label||'Untitled field'):shownName(f,x))}</span><span class="ftype">${esc(T[x.type].label)}</span></button></li>`).join('')}</ol>`:`<p class="note">No fields yet.</p>`}
+        ${f.fields.length?`<ol class="dz-ol">${canvasRows(f.fields).map((r,i)=>{const x=r.field,h=x.type==='heading';return `<li class="${h?'dz-lsec':r.section?'dz-lin':''}"><button class="dz-li" data-act="focus-field" data-id="${x.id}"><span class="num">${i+1}</span>${gly(x.type,'glyph sm')}<span class="fname" title="${esc(h?x.label:shownName(f,x))}">${esc(h?(x.label||'Untitled section'):shownName(f,x))}</span></button></li>`;}).join('')}</ol>`:`<p class="note">No fields yet.</p>`}
       </aside>
       <main class="panel dz-canvas" data-dz-canvas aria-label="Form canvas">
-        ${f.fields.length?f.fields.map((x)=>`<div class="crow" data-feid="${x.id}">
-          <button type="button" class="pgrip" data-pdrag="field" data-v="${x.id}" aria-label="Move ${esc(x.label||'field')}: drag, or use the up and down arrow keys" title="Drag to move"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="6" r="1.8"/><circle cx="16" cy="6" r="1.8"/><circle cx="8" cy="12" r="1.8"/><circle cx="16" cy="12" r="1.8"/><circle cx="8" cy="18" r="1.8"/><circle cx="16" cy="18" r="1.8"/></svg></button>
-          <span class="glyph" title="${esc(T[x.type].label)}">${T[x.type].glyph}</span>
-          <div class="crow-m"><b id="frl-${x.id}">${esc(x.label||'Untitled field')}${x.required?'<span class="req">*</span>':''}</b><small>${esc(T[x.type].label)}${x.type!=='heading'&&String(x.sysName||'').trim()&&String(x.sysName).trim()!==x.label?` · <span class="sysn" title="System name">${esc(String(x.sysName).trim())}</span>`:''}${x.type==='relation'&&formById(x.relForm)?' → '+esc(formById(x.relForm).name):''}${x.inList?' · in list':''}${f.titleField===x.id?' · title':''}${ruleTag(f,x.id)}</small></div>
-          <button class="ibtn dz-dots" data-act="open-field" data-id="${x.id}" aria-label="Options for ${esc(x.label||'field')}">⋯</button>
-        </div>`).join(''):`<p class="note dz-empty">Drag a field type here to add it.</p>`}
+        ${dzCanvasHTML(f)}
         <div class="dz-drop">Drop a field type here</div>
         ${sectionCards(f)}
       </main>
@@ -1732,7 +1768,7 @@ function fieldModal(){
   const armed=ui.confirm==='f-'+x.id;
   return `<div class="fscrim">
     <div class="fmodal" data-feid="${x.id}" role="dialog" aria-modal="true" aria-labelledby="fm-t-${x.id}" style="transform:translate3d(${fmPos.x}px,${fmPos.y}px,0)">
-      <div class="fmodal-h"><span class="glyph">${T[x.type].glyph}</span><b id="fm-t-${x.id}">${esc(x.label||'Untitled field')}</b><span class="fm-type">${esc(T[x.type].label)}</span><button class="ibtn" data-act="close-field" aria-label="Close">✕</button></div>
+      <div class="fmodal-h">${gly(x.type)}<b id="fm-t-${x.id}">${esc(x.label||'Untitled field')}</b><span class="fm-type">${esc(T[x.type].label)}</span><button class="ibtn" data-act="close-field" aria-label="Close">✕</button></div>
       <div class="fmodal-b">${fieldEditor(x)}</div>
       <div class="fmodal-f">
         <button class="ibtn" data-act="field-move" data-id="${x.id}" data-dir="-1" aria-label="Move up"${i===0?' disabled':''}>↑</button>
@@ -2116,9 +2152,12 @@ document.addEventListener('click',async e=>{
     case 'tab':ui.tab=el.dataset.tab;ui.confirm=null;ui.openField=null;if(ui.tab==='history')fv.refresh();if(ui.tab==='preview'||ui.tab==='rules')pdraft=null;renderMain();break;
     case 'open-field':ui.openField=id;fmPos={x:0,y:0};renderMain();break;
     case 'close-field':ui.openField=null;renderMain();break;
-    case 'focus-field':document.querySelector(`.crow[data-feid="${id}"]`)?.scrollIntoView({block:'center',behavior:'smooth'});break;
+    case 'focus-field':{if(dzUnfoldFor(id))renderMain();const row=document.querySelector(`.crow[data-feid="${id}"]`);row?.scrollIntoView({block:'center',behavior:'smooth'});row?.classList.add('flash');setTimeout(()=>row?.classList.remove('flash'),1200);break;}
+    case 'dz-fold':{const set=dzFolded();if(set.has(id))set.delete(id);else set.add(id);dzSaveFold();renderMain();document.querySelector(`[data-act="dz-fold"][data-id="${CSS.escape(id)}"]`)?.focus({preventScroll:true});break;}
+    case 'dz-fold-all':{const set=dzFolded();fdraft.fields.filter(x=>x.type==='heading').forEach(x=>set.add(x.id));dzSaveFold();renderMain();break;}
+    case 'dz-unfold-all':{dzFolded().clear();dzSaveFold();renderMain();break;}
     case 'sec-move':{const k=el.dataset.k,dir=+el.dataset.dir;fdraft.sectionOrder=moveSection(sectionOrder(fdraft),k,dir);setFdirty();renderMain();const b=document.querySelector(`[data-act="sec-move"][data-k="${CSS.escape(k)}"][data-dir="${dir}"]:not(:disabled)`)||document.querySelector(`[data-act="sec-move"][data-k="${CSS.escape(k)}"]:not(:disabled)`);b?.focus();break;}
-    case 'add-field':{const f=newField(el.dataset.type);fdraft.fields.push(f);ui.openField=f.id;setFdirty();renderMain();document.querySelector(`[data-feid="${f.id}"]`)?.scrollIntoView({block:'center',behavior:'smooth'});break;}
+    case 'add-field':{const f=newField(el.dataset.type);fdraft.fields.push(f);dzUnfoldFor(f.id);ui.openField=f.id;setFdirty();renderMain();document.querySelector(`[data-feid="${f.id}"]`)?.scrollIntoView({block:'center',behavior:'smooth'});break;}
     case 'field-move':{const fs=fdraft.fields,i=fs.findIndex(x=>x.id===id),j=i+(+el.dataset.dir);if(j<0||j>=fs.length)return;[fs[i],fs[j]]=[fs[j],fs[i]];setFdirty();renderMain();break;}
     case 'field-dup':{const i=fdraft.fields.findIndex(x=>x.id===id);const c={...clone(fdraft.fields[i]),id:uid('x')};c.label+=' (copy)';fdraft.fields.splice(i+1,0,c);ui.openField=c.id;setFdirty();renderMain();break;}
     case 'field-del':{if(ui.confirm!=='f-'+id){ui.confirm='f-'+id;renderMain();toast('Tap the check to delete this field. Values already saved in records are kept but hidden.');return;}ui.confirm=null;fdraft.fields=fdraft.fields.filter(x=>x.id!==id);if(fdraft.titleField===id)fdraft.titleField='';setFdirty();renderMain();break;}
@@ -2270,12 +2309,21 @@ async function loadExamples(){
    Arrow keys on a focused handle move it one place. */
 let pd=null; // { kind:'field'|'section', id, el, others, to, y0, cy, pid, moved, line, raf }
 const pdItems=kind=>[...document.querySelectorAll(kind==='field'?'[data-dz-canvas] .crow':'.scards .scard')];
+/** Move a field (a folded section moves with its fields) to just before another row (null: the end). */
+function dzMove(id,beforeId){
+  const ids=blockOf(fdraft.fields,id,dzFolded());
+  if(ids.length>1||(dzFolded().has(id)))beforeId=snapBefore(fdraft.fields.filter(x=>!ids.includes(x.id)),beforeId); // a folded section lands between sections
+  const next=moveBefore(fdraft.fields,ids,beforeId);
+  if(!next)return false;
+  fdraft.fields=next;
+  dzUnfoldFor(id); // dropped into a folded section: open it so you can see where it went
+  setFdirty();renderMain();
+  document.querySelector(`[data-pdrag="field"][data-v="${CSS.escape(id)}"]`)?.focus({preventScroll:true});
+  return true;
+}
 function pdApply(kind,id,to){
   if(kind==='field'){
-    const fs=fdraft.fields,moved=fs.find(x=>x.id===id);if(!moved)return false;
-    const rest=fs.filter(x=>x.id!==id),next=[...rest.slice(0,to),moved,...rest.slice(to)];
-    if(next.every((x,k)=>x===fs[k]))return false;
-    fdraft.fields=next;
+    return dzMove(id,to);
   }else{
     const order=sectionOrder(fdraft),rest=order.filter(k=>k!==id),next=[...rest.slice(0,to),id,...rest.slice(to)];
     if(next.join()===order.join())return false;
@@ -2307,7 +2355,7 @@ function pdEnd(apply){
   const d=pd;if(!d)return;pd=null;
   cancelAnimationFrame(d.raf);d.line.remove();d.el.classList.remove('lifting');d.el.style.transform='';
   document.body.classList.remove('pd-on');
-  if(apply&&d.moved)pdApply(d.kind,d.id,d.to);
+  if(apply&&d.moved)pdApply(d.kind,d.id,d.kind==='field'?(d.others[d.to]?.dataset.feid??null):d.to);
 }
 document.addEventListener('pointerdown',e=>{
   const g=e.target.closest?.('[data-pdrag]');
@@ -2334,7 +2382,7 @@ document.addEventListener('keydown',e=>{
   if(!g||!fdraft||!['ArrowUp','ArrowDown'].includes(e.key))return;
   e.preventDefault();
   const kind=g.dataset.pdrag,id=g.dataset.v,dir=e.key==='ArrowUp'?-1:1;
-  if(kind==='field'){const i=fdraft.fields.findIndex(x=>x.id===id);if(i<0||i+dir<0||i+dir>=fdraft.fields.length)return;pdApply('field',id,i+dir);}
+  if(kind==='field'){const to=dzFolded().has(id)?sectionStep(fdraft.fields,id,dir):stepTarget(pdItems('field').map(r=>r.dataset.feid),id,dir);if(to===undefined)return;pdApply('field',id,to);}
   else{const order=sectionOrder(fdraft),i=order.indexOf(id);if(i<0||i+dir<0||i+dir>=order.length)return;pdApply('section',id,i+dir);}
 });
 
@@ -2370,19 +2418,14 @@ document.addEventListener('drop',e=>{
   const canvas=e.target.closest?.('[data-dz-canvas]');
   if(!canvas||!dzDrag||!fdraft)return;
   e.preventDefault();
-  const {i}=dzIndex(canvas,e.clientY);
+  const {rows,i}=dzIndex(canvas,e.clientY);
+  const before=rows[i]?.dataset.feid??null;
   const drag=dzDrag;dzDrag=null;
-  const fs=fdraft.fields;
-  if(drag.kind==='move'){
-    const moved=fs.find(x=>x.id===drag.id);
-    if(!moved)return;
-    const rest=fs.filter(x=>x.id!==drag.id);
-    const next=[...rest.slice(0,i),moved,...rest.slice(i)];
-    if(next.every((x,k)=>x===fs[k]))return;   // dropped where it already was
-    fdraft.fields=next;
-  }else{
+  if(drag.kind==='move'){dzMove(drag.id,before);return;}
+  else{
     const nf=newField(drag.type);
-    fdraft.fields=[...fs.slice(0,i),nf,...fs.slice(i)];
+    fdraft.fields=moveBefore([...fdraft.fields,nf],[nf.id],before)||[...fdraft.fields,nf];
+    dzUnfoldFor(nf.id);
     ui.openField=nf.id;
     fmPos={x:0,y:0};
   }
