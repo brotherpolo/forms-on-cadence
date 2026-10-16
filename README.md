@@ -79,6 +79,8 @@ src/
   comments.js              Comments with @mentions on records, and My work → Mentions
   commentlogic.js          Threads, the @ list, who's mentioned and told (pure, unit-tested)
   notices.js               Live pop-ups for new mentions and records that become yours
+  docxtpl.js, docxxml.js   Word templates: reading placeholders and filling a .docx (pure, unit-tested)
+  wordui.js                Export ▾, the Word templates pop-up, and a record's values for a template
   noticelogic.js           What counts as new for those pop-ups (pure, unit-tested)
   lists.js, lists.css      Records list: saved views, columns, filters, select several
   grids.css                Sub-form grids on the record page
@@ -132,6 +134,7 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 | `records/{id}` | `formId, values{fieldId: value}, parentId, parentFormId, ownerId, createdBy, createdAt, updatedAt, updatedBy`; `nums{fieldId: number}` and `autoLog[]` from the server; `stage, assignee, assigneeGroup, stageAt` with a workflow | per access; at a workflow stage only its assignee or admins (`nums`, `autoLog`: server only) |
 | `records/{id}/comments/{id}` | `by, byName, at, text, mentions[{uid, name}], parent, task, editedAt`; `notified{uid: sent, no-access, gone}` from the server | anyone who can see the record, as themselves; edit your own, delete your own (admins any) |
 | `mentions/{id}` | `to, by, byName, recordId, formId, recordTitle, formName, commentId, snippet, at, read` | server only; the person mentioned reads it and marks it read |
+| `docTemplates/{id}` | `formId, name, path, url, size, by, byName, at, updatedAt, tags, problems`: a Word template; the .docx is in Storage at `docTemplates/{formId}/{uid}/…` | anyone who can see the form adds one; the person who added it, or an admin, changes or deletes it |
 | `records/{id}/stages/{id}` | `at, by, from, fromName, to, toName, label, comment, assignee, assigneeGroup`: stage history | whoever moves it, as themselves; never changed |
 | `forms/{id}/versions/{id}` | `n, at, by, kind (saved, draft, loaded, activated, baseline), note, from, fromN, summary[], form{…}`: version history; `forms/{id}.activeVersion` names the live one | admins (never changed or deleted) |
 | `settings/home` | `dashboardId, updatedAt, updatedBy`: the dashboard Home shows for anyone without their own | admins (everyone let in reads it) |
@@ -432,9 +435,21 @@ Each section under a record's fields has a bar at the top: a search box (once th
 - **Phones** show cards with a **Sort** menu instead of the table.
 - `sublogic.js` (pure, unit-tested) holds the choices, limits and task cells; `subui.js` draws the bar, picker and menus.
 
+## Word templates (Export ▾)
+
+A saved record's **Export ▾** button offers **PDF** (the standard layout) and every Word template made for that form. Picking one downloads a filled-in `.docx`, named `<Template> - <Record>.docx`. Anyone who can see a form can add templates to it (**Export ▾ → Word templates…**); whoever added one, or an administrator, can rename, replace or delete it. Word files only, up to 10 MB.
+
+- **Making one:** design the document in Word and type placeholders as plain text: `{Field}` (caption or system name), `{Parent form: Field}`, `{Link field: Field}`, `{= formula}` (as in a Calculated field), `{%Photo}` / `{%Signature}` / `{%Logo}` for pictures (`|width=5cm` or `|height=…`). Options after `|`: `short`, `long` or a date pattern in quotes (`"MMM d, yyyy"`), number patterns (`0.00`, `#,##0`), `currency`, `percent`, `Yes/No` for checkboxes, `upper`/`lower`/`title`, `or "None"`, `bullets`/`lines` for several choices, `plain`. Values that every record has: `{Today}`, `{Now}`, `{Exported by}`, `{Owner}`, `{Created by}`, `{Created}`, `{Last updated}`, `{Item name}`, `{Form name}`, `{Stage}`, `{Company name}`, `{Title}`. `{{` gives a real "{".
+- **Sections:** `{#if condition} … {#else} … {/if}` (conditions like `Stage = "Approved" and Budget > 1000`, `contains`, `not`, brackets; a bare field means ticked / not empty) and `{#each Grid or child form} … {/each}` (optionally `|sort Field desc`, `|where condition`). Both ends in one paragraph: just that text. Each end on a line of its own: the paragraphs between (those two lines go). Ends in different cells of a table row, or in different rows: those rows repeat.
+- **Formatted long text** keeps bold, italics, colours, headings, bullets and numbers when its placeholder is on a line of its own.
+- **Checking:** adding (or replacing) a template lists every placeholder, with the ones Formwright doesn't recognise in red; a template with a block left open can't be added. Unrecognised placeholders stay as typed in the filled document, and the export says which.
+- **How it works:** `src/docxtpl.js` reads the template's XML (first putting back placeholders Word split into pieces), finds the blocks, and fills it from a "scope" `src/wordui.js` builds from the record, its parent, links and children. Pictures are added as images in the file. Comments and tasks aren't part of it.
+- **The sample:** `public/word-template-sample.docx` (linked from the pop-up) shows every option, with notes; `tests/fixtures/quote-template.docx` is the same file, used by the tests.
+- The output is `.docx`; to get a PDF, open it in Word and save as PDF.
+
 ## Export PDF
 
-**Export PDF** in a saved record's top bar downloads it as a tidy document, for example `Site visits - Smith house.pdf`. Anyone who can see the record can export it.
+**Export ▾ → PDF** in a saved record's top bar downloads it as a tidy document, for example `Site visits - Smith house.pdf`. Anyone who can see the record can export it.
 
 - **Top:** the company name and logo from **Administration → PDF exports** (if set), then the form's name, the record's title, who created it and when, the last update, the owner, and its parent.
 - **Fields** in the form's order and layout: half-width fields side by side, section headings as headings (with their help text). Values print as the app shows them: CAD currency, written-out dates, Yes/No, ratings as stars, colours as a swatch, linked records by name, calculation results. Empty fields print empty. Long text prints in full and runs onto the next page if it needs to.

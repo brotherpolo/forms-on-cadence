@@ -42,6 +42,7 @@ import * as fv from './formver.js';
 import * as tm from './taskmodal.js';
 import * as cmt from './comments.js';
 import * as notices from './notices.js';
+import * as wordui from './wordui.js';
 import { typeColors, categoryStyle, canvasRows, blockOf, moveBefore, stepTarget, sectionOf, snapBefore, sectionStep } from './dzlogic.js';
 import { richEditorHTML, richViewHTML, initRichUI } from './richui.js';
 import { fromEditor, richBlocks, RICH_KEY } from './richtext.js';
@@ -474,7 +475,7 @@ function renderMain(){
   if(view.name==='record'&&rdraft){rdraft._rs=null;applyRules(rdraft);}
   if(view.name==='formEdit'&&pdraft&&(ui.tab==='rules'||ui.tab==='preview'))applyRules(pdraft);
   if(view.name==='dashboard')fitTiles();
-  syncTaskWatch();syncEmailWatch();syncStageWatch();cmt.sync();cmt.afterRender();
+  syncTaskWatch();syncEmailWatch();syncStageWatch();cmt.sync();cmt.afterRender();wordui.sync();
 }
 
 /* ---------- Cadence tasks linked to the open record ---------- */
@@ -613,7 +614,7 @@ function viewRecord(form){
     ${rec&&isAdmin(store.me)?`<button class="btn ghost" data-act="rec-history" title="This ${esc(itemName(form).toLowerCase())} in the audit trail">History</button>`:''}
     ${rec&&isAdmin(store.me)?`<button class="btn" data-act="email-pdf" title="Email this ${esc(itemName(form).toLowerCase())} as a PDF">Email PDF</button>`:''}
     ${rec&&canCreate(store.me,form.id)?`<button class="btn ghost" data-act="rec-duplicate" title="Start a new ${esc(itemName(form).toLowerCase())} with this one’s details">Duplicate</button>`:''}
-    ${rec?`<button class="btn" data-act="export-pdf" id="pdf-btn"${ui.pdfBusy?' disabled':''} title="Download this ${esc(itemName(form).toLowerCase())} as a PDF">${ui.pdfBusy?'Making PDF…':'Export PDF'}</button>`:''}
+    ${rec?wordui.exportButton(ui.pdfBusy):''}
     <button class="btn ghost" data-act="back">${rdraft.dirty?'Discard':'Back'}</button>
     ${ro?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
   </div>
@@ -999,11 +1000,16 @@ function pdfModel(form,rec){
   return {accent:colorOf(form),formName:form.name,title:recTitle(rec,form),meta,parent:parent&&pform?`${pform.name}: ${recTitle(parent,pform)}`:null,items,sections,
     stamp:`Exported ${now.toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} by ${realName(store.user?.uid)}`};
 }
+/** The record bar's Export ▾ button while a PDF or Word document is being made. */
+function exportBusy(on){ui.pdfBusy=!!on;const b=$('#pdf-btn');if(b){b.disabled=!!on;b.innerHTML=on?'Working…':'Export <span aria-hidden="true">▾</span>';}}
+/** {= …} in a Word template: a calculation on this record, or (with no record) whether it's valid. */
+function docCalc(form,rec,expr){try{const v=evalFormula(form,{id:'__doc',type:'formula',expr},rec);return (typeof v==='number'&&!isFinite(v))?{e:'The result is too large or undefined.'}:{v};}catch(e){return {e:e.fx?e.message:'This calculation could not be worked out.'};}}
+function docCheck(form,expr){if(!String(expr||'').trim())return 'Write a calculation after the =.';try{evalFormula(form,{id:'__doc',type:'formula',expr},{id:null,formId:form.id,values:{},parentId:null},0,true);return null;}catch(e){return e.fx?e.message:'This calculation could not be worked out.';}}
 async function exportPdf(){
   const rec=view.recordId?recById(view.recordId):null,form=rec?formById(rec.formId):null;
   if(!rec||!form||ui.pdfBusy)return;
   if(rdraft?.dirty){toast('Save your changes first, so the PDF matches what’s saved.');return;}
-  ui.pdfBusy=true;const paint=()=>{const b=$('#pdf-btn');if(b){b.disabled=!!ui.pdfBusy;b.textContent=ui.pdfBusy?'Making PDF…':'Export PDF';}};paint();
+  ui.pdfBusy=true;const paint=()=>exportBusy(ui.pdfBusy);paint();
   try{
     const {exportRecordPdf}=await import('./pdfexport.js');
     const r=await exportRecordPdf(pdfModel(form,rec));
@@ -2504,6 +2510,8 @@ export function startApp(){
   tm.initTaskModal({store,recById,formById,recTitle,toast,cadenceUrl,tasks:()=>tw.tasks||[]});
   cmt.initComments({store,view:()=>view,recById,formById,recTitle,itemName,toast,isAdmin:()=>isAdmin(store.me),canUseTasks,foldBtn,folded,
     unfold:(fid,k)=>saveFolds(setFold(folds(),fid,k,false)),openRecord:id=>{const r=recById(id);if(!r)return;if(view.name==='record'&&view.recordId===id){renderMain();return;}goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
+  wordui.initWordUI({store,view:()=>view,recById,formById,recTitle,itemName,valOf,fmt,realName,stageName,wfOn,parentsOf,calcExpr:docCalc,checkExpr:docCheck,
+    isAdmin:()=>isAdmin(store.me),toast,dirty:()=>!!rdraft?.dirty,busy:exportBusy});
   notices.initNotices({store,recById,formById,recTitle,stageName,groupName,wfOn,openMention:id=>cmt.openMention(id),
     openRecord:id=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});},
     openMyWork:tab=>{ui.mwTab=tab;if(view.name==='mywork')renderMain();else go({name:'mywork'});}});
@@ -2519,6 +2527,6 @@ export function startApp(){
 export function stopApp(){
   booted=false;store.onChange=()=>{};$('#app').hidden=true;document.getElementById('noaccess')?.remove();closeMenu();resetLists();resetImports();forgetDrafts();
   if(tw.unsub){tw.unsub();tw.unsub=null;}tw.recordId=null;
-  cmt.stop();
+  cmt.stop();wordui.stop();
 }
 export { view as currentView, ui, byOrder, formById, recordsOf, renderMain };

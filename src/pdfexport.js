@@ -11,7 +11,7 @@ const MAX_PX = 1600; // photos are scaled down to this, which keeps PDFs small a
 const isPng = (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
 const isJpg = (b) => b[0] === 0xff && b[1] === 0xd8;
 
-function dataUrlBytes(s) {
+export function dataUrlBytes(s) {
   const m = /^data:image\/(png|jpe?g);base64,(.+)$/i.exec(String(s || ''));
   if (!m) return null;
   const bin = atob(m[2]);
@@ -21,7 +21,7 @@ function dataUrlBytes(s) {
 }
 
 /** A photo as a JPEG the PDF can hold: turned upright and scaled down. Anything the browser can show works. */
-async function photoBytes(blob) {
+export async function photoBytes(blob) {
   try {
     const bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' });
     const s = Math.min(1, MAX_PX / Math.max(bmp.width, bmp.height));

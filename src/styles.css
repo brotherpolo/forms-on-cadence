@@ -735,3 +735,42 @@ tr.wf-over td.title{color:var(--danger)}
 .mw-f{color:var(--muted)}
 .mw-2{font-size:14px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mw-m time{font-size:12.5px;color:var(--muted);white-space:nowrap}
+
+/* ---------- Export ▾ and Word templates (wordui.js) ---------- */
+.xw-menu{position:fixed;z-index:85;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 36px rgba(10,12,20,.22);padding:6px;display:flex;flex-direction:column}
+.xw-item{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:6px 10px;border:0;border-radius:8px;background:none;font:inherit;font-size:14px;color:var(--fg);text-align:left;cursor:pointer}
+.xw-item:hover,.xw-item:focus-visible{background:var(--accent-soft);outline:none}
+.xw-item .grow{flex:1;min-width:0;display:flex;flex-direction:column;overflow-wrap:anywhere}
+.xw-item small{color:var(--muted);font-size:12px}
+.xw-ic{flex:none;width:26px;height:26px;border-radius:6px;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--sunk);color:var(--muted)}
+.xw-ic.pdf{background:#b42335;color:#fff}
+.xw-ic.doc{background:#2b579a;color:#fff}
+.xw-sep{height:1px;background:var(--line);margin:4px 2px}
+.xw-note{margin:6px 10px;font-size:13px;color:var(--muted)}
+.xw-dlg{max-width:640px}
+.xw-top{display:flex;align-items:flex-start;gap:10px;justify-content:space-between}
+.xw-dlg code,.xw-tags code{font-family:var(--mono);font-size:12.5px;background:var(--sunk);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
+.xw-list{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+.xw-t{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.xw-t .help{margin:0}
+.xw-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.xw-row .in{flex:1;min-width:160px}
+.xw-row .grow{flex:1;min-width:0;overflow-wrap:anywhere}
+.xw-acts{display:flex;gap:6px;flex-wrap:wrap}
+.xw-file{cursor:pointer}
+.xw-warnt{color:var(--danger)}
+.xw-empty{color:var(--muted);margin:14px 0 4px}
+.xw-add{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px}
+.xw-pend{border:1px solid var(--accent);border-radius:12px;padding:14px;margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.xw-pend h3{margin:0;font-size:16px}
+.xw-pend .help{margin:0}
+.xw-l{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.xw-ok,.xw-warn,.xw-bad{margin:0;font-size:14px;font-weight:500}
+.xw-ok{color:var(--ok)}
+.xw-warn{color:var(--fg)}
+.xw-bad{color:var(--danger)}
+.xw-tags{list-style:none;margin:0;padding:0;max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.xw-tags li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;padding:6px 10px;border-bottom:1px solid var(--line);font-size:13px}
+.xw-tags li:last-child{border-bottom:0}
+.xw-tags li.bad span{color:var(--danger)}
+.xw-tags li.ok code::before{content:"✓ ";color:var(--ok)}

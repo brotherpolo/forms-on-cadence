@@ -19,7 +19,7 @@ import {
   limit,
   startAfter,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, getBlob } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, getBlob, deleteObject } from 'firebase/storage';
 import { isAdmin, formLevel, effectiveAccess, withInherited } from './access.js';
 import { clone } from './util.js';
 
@@ -824,6 +824,45 @@ export async function loadExamples(examples) {
 }
 
 /* ---------- Files ---------- */
+
+/* ---------- Word templates (Export ▾ on a record) ----------
+   docTemplates/{id}: { formId, name, path, url, size, by, byName, at, updatedAt, tags, problems }; the
+   file is in Storage at docTemplates/{formId}/{uid}/{time}-{file}.docx. Anyone who can see the form
+   can add one; whoever added it (or an administrator) can rename or delete it. */
+export function watchTemplates(formId, onNext, onError) {
+  return onSnapshot(query(collection(db, 'docTemplates'), where('formId', '==', formId)),
+    (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => String(a.name).localeCompare(String(b.name)))), onError || (() => onNext([])));
+}
+const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+export async function addTemplate(formId, file, name, check) {
+  const me = store.user.uid;
+  const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80);
+  const path = `docTemplates/${formId}/${me}/${Date.now()}-${safe}`;
+  await uploadBytes(ref(storage, path), file, { contentType: DOCX });
+  const url = await getDownloadURL(ref(storage, path));
+  const id = doc(collection(db, 'docTemplates')).id;
+  const now = Date.now();
+  await setDoc(doc(db, 'docTemplates', id), plain({ formId, name: String(name).slice(0, 120), path, url, size: file.size, by: me, byName: store.profiles[me]?.displayName || store.me?.displayName || '', at: now, updatedAt: now, tags: check.tags, problems: check.problems }));
+  return id;
+}
+export async function replaceTemplateFile(t, file, check) {
+  const me = store.user.uid;
+  const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80);
+  const path = `docTemplates/${t.formId}/${me}/${Date.now()}-${safe}`;
+  await uploadBytes(ref(storage, path), file, { contentType: DOCX });
+  const url = await getDownloadURL(ref(storage, path));
+  await updateDoc(doc(db, 'docTemplates', t.id), { path, url, size: file.size, updatedAt: Date.now(), tags: check.tags, problems: check.problems });
+  try { await deleteObject(ref(storage, t.path)); } catch (e) { /* the old file can stay */ }
+}
+export async function renameTemplate(id, name) { await updateDoc(doc(db, 'docTemplates', id), { name: String(name).slice(0, 120), updatedAt: Date.now() }); }
+export async function deleteTemplate(t) {
+  await deleteDoc(doc(db, 'docTemplates', t.id));
+  try { await deleteObject(ref(storage, t.path)); } catch (e) { /* already gone */ }
+}
+export async function templateBytes(t) {
+  const b = await fileBlob({ path: t.path, url: t.url });
+  return new Uint8Array(await b.arrayBuffer());
+}
 
 export async function uploadFile(file, formId) {
   const me = store.user.uid;
