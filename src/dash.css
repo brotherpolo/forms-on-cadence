@@ -327,3 +327,32 @@ button.db-li:hover{background:var(--accent-soft)}
 .db-t-kpi .rp-kpisub{text-align:center;max-width:100%}
 .db-t-kpi .db-kd{align-self:center}
 .db-starter{margin:-4px 0 4px}
+
+/* Donut and KPI tiles scale with the tile, the way Cadence's dashboards do: the ring fills the
+   space and sits centred; a wide tile puts the legend beside it, a tall one puts it underneath. */
+@media (min-width:761px){
+.db-tile .db-donut,.db-tile .db-donut.many{height:100%;display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;justify-content:center;gap:10px}
+.db-tile .db-rbox{flex:1 1 0;min-height:60px;min-width:0;container-type:size;display:grid;place-items:center}
+.db-tile .db-ring,.db-tile .db-donut.many .db-ring{--ring:min(100cqw,100cqh);width:var(--ring);height:var(--ring);flex:none;position:relative;top:auto}
+.db-tile .db-ring::after{inset:21%}
+.db-tile .db-ringc{font-size:clamp(12px,calc(var(--ring) * .15),40px);line-height:1.1}
+.db-tile .db-ringc small{font-size:clamp(10px,calc(var(--ring) * .07),14px)}
+.db-tile .db-leg{flex:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),max-content));justify-content:center;gap:0 14px;max-height:40%;overflow:hidden}
+.db-tile .db-li{grid-template-columns:12px minmax(0,1fr) 34px;gap:6px;padding:1px 2px}
+.db-tile .db-li .db-lv{display:none}
+@container (min-aspect-ratio:5/4) and (min-width:340px){
+  .db-tile .db-donut,.db-tile .db-donut.many{flex-direction:row;align-items:center;gap:max(16px,4cqw)}
+  .db-tile .db-rbox{height:100%;flex:0 1 auto;aspect-ratio:1;max-width:60%}
+  .db-tile .db-leg{flex:0 0 auto;max-width:55%;max-height:100%;overflow-y:auto;grid-template-columns:minmax(0,max-content);justify-content:start;align-content:center;gap:0}
+  .db-tile .db-li{grid-template-columns:12px minmax(0,1fr) auto 38px;gap:8px}
+  .db-tile .db-li .db-lv{display:inline}
+}
+@container (max-height:150px) and (max-width:339px){.db-tile .db-leg{display:none}}
+@container (max-height:150px) and (max-aspect-ratio:5/4){.db-tile .db-leg{display:none}}
+
+/* KPI: the number takes the space it's given, centred; the line under it goes when there's no room */
+.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.4rem,56cqh,4.4rem);line-height:1}
+@container (max-height:100px){.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.3rem,66cqh,4.4rem)}.db-t-kpi .rp-kpisub{display:none}}
+}
+/* phones: a KPI number fits across the card */
+@media (max-width:760px){.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.6rem,12cqw,2.8rem)}}
