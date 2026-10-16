@@ -7,6 +7,7 @@ import { readTheme, applyTheme, nextTheme, themeLabel } from './theme.js';
 import { fillAutoNumbers, setAutoNumber, autoCounter, emailRecord, watchEmails, deleteSentEmails, fileBlob, getExportSettings } from './store.js';
 import { DEFAULT_SUBJECT, DEFAULT_MESSAGE, fillTemplate, parseEmails, emailSuggestions } from './emaillogic.js';
 import { runImport, rewriteValues, moveStage, watchStages } from './store.js';
+import { canUseTasks } from './store.js';
 import { store, uploadFile, deleteFormCascade, loadExamples as writeExamples, watchTasks, setTaskDone, saveRecordBundle, recomputeAllAccess, attachRecords } from './store.js';
 import { cadenceUrl } from './firebase.js';
 import { parseRoute, routeFor } from './route.js';
@@ -38,6 +39,7 @@ import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesi
 import { checkWorkflow } from './workflow.js';
 import { fieldByName, sysOf, uniqueSysNames, shownName } from './fieldnames.js';
 import * as fv from './formver.js';
+import * as tm from './taskmodal.js';
 import { typeColors, categoryStyle, canvasRows, blockOf, moveBefore, stepTarget, sectionOf, snapBefore, sectionStep } from './dzlogic.js';
 import { richEditorHTML, richViewHTML, initRichUI } from './richui.js';
 import { fromEditor, richBlocks, RICH_KEY } from './richtext.js';
@@ -494,7 +496,7 @@ function tasksInner(){
   const form=rec?formById(rec.formId):null;
   const noun=form?itemName(form).toLowerCase():'record';
   const k='t:tasks',p=form?subPrefs(form.id,k):prefsOf({},'',k);
-  const addBtn=cadenceUrl?`<button class="btn sm" data-act="add-task">+ Add task</button>`:'';
+  const addBtn=canUseTasks()?`<button class="btn sm" data-act="add-task">+ Add task</button>`:'';
   const ready=tw.status==='ready'&&tw.recordId===view.recordId;
   const openTasks=ready?tw.tasks.filter(t=>!t.done):[];
   const tOpen=!(form&&folded(form.id,k));
@@ -516,16 +518,16 @@ function tasksInner(){
   const tools=colsTool(k,ui.subPop===k,cols,TASK_COLS.map(c=>({...c,group:''})),{fixed:'Task'})+showMenu(k,p.show,tw.tasks.length)+sortMenu(k,[{key:'title',label:'Task'},...cols],sort,'Open first, by due date');
   const bar=toolBar({search:tw.tasks.length>5||tq?subSearch(k,'Tasks',tq,found.length,tw.tasks.length):'',tools,buttons:addBtn});
   if(!found.length)return head+`<div class="panel subsec">${bar}<p class="note">No tasks match “${esc(tq)}”.</p></div>`;
-  const tick=t=>{const busy=tw.busy.has(t.id),rep=repeats(t);return `<button class="tcheck${t.done?' on':''}" data-act="task-done" data-id="${esc(t.id)}" aria-pressed="${!!t.done}" aria-label="${t.done?'Reopen':'Mark done'}: ${esc(t.title)}"${busy?' disabled':''}${rep&&!t.done?' title="Repeating tasks are completed in Cadence, so the next one is created"':''}>✓</button>`;};
+  const tick=t=>{const busy=tw.busy.has(t.id);return `<button class="tcheck${t.done?' on':''}" data-act="task-done" data-id="${esc(t.id)}" aria-pressed="${!!t.done}" aria-label="${t.done?'Reopen':'Mark done'}: ${esc(t.title)}"${busy?' disabled':''}>✓</button>`;};
   const tdCell=(c,x)=>`<td class="${[c.num?'num':'',x.tone?'tt-'+x.tone:'',x.long?'lv-long':''].filter(Boolean).join(' ')}"${x.long&&x.text?` title="${esc(x.text)}"`:''}>${esc(x.text)}</td>`;
   const table=`<div class="sub-box"><div class="tblwrap"><table class="tbl lv-tbl sub-tbl tt-tbl"><thead><tr><th class="tt-ck"><span class="sr">Done</span></th>${subHead(k,{key:'title',label:'Task'},sort)}${cols.map(c=>subHead(k,c,sort)).join('')}</tr></thead>
-    <tbody>${lim.rows.map(r=>`<tr class="${r.t.done?'done':''}"${cadenceUrl?` data-act="task-open" data-id="${esc(r.t.id)}"`:''}><td class="tt-ck">${tick(r.t)}</td><td class="title" title="${esc(r.title.text)}">${esc(r.title.text)}</td>${cols.map((c,i)=>tdCell(c,r.cells[i])).join('')}</tr>`).join('')}</tbody></table></div></div>`;
+    <tbody>${lim.rows.map(r=>`<tr class="${r.t.done?'done':''}" data-act="task-open" data-id="${esc(r.t.id)}"><td class="tt-ck">${tick(r.t)}</td><td class="title" title="${esc(r.title.text)}">${esc(r.title.text)}</td>${cols.map((c,i)=>tdCell(c,r.cells[i])).join('')}</tr>`).join('')}</tbody></table></div></div>`;
   const cards=`<div class="sub-cards tlist">${lim.rows.map(({t})=>{
     const due=t.done?{text:'Done',tone:'ok'}:dueInfo(t.due,today);
     const rep=repeats(t);
     const meta=[`<span class="tdue ${due.tone}">${esc(due.text)}</span>`,whoLine(t,me),rep?repeatLabel(t):''].filter(Boolean);
     return `<div class="trow${t.done?' done':''}">${tick(t)}
-      <button class="tmain" data-act="task-open" data-id="${esc(t.id)}"${cadenceUrl?'':' disabled'}><b>${esc(t.title||'Untitled task')}</b><span class="tmeta">${meta.map(x=>x.startsWith('<')?x:`<span>${esc(x)}</span>`).join('')}</span></button>
+      <button class="tmain" data-act="task-open" data-id="${esc(t.id)}"><b>${esc(t.title||'Untitled task')}</b><span class="tmeta">${meta.map(x=>x.startsWith('<')?x:`<span>${esc(x)}</span>`).join('')}</span></button>
     </div>`;}).join('')}</div>`;
   return head+`<div class="panel subsec">${bar}${table}${cards}${moreLine(k,lim.rows.length,found.length,found.length===1?'task':'tasks')}</div>`;
 }
@@ -541,13 +543,8 @@ function taskRows(p,tq,today,now){
 }
 async function toggleTask(id){
   const t=tw.tasks.find(x=>x.id===id);if(!t)return;
-  if(repeats(t)&&!t.done){
-    if(cadenceUrl){window.open(cadenceLink(cadenceUrl,{task:t.id}),'cadence');toast('Complete repeating tasks in Cadence so the next one is created.');}
-    else toast('Complete repeating tasks in Cadence so the next one is created.');
-    return;
-  }
   tw.busy.add(id);paintTasks();
-  try{await setTaskDone(id,donePatch(!t.done,store.user.uid,Date.now()));}
+  try{const r=await tm.toggleDone(t);if(r==='next')toast('Done. The next one is in your tasks.');}
   catch(err){console.error('[formwright] task',err);toast('Couldn’t update that task. Try again.');}
   tw.busy.delete(id);paintTasks();
 }
@@ -2105,8 +2102,8 @@ document.addEventListener('click',async e=>{
     case 'grid-cell':{const g=rdraft?.grids?.[el.dataset.grid];const cf=formById(el.dataset.grid);const row=g?.rows.find(r=>r.id===el.dataset.row);if(!row||!cf)return;cdraft={formId:cf.id,values:row.values,errors:{},_row:row,_fid:el.dataset.fid,readOnly:rdraft.readOnly||!rowEditable(row,cf)};renderMain();document.querySelector('.gpop [data-scope="cell"] input, .gpop [data-scope="cell"] textarea, .gpop [data-scope="cell"] canvas')?.focus();break;}
     case 'cell-close':{const back=cdraft&&`[data-act="grid-cell"][data-row="${cdraft._row.id}"][data-fid="${cdraft._fid}"]`;cdraft=null;renderMain();if(back)document.querySelector(back)?.focus();break;}
     case 'task-done':toggleTask(id);break;
-    case 'task-open':if(cadenceUrl)window.open(cadenceLink(cadenceUrl,{task:id}),'cadence');break;
-    case 'add-task':if(cadenceUrl&&view.recordId)window.open(cadenceLink(cadenceUrl,{addTaskFor:view.recordId}),'cadence');break;
+    case 'task-open':if(view.recordId)tm.open(view.recordId,id);break;
+    case 'add-task':if(view.recordId){if(!rdraft?.recordId){toast('Save this record first, then add tasks to it.');break;}tm.open(view.recordId);}break;
     case 'export-pdf':exportPdf();break;
     case 'email-pdf':openMail();break;
     case 'mail-cancel':if(ui.mail&&!ui.mail.busy){ui.mail=null;renderMain();document.querySelector('[data-act="email-pdf"]')?.focus();}break;
@@ -2483,6 +2480,7 @@ export function startApp(){
   initAudit({fmt,formById,recById,recTitle:(r,f)=>recTitle(r,f),go,renderMain});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
   initRichUI();
+  tm.initTaskModal({store,recById,formById,recTitle,toast,cadenceUrl,tasks:()=>tw.tasks||[]});
   fv.initFormVer({fdraft:()=>fdraft,setFdraft:f=>{fdraft=f;pdraft=null;},setFdirty,renderMain,saveForm,formById,recordsOf,isEmpty,toast,when,forms:()=>store.forms,newId:()=>uid('x'),me:()=>store.user?.uid,personName:id=>realName(id),closeField:()=>{ui.openField=null;}});
   initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
   initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});

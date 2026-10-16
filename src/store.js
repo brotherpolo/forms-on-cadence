@@ -123,6 +123,7 @@ export function startData(user) {
         syncMember();
         syncAdminSubs();
         syncRecordSubs();
+        registerForTasks();
         changed();
       },
       fail('your account')
@@ -362,6 +363,55 @@ export function watchTasks(recordId, onNext, onError) {
   );
   return onSnapshot(q, (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id }))), onError);
 }
+
+/* ---------- Adding and editing Cadence tasks in Formwright ----------
+   The same documents Cadence writes (tasks/{id}); Cadence's security rules check every write. */
+
+const cadenceOn = () => !!store.me && (store.me.role === 'admin' || store.me.cadence === true);
+export const canUseTasks = cadenceOn;
+let registered = '';
+/**
+ * So people can be given tasks without opening Cadence first: put my email in Cadence's people
+ * directory (people/{email} → my uid; Cadence's rules let only me write my own) and on my
+ * profile (so the people picker can list me). Once per session; failures are harmless.
+ */
+async function registerForTasks() {
+  const u = store.user, email = String(u?.email || '').toLowerCase();
+  if (!u || !email || registered === u.uid + (cadenceOn() ? '+' : '')) return;
+  registered = u.uid + (cadenceOn() ? '+' : '');
+  const name = store.me?.displayName || u.displayName || email.split('@')[0];
+  try { await setDoc(doc(db, 'profiles', u.uid), { email: u.email }, { merge: true }); } catch (e) { /* rules not updated yet */ }
+  if (cadenceOn() && u.emailVerified !== false) {
+    try { await setDoc(doc(db, 'people', u.email), { uid: u.uid, name: String(name).slice(0, 200) }); } catch (e) { console.warn('[formwright] people directory', e?.code || e); }
+  }
+}
+
+/** My Cadence settings (types, levels) and map, or nulls when I haven't any. */
+export async function loadCadenceItems() {
+  const uid = store.user?.uid;
+  const one = async (id) => { try { const s = await getDoc(doc(db, 'users', uid, 'items', id)); return s.exists() ? s.data() : null; } catch (e) { return null; } };
+  const [settings, map] = await Promise.all([one('settings'), one('map')]);
+  return { settings, map };
+}
+
+const peopleSeen = new Map(); // email → uid ('' when they can't be assigned)
+/** Who Cadence lets me assign: for each email, the uid in Cadence's people directory, or ''. */
+export async function assignableUids(emails) {
+  await Promise.all([...new Set(emails.filter(Boolean))].filter((e) => !peopleSeen.has(e)).map(async (e) => {
+    try { const s = await getDoc(doc(db, 'people', e)); peopleSeen.set(e, s.exists() ? String(s.data().uid || '') : ''); } catch (err) { peopleSeen.set(e, ''); }
+  }));
+  return new Map(emails.map((e) => [e, peopleSeen.get(e) || '']));
+}
+
+/** Add tasks (a batch, so a repeating task's next occurrence and its link land together). */
+export async function writeTasks(creates, updates = []) {
+  const b = writeBatch(db);
+  creates.forEach((t) => b.set(doc(db, 'tasks', t.id), plain(t)));
+  updates.forEach(([id, patch]) => b.update(doc(db, 'tasks', id), plain(patch)));
+  await b.commit();
+}
+export async function updateTask(id, patch) { await updateDoc(doc(db, 'tasks', id), plain(patch)); }
+export async function deleteTask(id) { await deleteDoc(doc(db, 'tasks', id)); }
 
 /** Tick a task off or reopen it, writing only the fields Cadence's rules let an owner or assignee change. */
 export async function setTaskDone(taskId, patch) {

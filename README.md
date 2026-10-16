@@ -11,7 +11,7 @@ A form builder for phone and desktop, running on Firebase.
 
 Plain JavaScript modules, built with Vite. The only runtime dependency is the Firebase JS SDK.
 
-- **Cadence tasks**: each record lists the Cadence tasks linked to it that you own or are assigned. Tick them off, open them in Cadence, or **Add task** to start one already linked.
+- **Cadence tasks**: each record lists the Cadence tasks linked to it that you own or are assigned. Add, edit, tick off and delete them in a Formwright pop-up (assign, type, priority, map node, checklist); they're the same tasks Cadence shows.
 
 Formwright runs on **Cadence's Firebase project (`tasks-2ae9d`)**, with the same accounts, and deploys to its own Hosting site. The security rules, indexes and Cloud Functions for both apps live in the Cadence folder and deploy from there. This repo deploys only its web pages.
 
@@ -74,7 +74,8 @@ src/
   dash.js, dash.css        Reports and dashboards screens (charts reuse reports.css)
   dashlogic.js             Report types, filters, periods, sharing, moving old reports (pure, unit-tested)
   reportlogic.js           Field joins, totals, time buckets and the gap-free grid (pure, unit-tested)
-  tasks.js                 Cadence task display helpers and links into Cadence (pure)
+  tasks.js                 Cadence tasks: display helpers, and the documents the pop-up writes (pure, unit-tested)
+  taskmodal.js             The Cadence task pop-up on records
   lists.js, lists.css      Records list: saved views, columns, filters, select several
   grids.css                Sub-form grids on the record page
   listlogic.js             List columns, views, sorting, filters and CSV (pure, unit-tested)
@@ -475,12 +476,11 @@ Cadence links to records this way, from the record chip on a task.
 **Tasks panel.** Under each record's fields, Formwright lists the Cadence tasks linked to that record that you own or are assigned. Cadence's rules allow nothing else.
 
 - Overdue tasks come first, then by due date. Done tasks are listed last.
-- The tick box marks a task done or reopens it, writing the same fields Cadence does.
-- Repeating tasks open in Cadence instead, so Cadence can create the next occurrence.
-- Tapping a task opens it in Cadence (`?task=<id>`).
-- **Add task** opens Cadence with a new task already linked to the record (`?addTaskFor=<recordId>`).
+- The tick box marks a task done or reopens it, writing the same fields Cadence does. Ticking off a repeating task creates its next occurrence (as Cadence does: next date, checklist cleared, `spawnedFrom` / `spawnedNext`); reopening it removes that occurrence if it hasn't been done.
+- **The task pop-up** (`src/taskmodal.js`; documents built by `src/tasks.js`, unit-tested): **Add task** and tapping a task open it in Formwright. Title, notes, due date and time, repeat, **Assigned to**, type and priority (your own Cadence lists, from `users/{uid}/items/settings`, or Cadence's starting lists), **On the map** (a pill picker of your own Cadence map's nodes, `users/{uid}/items/map`, indented under their parents) and a checklist. Opening a task lets you edit it, mark it done or delete it (owner only). On a task someone gave you, only the notes, date and checklist can change (Cadence's rules), and your map isn't offered. Rescheduling counts `moved`/`pushed` as Cadence does. **Open in Cadence** is a link in the footer (`?task=<id>` / `?addTaskFor=<recordId>`).
+- **Who a task can go to:** everyone in Formwright. Cadence only accepts an assignee who is in its people directory (`people/{email}` → uid), so each person is added there when they sign in to Formwright with Cadence switched on (their own entry; Cadence's rules allow only that), and their sign-in email is added to their profile (`profiles/{uid}.email`) so others can pick them. People who can't be given tasks yet are greyed out with the reason.
 
-Set Cadence's address in `VITE_CADENCE_URL` (in `.env.local`, and as a GitHub Actions variable for deploys). Without it, the panel still lists and ticks tasks, but can't open Cadence.
+Set Cadence's address in `VITE_CADENCE_URL` (in `.env.local`, and as a GitHub Actions variable for deploys). Without it, everything works except the Open in Cadence link.
 
 The panel's query needs the `tasks` index on `members` + `recordId`. It's in Cadence's `firestore.indexes.json`.
 

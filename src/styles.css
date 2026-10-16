@@ -592,3 +592,51 @@ tr.wf-over td.title{color:var(--danger)}
 :root:not([data-theme="light"]) :is(.rte-ed,.rte-view) [style*="color: #7434b0"],:root:not([data-theme="light"]) :is(.rte-ed,.rte-view) [style*="color: rgb(116, 52, 176)"]{color:#c9a2ff!important}
 :root:not([data-theme="light"]) :is(.rte-ed,.rte-view) [style*="color: #141826"],:root:not([data-theme="light"]) :is(.rte-ed,.rte-view) [style*="color: rgb(20, 24, 38)"]{color:var(--fg)!important}
 :root:not([data-theme="light"]) :is(.rte-ed,.rte-view) [style*="background-color"]{color:#141826!important}}
+
+/* Cadence task pop-up (taskmodal.js) */
+.tk-scrim{z-index:90}
+.lv-dlg.tk-dlg{max-width:640px;padding:0;display:flex;flex-direction:column}
+.tk-head{display:flex;align-items:center;gap:8px;padding:18px 22px 4px}
+.lv-dlg .tk-head h2{flex:1;margin:0;font-family:var(--display)}
+.tk-link{display:flex;align-items:center;gap:8px;margin:0;padding:0 22px 6px;font-size:13px;color:var(--muted)}
+.tk-link .badge{width:20px;height:20px;font-size:11px}
+.tk-from{margin:0;padding:0 22px 4px}
+.tk-f{border:0;margin:0;padding:10px 22px 16px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.tk-l{display:flex;flex-direction:column;gap:6px;min-width:0}
+.tk-l>span:first-child{font-size:13px;font-weight:600;color:var(--muted)}
+.tk-who-help{margin:-6px 0 0}
+.tk-title{font-size:16px;font-weight:500}
+.tk-row3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.tk-row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.tk-ro{margin:0;min-height:40px;display:flex;align-items:center}
+.tk-pill{--pc:var(--line-strong);display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:3px 12px 3px 10px;border-radius:999px;border:1px solid color-mix(in srgb,var(--pc) 40%,transparent);background:color-mix(in srgb,var(--pc) 13%,var(--surface));color:var(--fg);font:inherit;font-size:14px;font-weight:500;max-width:100%}
+.tk-pill i{width:9px;height:9px;border-radius:50%;background:var(--pc);flex:none}
+.tk-pill.tk-none{border-style:dashed;border-color:var(--line-strong);background:var(--surface);color:var(--muted)}
+.tk-pill.tk-none i{background:var(--line)}
+.tk-pickn{cursor:pointer}
+.tk-pickn:hover{border-color:var(--pc)}
+.tk-pickn.tk-none:hover{border-color:var(--accent)}
+.tk-nodew{position:relative}
+.tk-nodeline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tk-nodes{position:absolute;z-index:3;left:0;right:0;top:66px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(20,24,38,.18);padding:6px}
+.tk-nodes .in{min-height:36px;margin-bottom:4px}
+.tk-nlist{max-height:240px;overflow:auto}
+.tk-nopt{display:flex;align-items:center;gap:8px;width:100%;min-height:40px;padding:3px 10px;border:0;border-radius:8px;background:transparent;font:inherit;text-align:left;cursor:pointer}
+.tk-nopt:hover,.tk-nopt:focus-visible{background:var(--sunk)}
+.tk-nopt.on{background:var(--sunk)}
+.tk-nopt .tk-pill{font-size:13.5px;min-height:28px}
+.tk-check{margin-left:auto;color:var(--accent);font-weight:700}
+.tk-lv{align-self:flex-start;flex-wrap:wrap}
+.tk-lv button{display:inline-flex;align-items:center;gap:6px}
+.tk-lv i{width:8px;height:8px;border-radius:50%}
+.tk-subs{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tk-sub{display:flex;align-items:center;gap:10px;padding:6px 8px 6px 10px;border-bottom:1px solid var(--line)}
+.tk-sub:last-child{border-bottom:0}
+.tk-sub .tcheck{width:22px;height:22px}
+.tk-subt,.tk-subnew input{flex:1;min-width:0;font:inherit;font-size:14.5px;border:0;outline:none;background:transparent;color:var(--fg);padding:6px 0}
+.tk-sub.done .tk-subt{text-decoration:line-through;color:var(--muted)}
+.tk-subnew span{width:22px;text-align:center;color:var(--muted);font-size:18px}
+.tk-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 22px;border-top:1px solid var(--line);background:var(--sunk);border-radius:0 0 14px 14px}
+.tk-foot .grow{flex:1}
+.tk-cad{font-size:13px}
+@media (max-width:560px){.tk-row3,.tk-row2{grid-template-columns:minmax(0,1fr)}.tk-dlg{max-height:calc(100dvh - 16px)}.tk-f,.tk-head,.tk-foot{padding-left:16px;padding-right:16px}}
