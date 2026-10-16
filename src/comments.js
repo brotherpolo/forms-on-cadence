@@ -347,7 +347,7 @@ export function mentionsHTML() {
     <div class="mw-list">${list.map(row).join('')}</div></div>`;
 }
 
-async function openMention(id) {
+export async function openMention(id) {
   const m = (H.store.mentions || []).find((x) => x.id === id);
   if (!m) return;
   if (!m.read) markMentionsRead([id]).catch((e) => console.error(e));

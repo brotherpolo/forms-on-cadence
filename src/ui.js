@@ -17,12 +17,49 @@ export const badge = (f, lg) =>
     (f.name || '?').trim().charAt(0).toUpperCase() || '?'
   )}</span>`;
 
-let toastTimer;
-export function toast(message) {
-  const t = $('#toast');
-  if (!t) return;
-  t.textContent = message;
-  t.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 3600);
+/*
+ * Pop-up messages at the bottom of the screen, styled like Cadence's: a dark rounded pill that
+ * slides up, with an optional action button (Open, Show, Undo…) and a × to close. Up to three
+ * stack; each goes after 3.6 s (or opts.duration), and waits while the pointer is on it.
+ *   toast('Form saved')
+ *   toast('<b>Bea</b> mentioned you…', { html: true, action: 'Open', onAction: () => …, duration: 8000 })
+ * #toast (hidden) always holds the newest message as plain text, for tests and tools.
+ */
+let mirrorTimer;
+const X_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+export function toast(message, opts = {}) {
+  let root = document.getElementById('toasts');
+  if (!root) { root = document.createElement('div'); root.id = 'toasts'; root.className = 'toasts'; document.body.appendChild(root); }
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.setAttribute('role', 'status');
+  el.innerHTML = `<span class="toast-msg"></span>${opts.action ? `<button type="button" class="toast-btn">${esc(opts.action)}</button>` : ''}<button type="button" class="toast-x" aria-label="Dismiss">${X_ICON}</button>`;
+  const msg = el.querySelector('.toast-msg');
+  if (opts.html) msg.innerHTML = message; else msg.textContent = message;
+  root.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('in'));
+  let gone = false, timer = null;
+  const close = () => {
+    if (gone) return; gone = true; clearTimeout(timer);
+    el.classList.remove('in');
+    setTimeout(() => el.remove(), 250);
+  };
+  const wait = () => { clearTimeout(timer); timer = setTimeout(close, opts.duration || 3600); };
+  wait();
+  el.addEventListener('pointerenter', () => clearTimeout(timer));
+  el.addEventListener('pointerleave', wait);
+  el.addEventListener('focusin', () => clearTimeout(timer));
+  el.addEventListener('focusout', wait);
+  if (opts.action) el.querySelector('.toast-btn').addEventListener('click', () => { close(); opts.onAction && opts.onAction(); });
+  el.querySelector('.toast-x').addEventListener('click', close);
+  while (root.children.length > 3) root.firstElementChild.remove();
+  const m = $('#toast');
+  if (m) {
+    m.className = 'toast-mirror';
+    m.textContent = msg.textContent;
+    m.hidden = false;
+    clearTimeout(mirrorTimer);
+    mirrorTimer = setTimeout(() => (m.hidden = true), opts.duration || 3600);
+  }
+  return close;
 }

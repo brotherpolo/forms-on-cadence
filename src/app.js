@@ -41,6 +41,7 @@ import { fieldByName, sysOf, uniqueSysNames, shownName } from './fieldnames.js';
 import * as fv from './formver.js';
 import * as tm from './taskmodal.js';
 import * as cmt from './comments.js';
+import * as notices from './notices.js';
 import { typeColors, categoryStyle, canvasRows, blockOf, moveBefore, stepTarget, sectionOf, snapBefore, sectionStep } from './dzlogic.js';
 import { richEditorHTML, richViewHTML, initRichUI } from './richui.js';
 import { fromEditor, richBlocks, RICH_KEY } from './richtext.js';
@@ -369,6 +370,7 @@ function onData(){
   if(ADMIN_VIEWS.has(view.name)&&!isAdmin(store.me)){ui.leaveOk=true;home();return;}
   if((view.name==='records'||view.name==='record')&&!canViewForm(store.me,view.formId)){ui.leaveOk=true;home();return;}
   renderSide();
+  notices.check(); // pop-ups for mentions and records that just became yours
   if(admin.isDirty(view))return;
   if(view.name==='formEdit')return;
   if(view.name==='record'&&rdraft?.dirty)return;
@@ -2502,6 +2504,9 @@ export function startApp(){
   tm.initTaskModal({store,recById,formById,recTitle,toast,cadenceUrl,tasks:()=>tw.tasks||[]});
   cmt.initComments({store,view:()=>view,recById,formById,recTitle,itemName,toast,isAdmin:()=>isAdmin(store.me),canUseTasks,foldBtn,folded,
     unfold:(fid,k)=>saveFolds(setFold(folds(),fid,k,false)),openRecord:id=>{const r=recById(id);if(!r)return;if(view.name==='record'&&view.recordId===id){renderMain();return;}goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
+  notices.initNotices({store,recById,formById,recTitle,stageName,groupName,wfOn,openMention:id=>cmt.openMention(id),
+    openRecord:id=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});},
+    openMyWork:tab=>{ui.mwTab=tab;if(view.name==='mywork')renderMain();else go({name:'mywork'});}});
   fv.initFormVer({fdraft:()=>fdraft,setFdraft:f=>{fdraft=f;pdraft=null;},setFdirty,renderMain,saveForm,formById,recordsOf,isEmpty,toast,when,forms:()=>store.forms,newId:()=>uid('x'),me:()=>store.user?.uid,personName:id=>realName(id),closeField:()=>{ui.openField=null;}});
   initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
   initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});
