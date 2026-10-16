@@ -61,7 +61,17 @@ export function allMentionsHTML() {
       <td class="aw-when" title="${esc(new Date(m.at || 0).toLocaleString())}">${esc(ago(m.at || 0))}</td>
       <td>${m.read ? '<span class="aw-st">Read</span>' : '<span class="aw-st un">Unread</span>'}</td></tr>`;
   };
-  return `${bar}<div class="panel"><div class="tblwrap"><table class="tbl aw-tbl"><thead><tr><th>To</th><th>From</th><th>Record</th><th>Comment</th><th>When</th><th>Status</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div></div>
+  // phones: one card per mention (tables are hidden below 640px)
+  const card = (m) => {
+    const { title, form } = recLabel(m.recordId, m.recordTitle);
+    const to = nameOf(m.to), by = nameOf(m.by, m.byName);
+    return `<button type="button" class="card aw-card${m.read ? '' : ' aw-unread'}" data-aw="m-open" data-id="${esc(m.id)}">
+      <span class="aw-ch"><span class="aw-who">${av(m.by, by)}<b>${esc(by)}</b></span><span class="aw-arrow" aria-hidden="true">→</span><span class="aw-who">${av(m.to, to)}<b>${esc(to)}</b></span>${m.read ? '<span class="aw-st">Read</span>' : '<span class="aw-st un">Unread</span>'}</span>
+      <span class="aw-csnip">${esc(m.snippet || '')}</span>
+      <span class="meta"><span class="aw-recl">${form ? badge(form) : ''}${esc(title)}</span><span>${esc(ago(m.at || 0))}</span></span></button>`;
+  };
+  return `${bar}<div class="panel"><div class="tblwrap"><table class="tbl aw-tbl"><thead><tr><th>To</th><th>From</th><th>Record</th><th>Comment</th><th>When</th><th>Status</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>
+    <div class="cards aw-cards">${list.map(card).join('')}</div></div>
     <p class="help">Opening one shows the comment; it stays unread for the person it was meant for.</p>`;
 }
 
@@ -96,7 +106,18 @@ export function allTasksHTML() {
       <td>${t.done ? '<span class="aw-st">Done</span>' : '<span class="aw-st un">Open</span>'}</td>
       <td class="aw-act"><button type="button" class="btn sm" data-aw="t-reassign" data-id="${esc(t.id)}">Reassign…</button></td></tr>`;
   };
-  return `${bar}<div class="panel"><div class="tblwrap"><table class="tbl aw-tbl aw-tasks"><thead><tr><th class="aw-cb"><input type="checkbox" data-aw="t-all" aria-label="Select all shown"${all ? ' checked' : ''}></th><th>Task</th><th>Record</th><th>Assigned to</th><th>Owner</th><th>Due</th><th>Status</th><th><span class="sr">Reassign</span></th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div></div>
+  // phones: one card per task (tables are hidden below 640px)
+  const card = (t) => {
+    const { title, form, rec } = recLabel(t.recordId, t.recordSnap?.title);
+    const h = holder(t), due = t.due ? dueInfo(t.due, today) : null, late = !t.done && t.due && t.due < today;
+    return `<div class="card aw-card aw-tcard${t.done ? ' aw-done' : ''}">
+      <div class="aw-ch"><input type="checkbox" data-aw="t-sel" data-id="${esc(t.id)}" aria-label="Select ${esc(t.title || 'task')}"${A.sel.has(t.id) ? ' checked' : ''}><b class="aw-title">${esc(t.title || 'Untitled task')}</b>${t.done ? '<span class="aw-st">Done</span>' : '<span class="aw-st un">Open</span>'}</div>
+      <div>${rec ? `<button type="button" class="aw-link" data-aw="t-open" data-id="${esc(t.recordId)}">${form ? badge(form) : ''}${esc(title)}</button>` : `<span class="help">${esc(title)} (removed)</span>`}</div>
+      <div class="meta"><span class="aw-who">${av(h.uid, h.name)}${esc(h.name)}${t.assigneeId ? '' : ' (owner)'}</span>${t.assigneeId ? `<span>From ${esc(t.ownerName || t.ownerEmail || 'someone')}</span>` : ''}${due ? `<span class="aw-due ${late ? 'late' : due.tone}">${esc(due.text)}</span>` : ''}</div>
+      <div class="aw-cact"><button type="button" class="btn sm" data-aw="t-reassign" data-id="${esc(t.id)}">Reassign…</button></div></div>`;
+  };
+  return `${bar}<div class="panel"><div class="tblwrap"><table class="tbl aw-tbl aw-tasks"><thead><tr><th class="aw-cb"><input type="checkbox" data-aw="t-all" aria-label="Select all shown"${all ? ' checked' : ''}></th><th>Task</th><th>Record</th><th>Assigned to</th><th>Owner</th><th>Due</th><th>Status</th><th><span class="sr">Reassign</span></th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>
+    <div class="cards aw-cards"><label class="aw-call"><input type="checkbox" data-aw="t-all"${all ? ' checked' : ''}> Select all shown</label>${list.map(card).join('')}</div></div>
     <p class="help">Only Cadence tasks linked to records are listed. Reassigning changes who does it; each task’s owner still sees it.</p>`;
 }
 
@@ -159,7 +180,7 @@ function onClick(el, e) {
   if (a === 'm-open') { const m = A.mList.find((x) => x.id === id); if (m) H.showComment(m.recordId, m.commentId); return; }
   if (a === 't-open') { H.openRecord(id); return; }
   if (a === 't-status') { A.tf.status = el.dataset.v; H.renderMain(); return; }
-  if (a === 't-sel') { if (el.checked) A.sel.add(id); else A.sel.delete(id); H.renderMain(); document.querySelector(`[data-aw="t-sel"][data-id="${CSS.escape(id)}"]`)?.focus(); return; }
+  if (a === 't-sel') { if (el.checked) A.sel.add(id); else A.sel.delete(id); H.renderMain(); [...document.querySelectorAll(`[data-aw="t-sel"][data-id="${CSS.escape(id)}"]`)].find((x) => x.offsetParent)?.focus(); return; }
   if (a === 't-all') { const shown = sortTasks(filterTasks(A.tList, A.tf), dateKey(new Date())); if (el.checked) shown.forEach((t) => A.sel.add(t.id)); else A.sel.clear(); H.renderMain(); return; }
   if (a === 't-clear') { A.sel.clear(); H.renderMain(); return; }
   if (a === 't-reassign') { openDlg([id]); return; }

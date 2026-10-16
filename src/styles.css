@@ -807,3 +807,18 @@ tr.wf-over td.title{color:var(--danger)}
 .aw-dlg{max-width:520px}
 @media (max-width:760px){.aw-bar .grow{text-align:left}.aw-f{min-width:0;flex:1}.aw-snip{max-width:180px}}
 .aw-dlg .help{margin:6px 0 14px}
+.aw-tasks th:nth-child(2),.aw-tasks td.aw-title{min-width:160px}
+.aw-cards .card{gap:6px}
+.aw-tcard{cursor:default}
+.aw-ch{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.aw-ch .aw-st{margin-left:auto}
+.aw-ch input{width:20px;height:20px;accent-color:var(--accent);flex:none}
+.aw-ch .aw-title{flex:1;min-width:0}
+.aw-arrow{color:var(--muted)}
+.aw-csnip{font-size:14px;color:var(--ink,inherit);overflow-wrap:anywhere}
+.aw-card.aw-unread .aw-csnip{font-weight:600}
+.aw-cact{display:flex;justify-content:flex-end}
+.aw-recl{display:inline-flex;align-items:center;gap:6px}
+.aw-call{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:13.5px;color:var(--muted)}
+.aw-call input{width:18px;height:18px;accent-color:var(--accent)}
+@media (max-width:640px){.aw-bar .aw-f{flex:1 1 100%}.aw-bar .grow{flex:1 1 100%;min-width:0}}
