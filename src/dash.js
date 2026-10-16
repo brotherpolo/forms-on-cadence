@@ -431,11 +431,12 @@ export function fitTiles() {
     tile.querySelectorAll('.rp-kpi').forEach((k) => { k.style.fontSize = ''; });
     const hide = (el) => { if (el && !el.hidden) { el.hidden = true; el.dataset.fitHid = '1'; } };
     if (loose) { phoneCard(tile, wb, hide); return; }
-    // a KPI number keeps its full size unless it doesn't fit across; then it shrinks, down to about half
+    // a KPI number fills the tile's height unless it doesn't fit across; then it shrinks to fit
+    // (from a big tile as far as it needs; from the normal size, down to about half)
     wb.querySelectorAll('.rp-kpi').forEach((k) => {
       k.style.fontSize = '';
       let fs = parseFloat(getComputedStyle(k).fontSize) || 0;
-      const min = Math.max(16, fs * 0.5);
+      const min = Math.max(16, Math.min(fs, 64) * 0.5);
       while (k.scrollWidth > k.clientWidth + 1 && fs > min) { fs = Math.max(min, fs * 0.92); k.style.fontSize = fs + 'px'; }
     });
     // numbers that still don't fit switch to the short form (CA$91.5k)

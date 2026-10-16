@@ -351,8 +351,10 @@ button.db-li:hover{background:var(--accent-soft)}
 @container (max-height:150px) and (max-aspect-ratio:5/4){.db-tile .db-leg{display:none}}
 
 /* KPI: the number takes the space it's given, centred; the line under it goes when there's no room */
-.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.4rem,56cqh,4.4rem);line-height:1}
-@container (max-height:100px){.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.3rem,66cqh,4.4rem)}.db-t-kpi .rp-kpisub{display:none}}
+.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.4rem,56cqh,16rem);line-height:1}
+.db-t-kpi .rp-kpisub{font-size:clamp(13px,4.5cqh,20px)}
+.db-tile.db-t-kpi button.rp-kpi{max-width:92%}
+@container (max-height:100px){.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.3rem,66cqh,16rem)}.db-t-kpi .rp-kpisub{display:none}}
 }
 /* phones: a KPI number fits across the card */
 @media (max-width:760px){.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.6rem,12cqw,2.8rem)}}
