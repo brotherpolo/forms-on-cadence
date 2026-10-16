@@ -171,6 +171,27 @@ function snaps(t, lists) {
   return { typeSnap: snapOf(ty, ['name', 'color', 'glyph']), levelSnap: snapOf(lv, ['name', 'color']) };
 }
 
+/**
+ * Reassign: give a task linked to a record to someone else, or back to its owner (who = null or
+ * the owner). The owner stays; members mirror owner + assignee, as Cadence's rules want.
+ * who: { uid, name, email } | null; by: the uid doing it.
+ */
+export function reassignPatch(task, who, by, now) {
+  const to = who && who.uid && who.uid !== task.ownerId ? who : null;
+  return {
+    assigneeId: to ? to.uid : null, assigneeName: to ? to.name || null : null, assigneeEmail: to ? normEmail(to.email) || null : null,
+    members: to ? [task.ownerId, to.uid] : [task.ownerId],
+    updatedAt: now, reassignedBy: by, reassignedAt: now,
+  };
+}
+/** Who a task can be passed to by its assignee: keep it, back to the owner, or anyone else Cadence lets have it. */
+export function passChoices(people, task, me) {
+  const owner = { uid: task.ownerId, name: task.ownerName || task.ownerEmail || 'The owner', email: task.ownerEmail || '', ok: true, owner: true };
+  const rest = (people || []).filter((p) => p && p.uid && p.uid !== me.uid && p.uid !== task.ownerId).map((p) => ({ ...p }))
+    .sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
+  return [{ uid: me.uid, name: me.name, email: me.email, ok: true, me: true }, owner, ...rest];
+}
+
 /** Fields an assignee may change (Cadence's rules); the owner may change the rest too. */
 export const ASSIGNEE_FIELDS = ['notes', 'due', 'time', 'subtasks'];
 /**

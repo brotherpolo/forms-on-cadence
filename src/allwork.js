@@ -1,0 +1,181 @@
+// My work → All mentions and All tasks (administrators only).
+// All mentions: every @mention, who it was for, who wrote it, on which record, read or not.
+// Opening one shows the comment without marking it read for the person it was meant for.
+// All tasks: Cadence tasks linked to Formwright records (people's own tasks stay private), with
+// Reassign: give one or several to someone else, or back to their owner. The owner stays.
+import { esc, badge } from './ui.js';
+import { watchAllMentions, watchRecordTasks, reassignTasks } from './store.js';
+import { reassignPatch, dueInfo, dateKey } from './tasks.js';
+import { assignablePeople } from './taskmodal.js';
+import { ago, avatarColor, initials } from './commentlogic.js';
+import { filterMentions, filterTasks, sortTasks, holder } from './allworklogic.js';
+
+let H = null; // { store, recById, formById, recTitle, view(), showComment(recordId, commentId), openRecord(id), toast, renderMain, isAdmin() }
+const A = { m: null, mList: [], mReady: false, mErr: false, t: null, tList: [], tReady: false, tErr: false,
+  mf: { who: '', unread: false }, tf: { who: '', form: '', status: 'open' }, sel: new Set(), dlg: null };
+
+export function initAllWork(helpers) {
+  H = helpers;
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest?.('[data-aw]');
+    if (!el) return;
+    e.stopPropagation();
+    onClick(el, e);
+  }, true);
+  document.addEventListener('change', (e) => { const el = e.target; if (el.dataset?.awf) { e.stopPropagation(); onFilter(el); } }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && A.dlg && !A.dlg.busy) { e.preventDefault(); e.stopPropagation(); A.dlg = null; paintDlg(); } }, true);
+}
+const onTab = (tab) => H.view().name === 'mywork' && H.tab() === tab;
+/** Start listening once an administrator opens one of the tabs. */
+export function start(tab) {
+  if (!H.isAdmin()) return;
+  if (tab === 'allm' && !A.m) A.m = watchAllMentions((l) => { A.mList = l; A.mReady = true; A.mErr = false; if (onTab('allm')) H.renderMain(); }, (e) => { console.warn('[formwright] all mentions', e?.code || e); A.mReady = true; A.mErr = true; if (onTab('allm')) H.renderMain(); });
+  if (tab === 'allt' && !A.t) A.t = watchRecordTasks((l) => { A.tList = l; A.tReady = true; A.tErr = false; const ids = new Set(l.map((x) => x.id)); [...A.sel].forEach((id) => { if (!ids.has(id)) A.sel.delete(id); }); if (onTab('allt')) H.renderMain(); }, (e) => { console.warn('[formwright] all tasks', e?.code || e); A.tReady = true; A.tErr = true; if (onTab('allt')) H.renderMain(); });
+}
+export function stop() { A.m?.(); A.t?.(); Object.assign(A, { m: null, mList: [], mReady: false, t: null, tList: [], tReady: false, sel: new Set(), dlg: null }); paintDlg(); }
+
+const nameOf = (uid, fb) => H.store.profiles?.[uid]?.displayName || fb || 'Someone';
+const people = () => Object.entries(H.store.profiles || {}).filter(([, p]) => p && !p.removed).map(([uid, p]) => ({ uid, name: p.displayName || p.email || 'Someone' })).sort((a, b) => a.name.localeCompare(b.name));
+const av = (uid, name) => `<span class="cm-av sm" style="background:${avatarColor(uid)}" aria-hidden="true">${esc(initials(name))}</span>`;
+const denied = (msg) => `<div class="panel empty"><h2>Couldn’t load this</h2><p>${msg} The latest Cadence security rules may not be deployed yet.</p></div>`;
+const recLabel = (recordId, fallback) => { const r = H.recById(recordId), f = r && H.formById(r.formId); return { rec: r, form: f, title: r && f ? H.recTitle(r, f) : fallback || 'a record' }; };
+
+/* ---------- All mentions ---------- */
+export function allMentionsHTML() {
+  start('allm');
+  if (A.mErr) return denied('Everyone’s mentions couldn’t be read.');
+  if (!A.mReady) return '<div class="panel"><p class="note">Loading mentions…</p></div>';
+  const list = filterMentions(A.mList, A.mf);
+  const unread = A.mList.filter((m) => !m.read).length;
+  const ppl = people();
+  const bar = `<div class="aw-bar"><label class="aw-f"><span>Person</span><select class="in" data-awf="m-who"><option value="">Everyone</option>${ppl.map((p) => `<option value="${esc(p.uid)}"${A.mf.who === p.uid ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+    <label class="aw-chk"><input type="checkbox" data-awf="m-unread"${A.mf.unread ? ' checked' : ''}> Unread only</label>
+    <span class="grow help">${list.length} of ${A.mList.length}${unread ? ` · ${unread} unread` : ''}</span></div>`;
+  if (!list.length) return `${bar}<div class="panel empty"><h2>No mentions${A.mf.who || A.mf.unread ? ' match' : ' yet'}</h2><p>When someone types @ and a name in a comment, it shows up here.</p></div>`;
+  const row = (m) => {
+    const { title, form } = recLabel(m.recordId, m.recordTitle);
+    const to = nameOf(m.to), by = nameOf(m.by, m.byName);
+    return `<tr data-aw="m-open" data-id="${esc(m.id)}" class="${m.read ? '' : 'aw-unread'}" tabindex="0">
+      <td><span class="aw-who">${av(m.to, to)}${esc(to)}</span></td><td><span class="aw-who">${av(m.by, by)}${esc(by)}</span></td>
+      <td>${form ? badge(form) : ''}<span class="aw-rec">${esc(title)}</span></td><td class="aw-snip">${esc(m.snippet || '')}</td>
+      <td class="aw-when" title="${esc(new Date(m.at || 0).toLocaleString())}">${esc(ago(m.at || 0))}</td>
+      <td>${m.read ? '<span class="aw-st">Read</span>' : '<span class="aw-st un">Unread</span>'}</td></tr>`;
+  };
+  return `${bar}<div class="panel"><div class="tblwrap"><table class="tbl aw-tbl"><thead><tr><th>To</th><th>From</th><th>Record</th><th>Comment</th><th>When</th><th>Status</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div></div>
+    <p class="help">Opening one shows the comment; it stays unread for the person it was meant for.</p>`;
+}
+
+/* ---------- All tasks ---------- */
+export function allTasksHTML() {
+  start('allt');
+  if (A.tErr) return denied('Tasks linked to records couldn’t be read.');
+  if (!A.tReady) return '<div class="panel"><p class="note">Loading tasks…</p></div>';
+  const today = dateKey(new Date());
+  const list = sortTasks(filterTasks(A.tList, A.tf), today);
+  const ppl = people();
+  const forms = [...new Set(A.tList.map((t) => t.formId).filter(Boolean))].map((id) => H.formById(id)).filter(Boolean).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const nOpen = A.tList.filter((t) => !t.done).length, nLate = A.tList.filter((t) => !t.done && t.due && t.due < today).length;
+  const sel = [...A.sel].filter((id) => list.some((t) => t.id === id));
+  const bar = `<div class="aw-bar"><label class="aw-f"><span>Person</span><select class="in" data-awf="t-who"><option value="">Everyone</option>${ppl.map((p) => `<option value="${esc(p.uid)}"${A.tf.who === p.uid ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+    <label class="aw-f"><span>Form</span><select class="in" data-awf="t-form"><option value="">All forms</option>${forms.map((f) => `<option value="${esc(f.id)}"${A.tf.form === f.id ? ' selected' : ''}>${esc(f.name)}</option>`).join('')}</select></label>
+    <div class="segs" role="group" aria-label="Status">${[['open', 'Open'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => `<button type="button" class="${A.tf.status === k ? 'on' : ''}" aria-pressed="${A.tf.status === k}" data-aw="t-status" data-v="${k}">${l}</button>`).join('')}</div>
+    <span class="grow help">${list.length} shown · ${nOpen} open${nLate ? ` · <b class="aw-late">${nLate} overdue</b>` : ''}</span></div>
+    ${sel.length ? `<div class="aw-selbar" role="region" aria-label="Selected tasks"><b>${sel.length} selected</b><button type="button" class="btn sm primary" data-aw="t-reassign-sel">Reassign…</button><button type="button" class="btn sm ghost" data-aw="t-clear">Clear</button></div>` : ''}`;
+  if (!list.length) return `${bar}<div class="panel empty"><h2>No tasks${A.tf.who || A.tf.form || A.tf.status !== 'open' ? ' match' : ' open'}</h2><p>Cadence tasks linked to records show up here. People’s own tasks without a record stay private.</p></div>`;
+  const all = list.length && sel.length === list.length;
+  const row = (t) => {
+    const { title, form, rec } = recLabel(t.recordId, t.recordSnap?.title);
+    const h = holder(t), due = t.due ? dueInfo(t.due, today) : null, late = !t.done && t.due && t.due < today;
+    return `<tr class="${t.done ? 'aw-done' : ''}${late ? ' aw-over' : ''}">
+      <td class="aw-cb"><input type="checkbox" data-aw="t-sel" data-id="${esc(t.id)}" aria-label="Select ${esc(t.title || 'task')}"${A.sel.has(t.id) ? ' checked' : ''}></td>
+      <td class="aw-title">${esc(t.title || 'Untitled task')}</td>
+      <td>${rec ? `<button type="button" class="aw-link" data-aw="t-open" data-id="${esc(t.recordId)}">${form ? badge(form) : ''}${esc(title)}</button>` : `<span class="help">${esc(title)} (removed)</span>`}</td>
+      <td><span class="aw-who">${av(h.uid, h.name)}${esc(h.name)}${t.assigneeId ? '' : ' <small class="help">(owner)</small>'}</span></td>
+      <td>${esc(t.ownerName || t.ownerEmail || 'Someone')}</td>
+      <td>${due ? `<span class="aw-due ${late ? 'late' : due.tone}">${esc(due.text)}</span>` : '<span class="help">–</span>'}</td>
+      <td>${t.done ? '<span class="aw-st">Done</span>' : '<span class="aw-st un">Open</span>'}</td>
+      <td class="aw-act"><button type="button" class="btn sm" data-aw="t-reassign" data-id="${esc(t.id)}">Reassign…</button></td></tr>`;
+  };
+  return `${bar}<div class="panel"><div class="tblwrap"><table class="tbl aw-tbl aw-tasks"><thead><tr><th class="aw-cb"><input type="checkbox" data-aw="t-all" aria-label="Select all shown"${all ? ' checked' : ''}></th><th>Task</th><th>Record</th><th>Assigned to</th><th>Owner</th><th>Due</th><th>Status</th><th><span class="sr">Reassign</span></th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div></div>
+    <p class="help">Only Cadence tasks linked to records are listed. Reassigning changes who does it; each task’s owner still sees it.</p>`;
+}
+
+/* ---------- Reassign pop-up ---------- */
+function dlgRoot() { let r = document.getElementById('aw-root'); if (!r) { r = document.createElement('div'); r.id = 'aw-root'; document.body.appendChild(r); } return r; }
+function paintDlg() {
+  const r = dlgRoot(), d = A.dlg;
+  if (!d) { r.innerHTML = ''; return; }
+  const tasks = d.ids.map((id) => A.tList.find((t) => t.id === id)).filter(Boolean);
+  const one = tasks.length === 1 ? tasks[0] : null;
+  const owners = [...new Set(tasks.map((t) => t.ownerName || t.ownerEmail || 'the owner'))];
+  r.innerHTML = `<div class="lv-scrim" data-aw="scrim"><div class="lv-dlg aw-dlg" role="dialog" aria-modal="true" aria-labelledby="aw-h">
+    <h2 id="aw-h">${one ? `Reassign “${esc(one.title || 'Untitled task')}”` : `Reassign ${tasks.length} tasks`}</h2>
+    ${one ? `<p class="help">Now with <b>${esc(holder(one).name)}</b>. Owner: ${esc(one.ownerName || one.ownerEmail || 'someone')}.</p>` : `<p class="help">Owners: ${esc(owners.slice(0, 4).join(', '))}${owners.length > 4 ? '…' : ''}.</p>`}
+    ${d.loading ? '<p class="note">Loading people…</p>' : `<label class="mail-l"><span class="mlab">Give ${one ? 'it' : 'them'} to</span>
+      <select class="in" data-awf="d-who"${d.busy ? ' disabled' : ''}><option value="">Choose…</option><option value="__owner"${d.who === '__owner' ? ' selected' : ''}>Back to ${one ? esc(one.ownerName || 'the owner') + ' (owner)' : 'each task’s owner'}</option>
+      ${d.people.map((p) => `<option value="${esc(p.uid)}"${d.who === p.uid ? ' selected' : ''}${p.ok ? '' : ' disabled'}>${esc(p.name)}${p.ok ? '' : ' (can’t be given tasks yet)'}</option>`).join('')}</select></label>
+      <p class="help">They get Cadence’s “assigned to you” notice. The owner stays the same and still sees ${one ? 'it' : 'them'}. It’s noted in the audit trail.</p>`}
+    ${d.err ? `<p class="err" role="alert">${esc(d.err)}</p>` : ''}
+    <div class="lv-dlgacts"><button type="button" class="btn ghost" data-aw="d-cancel"${d.busy ? ' disabled' : ''}>Cancel</button><button type="button" class="btn primary" data-aw="d-save"${d.busy || !d.who ? ' disabled' : ''}>${d.busy ? 'Reassigning…' : 'Reassign'}</button></div>
+  </div></div>`;
+  r.querySelector(d.loading ? '.aw-dlg' : '[data-awf="d-who"]')?.focus?.();
+}
+async function openDlg(ids) {
+  if (!ids.length) return;
+  A.dlg = { ids, loading: true, people: [], who: '', busy: false, err: '' };
+  paintDlg();
+  let ppl = [];
+  try { ppl = await assignablePeople(); } catch (e) { console.error(e); }
+  if (!A.dlg) return;
+  A.dlg.people = ppl.map((p) => ({ ...p, ok: !!p.ok })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  A.dlg.loading = false;
+  paintDlg();
+}
+async function saveDlg() {
+  const d = A.dlg;
+  if (!d || !d.who || d.busy) return;
+  const me = H.store.user?.uid, now = Date.now();
+  const target = d.who === '__owner' ? null : d.people.find((p) => p.uid === d.who);
+  if (d.who !== '__owner' && (!target || !target.ok)) return;
+  const tasks = d.ids.map((id) => A.tList.find((t) => t.id === id)).filter(Boolean);
+  const pairs = tasks.filter((t) => (target ? (target.uid === t.ownerId ? !!t.assigneeId : t.assigneeId !== target.uid) : !!t.assigneeId)).map((t) => [t.id, reassignPatch(t, target, me, now)]);
+  d.busy = true; d.err = ''; paintDlg();
+  try {
+    if (pairs.length) await reassignTasks(pairs);
+    const to = target ? target.name.split(' ')[0] : 'their owners';
+    H.toast(!pairs.length ? 'Nothing to change: already with them.' : pairs.length === 1 ? `Reassigned to ${target ? target.name.split(' ')[0] : (tasks[0].ownerName || 'the owner').split(' ')[0]}` : `${pairs.length} tasks reassigned to ${to}`);
+    A.sel.clear(); A.dlg = null; paintDlg(); H.renderMain();
+  } catch (e) {
+    console.error('[formwright] reassign', e);
+    d.busy = false;
+    d.err = e?.code === 'permission-denied' ? 'Cadence didn’t allow that: the latest Cadence security rules may not be deployed yet, or that person can’t be given tasks.' : 'That didn’t work. Check your connection and try again.';
+    paintDlg();
+  }
+}
+
+/* ---------- events ---------- */
+function onClick(el, e) {
+  const a = el.dataset.aw, id = el.dataset.id;
+  if (a === 'm-open') { const m = A.mList.find((x) => x.id === id); if (m) H.showComment(m.recordId, m.commentId); return; }
+  if (a === 't-open') { H.openRecord(id); return; }
+  if (a === 't-status') { A.tf.status = el.dataset.v; H.renderMain(); return; }
+  if (a === 't-sel') { if (el.checked) A.sel.add(id); else A.sel.delete(id); H.renderMain(); document.querySelector(`[data-aw="t-sel"][data-id="${CSS.escape(id)}"]`)?.focus(); return; }
+  if (a === 't-all') { const shown = sortTasks(filterTasks(A.tList, A.tf), dateKey(new Date())); if (el.checked) shown.forEach((t) => A.sel.add(t.id)); else A.sel.clear(); H.renderMain(); return; }
+  if (a === 't-clear') { A.sel.clear(); H.renderMain(); return; }
+  if (a === 't-reassign') { openDlg([id]); return; }
+  if (a === 't-reassign-sel') { openDlg([...A.sel].filter((x) => A.tList.some((t) => t.id === x))); return; }
+  if (a === 'd-cancel' || (a === 'scrim' && e.target === el && !A.dlg?.busy)) { A.dlg = null; paintDlg(); return; }
+  if (a === 'd-save') saveDlg();
+}
+function onFilter(el) {
+  const k = el.dataset.awf;
+  if (k === 'm-who') A.mf.who = el.value;
+  else if (k === 'm-unread') A.mf.unread = el.checked;
+  else if (k === 't-who') A.tf.who = el.value;
+  else if (k === 't-form') A.tf.form = el.value;
+  else if (k === 'd-who') { if (A.dlg) { A.dlg.who = el.value; const b = dlgRoot().querySelector('[data-aw="d-save"]'); if (b) b.disabled = !el.value; } return; }
+  H.renderMain();
+  document.querySelector(`[data-awf="${k}"]`)?.focus();
+}
+// keyboard: Enter on a mention row opens it
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target?.dataset?.aw === 'm-open') { e.preventDefault(); e.target.click(); } });

@@ -43,6 +43,7 @@ import * as tm from './taskmodal.js';
 import * as cmt from './comments.js';
 import * as notices from './notices.js';
 import * as wordui from './wordui.js';
+import * as allwork from './allwork.js';
 import { typeColors, categoryStyle, canvasRows, blockOf, moveBefore, stepTarget, sectionOf, snapBefore, sectionStep } from './dzlogic.js';
 import { richEditorHTML, richViewHTML, initRichUI } from './richui.js';
 import { fromEditor, richBlocks, RICH_KEY } from './richtext.js';
@@ -743,11 +744,15 @@ async function doWfMove(rec,form,target,label,comment){
 function myWorkTabs(tab,hasWf){
   const unread=cmt.unreadCount(),n=myWorkCount();
   const t=(v,label,extra)=>`<button type="button" role="tab" class="mw-tab" id="mw-t-${v}" aria-selected="${tab===v}" aria-controls="mw-p" data-act="mw-tab" data-v="${v}"${tab===v?'':' tabindex="-1"'}>${label}${extra}</button>`;
-  return `<div class="mw-tabs" role="tablist" aria-label="My work">${t('mentions','Mentions',unread?` <span class="nb">${unread}<span class="sr"> unread</span></span>`:'')}${hasWf?t('waiting','Waiting on me',n?` <span class="count">${n}</span>`:''):''}</div>`;
+  const adm=isAdmin(store.me);
+  return `<div class="mw-tabs" role="tablist" aria-label="My work">${t('mentions','Mentions',unread?` <span class="nb">${unread}<span class="sr"> unread</span></span>`:'')}${adm?t('allm','All mentions',''):''}${adm?t('allt','All tasks',''):''}${hasWf?t('waiting','Waiting on me',n?` <span class="count">${n}</span>`:''):''}</div>`;
 }
 function viewMyWork(){
   const hasWf=store.forms.some(f=>wfOn(f));
-  const tab=hasWf&&ui.mwTab==='waiting'?'waiting':'mentions';
+  const adm=isAdmin(store.me);
+  const tab=hasWf&&ui.mwTab==='waiting'?'waiting':adm&&(ui.mwTab==='allm'||ui.mwTab==='allt')?ui.mwTab:'mentions';
+  if(tab==='allm'||tab==='allt')return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">${tab==='allm'?'Every @mention in comments, for administrators: who it was for, and whether they’ve read it.':'Cadence tasks linked to records, for administrators: who has them, and when they’re due. Reassign them here.'}</p></div></div></div>
+    ${myWorkTabs(tab,hasWf)}<div id="mw-p" role="tabpanel" aria-labelledby="mw-t-${tab}">${tab==='allm'?allwork.allMentionsHTML():allwork.allTasksHTML()}</div>`;
   if(tab==='mentions')return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">Comments where someone mentioned you${hasWf?', and records waiting on you in a workflow':''}.</p></div></div></div>
     ${myWorkTabs(tab,hasWf)}<div id="mw-p" role="tabpanel" aria-labelledby="mw-t-mentions">${cmt.mentionsHTML()}</div>`;
   return viewWaiting(tab,hasWf);
@@ -2512,6 +2517,7 @@ export function startApp(){
   tm.initTaskModal({store,recById,formById,recTitle,toast,cadenceUrl,tasks:()=>tw.tasks||[]});
   cmt.initComments({store,view:()=>view,recById,formById,recTitle,itemName,toast,isAdmin:()=>isAdmin(store.me),canUseTasks,foldBtn,folded,
     unfold:(fid,k)=>saveFolds(setFold(folds(),fid,k,false)),openRecord:id=>{const r=recById(id);if(!r)return;if(view.name==='record'&&view.recordId===id){renderMain();return;}goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
+  allwork.initAllWork({store,recById,formById,recTitle,view:()=>view,tab:()=>ui.mwTab,showComment:(r,c)=>cmt.showComment(r,c),openRecord:id=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});else toast('That record was deleted, or you can no longer see it.');},toast,renderMain,isAdmin:()=>isAdmin(store.me)});
   wordui.initWordUI({store,view:()=>view,recById,formById,recTitle,itemName,valOf,fmt,realName,stageName,wfOn,parentsOf,calcExpr:docCalc,checkExpr:docCheck,
     isAdmin:()=>isAdmin(store.me),toast,dirty:()=>!!rdraft?.dirty,busy:exportBusy,gridCols});
   notices.initNotices({store,recById,formById,recTitle,stageName,groupName,wfOn,openMention:id=>cmt.openMention(id),
@@ -2529,6 +2535,6 @@ export function startApp(){
 export function stopApp(){
   booted=false;store.onChange=()=>{};$('#app').hidden=true;document.getElementById('noaccess')?.remove();closeMenu();resetLists();resetImports();forgetDrafts();
   if(tw.unsub){tw.unsub();tw.unsub=null;}tw.recordId=null;
-  cmt.stop();wordui.stop();
+  cmt.stop();wordui.stop();allwork.stop();
 }
 export { view as currentView, ui, byOrder, formById, recordsOf, renderMain };

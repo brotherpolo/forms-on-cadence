@@ -82,6 +82,7 @@ src/
   docxtpl.js, docxxml.js   Word templates: reading placeholders and filling a .docx (pure, unit-tested)
   docxgen.js               "Placeholders for <form>" Word file, and what a form's templates may use (pure, unit-tested)
   wordui.js                Export ▾, the Word templates pop-up, and a record's values for a template
+  allwork.js, allworklogic.js  My work → All mentions and All tasks (admins), and Reassign (logic unit-tested)
   noticelogic.js           What counts as new for those pop-ups (pure, unit-tested)
   lists.js, lists.css      Records list: saved views, columns, filters, select several
   grids.css                Sub-form grids on the record page
@@ -491,6 +492,11 @@ The import is admins-only in the app and in the rules (`imports/…`). The recor
 
 Messages at the bottom of the screen look and work like Cadence's (`toast()` in `src/ui.js`): a dark rounded pill that slides up, an optional action button (**Open**, **Show**), and a × to close. Up to three stack; each stays 3.6 seconds (8 for mentions and workflow news), and waits while the pointer is on it. The records list's **Undo** bar after a delete has the same look. The hidden `#toast` element always holds the newest message as plain text, for tests.
 
+## All tasks and Reassign
+
+- **All tasks (administrators):** a My work tab listing the Cadence tasks linked to Formwright records (people's own tasks without a record stay private; the rules only let administrators read tasks with a `recordId`). Columns: task, record, assigned to, owner, due (overdue in red), status; filters by person, form and Open / Done / All; overdue first.
+- **Reassign** changes who a task is with; the owner always stays. An administrator can reassign any record task (one, or several ticked at once), to anyone with Cadence or back to its owner. The person a record task is assigned to can pass it on from the task pop-up (**Assigned to**: keep it, give it back to the owner, or someone else). The new person gets Cadence's "… passed you a task" notice, and it's noted in the audit trail (**Tasks reassigned**). Stored on the task as `reassignedBy`, `reassignedAt`; Cadence's rules allow exactly this change (`tasks.js` `reassignPatch`, unit-tested).
+
 ## Comments and @mentions
 
 Every saved record has a **Comments** section at the bottom (it folds like the others). Comments aren't part of the record's PDF.
@@ -500,6 +506,7 @@ Every saved record has a **Comments** section at the bottom (it folds like the o
 - **What the people you mention get** (Cadence `commentWritten`, `functions/comments.js`): an email from the company Gmail (with a link to the record when `FORMWRIGHT_URL` is set in the Cadence `functions/.env`), an entry in **My work → Mentions**, and, when you tick **Also give the people I mention a Cadence task**, a task from you to them linked to the record (only for people who use Cadence). Only people who can open the record are told; the comment then shows "Sam can't see this record and wasn't notified" to its writer and administrators. Editing a comment to add someone tells only the new person.
 - **My work** is always in the sidebar. **Mentions** lists comments that mention you, newest first, with unread ones marked; the sidebar shows how many are unread. Clicking one opens the record at that comment and marks it read; **Mark all as read** clears the rest. **Waiting on me** (workflow records) is the second tab when a form has a workflow.
 - **Pop-ups while Formwright is open:** a new mention slides up at the bottom ("**Bea Martin** mentioned you on **Lobby renovation**" with **Open**), and so does a record a workflow hands to you or your group ("**Lobby renovation** is waiting on you at **Review**" with **Open**). Several at once become one ("2 new mentions", **Show** opens My work). Your own moves don't pop up, and nothing pops up for what was already there when you opened the app (`src/notices.js`, `src/noticelogic.js`).
+- **All mentions (administrators):** a My work tab listing every @mention: who it was for, who wrote it, the record, the comment, when, and Read / Unread, filterable by person and unread only. Opening one shows the comment without marking it read for the person it was meant for. (Rules: administrators may read `mentions`; only the person mentioned changes theirs.)
 - **Audit trail:** deleting a comment is noted ("deleted a comment on", with its text), filterable as **Comments deleted**.
 
 ## Links and Cadence tasks

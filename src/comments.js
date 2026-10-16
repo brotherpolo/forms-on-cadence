@@ -351,11 +351,15 @@ export async function openMention(id) {
   const m = (H.store.mentions || []).find((x) => x.id === id);
   if (!m) return;
   if (!m.read) markMentionsRead([id]).catch((e) => console.error(e));
-  if (!H.recById(m.recordId)) { H.toast('That record was deleted, or you can no longer see it.'); return; }
-  S.flash = m.commentId;
-  const rec = H.recById(m.recordId);
-  if (rec && H.folded(rec.formId, KEY)) H.unfold(rec.formId, KEY);
-  H.openRecord(m.recordId);
+  showComment(m.recordId, m.commentId);
+}
+/** Open a record at one of its comments (highlighted). */
+export function showComment(recordId, commentId) {
+  const rec = H.recById(recordId);
+  if (!rec) { H.toast('That record was deleted, or you can no longer see it.'); return; }
+  S.flash = commentId;
+  if (H.folded(rec.formId, KEY)) H.unfold(rec.formId, KEY);
+  H.openRecord(recordId);
 }
 async function markAll() {
   const ids = unreadOf(H.store.mentions).map((m) => m.id);

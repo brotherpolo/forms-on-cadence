@@ -775,3 +775,35 @@ tr.wf-over td.title{color:var(--danger)}
 .xw-tags li.bad span{color:var(--danger)}
 .xw-tags li.ok code::before{content:"✓ ";color:var(--ok)}
 .xw-links{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+
+/* ---------- My work → All mentions, All tasks (allwork.js) ---------- */
+.aw-bar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 16px;margin-bottom:12px}
+.aw-bar .grow{flex:1;min-width:160px;text-align:right;margin:0}
+.aw-f{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted);min-width:180px}
+.aw-chk{display:inline-flex;align-items:center;gap:8px;font-size:14px;min-height:42px;cursor:pointer}
+.aw-chk input{width:18px;height:18px;accent-color:var(--accent)}
+.aw-late{color:var(--danger)}
+.aw-tbl td{vertical-align:middle}
+.aw-tbl tr[data-aw="m-open"]{cursor:pointer}
+.aw-tbl tr[data-aw="m-open"]:hover,.aw-tbl tr[data-aw="m-open"]:focus-visible{background:var(--sunk);outline:none}
+.aw-unread td{font-weight:600}
+.aw-who{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.aw-rec{margin-left:6px}
+.aw-snip{max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-weight:400}
+.aw-when{white-space:nowrap;color:var(--muted)}
+.aw-st{font-size:12.5px;padding:2px 8px;border-radius:999px;background:var(--sunk);color:var(--muted);white-space:nowrap}
+.aw-st.un{background:var(--accent-soft);color:var(--accent)}
+.aw-cb{width:36px}
+.aw-cb input{width:18px;height:18px;accent-color:var(--accent)}
+.aw-title{font-weight:600;overflow-wrap:anywhere}
+.aw-done .aw-title{text-decoration:line-through;color:var(--muted)}
+.aw-link{border:0;background:none;font:inherit;color:var(--accent);cursor:pointer;padding:4px 0;text-align:left;display:inline-flex;align-items:center;gap:6px}
+.aw-link:hover{text-decoration:underline}
+.aw-due{white-space:nowrap}
+.aw-due.late{color:var(--danger);font-weight:600}
+.aw-due.today{color:var(--accent);font-weight:600}
+.aw-act{text-align:right;white-space:nowrap}
+.aw-selbar{display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:10px;border:1px solid var(--accent);border-radius:10px;background:var(--accent-soft)}
+.aw-dlg{max-width:520px}
+@media (max-width:760px){.aw-bar .grow{text-align:left}.aw-f{min-width:0;flex:1}.aw-snip{max-width:180px}}
+.aw-dlg .help{margin:6px 0 14px}

@@ -67,3 +67,10 @@ test('a deleted comment', () => {
   assert.ok(matches(e, { kind: 'commentdeleted' }, () => ''));
   assert.ok(!matches(e, { kind: 'deleted' }, () => ''), 'not a deleted record');
 });
+
+test('a reassigned task', () => {
+  const e = { area: 'record', kind: 'reassigned', formName: 'Jobs', title: 'Job 12' };
+  assert.equal(verb(e), 'reassigned a task on');
+  assert.deepEqual(serverFilter({ kind: 'reassigned' }), ['kind', 'reassigned']);
+  assert.ok(!matches(e, { kind: 'changed' }, () => ''), 'not a record change');
+});

@@ -683,6 +683,22 @@ export async function addComment(recordId, data) {
 }
 export async function updateComment(recordId, id, patch) { await updateDoc(doc(db, 'records', recordId, 'comments', id), plain({ ...patch, editedAt: Date.now() })); }
 export async function deleteComment(recordId, id) { await deleteDoc(doc(db, 'records', recordId, 'comments', id)); }
+/** Administrators: every @mention (My work → All mentions), newest first. */
+export function watchAllMentions(onNext, onError) {
+  return onSnapshot(query(collection(db, 'mentions'), orderBy('at', 'desc'), limit(500)), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id }))), onError || (() => onNext([])));
+}
+/** Administrators: Cadence tasks linked to Formwright records (My work → All tasks). People's own tasks stay private. */
+export function watchRecordTasks(onNext, onError) {
+  return onSnapshot(query(collection(db, 'tasks'), where('recordId', '!=', null), limit(2000)), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id }))), onError || (() => onNext([])));
+}
+/** Reassign several tasks at once: [[taskId, patch]] (tasks.js reassignPatch). */
+export async function reassignTasks(pairs) {
+  for (let i = 0; i < pairs.length; i += 400) {
+    const b = writeBatch(db);
+    pairs.slice(i, i + 400).forEach(([id, patch]) => b.update(doc(db, 'tasks', id), patch));
+    await b.commit();
+  }
+}
 export async function markMentionsRead(ids) {
   for (let i = 0; i < ids.length; i += 400) {
     const b = writeBatch(db);

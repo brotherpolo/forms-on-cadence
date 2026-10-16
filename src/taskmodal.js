@@ -2,7 +2,7 @@
 // It reads and writes the same task documents Cadence does (tasks.js builds them; Cadence's security
 // rules check every write), so a task added here shows in Cadence at once, and the other way round.
 import { esc, colorOf } from './ui.js';
-import { normEmail, cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES } from './tasks.js';
+import { normEmail, reassignPatch, passChoices, cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES } from './tasks.js';
 import { loadCadenceItems, assignableUids, writeTasks, updateTask, deleteTask } from './store.js';
 
 let H = null;   // { store, recById, formById, recTitle, toast, cadenceUrl, tasks() }
@@ -27,7 +27,7 @@ const root = () => {
 };
 
 /** Everyone in Formwright who could be given a task, with whether Cadence lets them be. */
-async function people() {
+export async function assignablePeople() {
   const byUid = new Map();
   Object.entries(H.store.profiles || {}).forEach(([id, p]) => { if (p && !p.removed && p.email) byUid.set(id, { uid: id, name: p.displayName || p.email, email: normEmail(p.email) }); });
   (H.store.users || []).forEach((u) => { if (u.email && !byUid.has(u.id)) byUid.set(u.id, { uid: u.id, name: H.store.profiles?.[u.id]?.displayName || u.displayName || u.email, email: normEmail(u.email), cadence: u.role === 'admin' || u.cadence === true }); else if (byUid.has(u.id)) byUid.get(u.id).cadence = u.role === 'admin' || u.cadence === true; });
@@ -42,9 +42,11 @@ export async function open(recordId, taskId = null) {
   const task = taskId ? (H.tasks() || []).find((t) => t.id === taskId) : null;
   if (taskId && !task) return;
   const mine = !task || task.ownerId === H.store.user?.uid;
-  M = { recordId, id: taskId, task, owner: mine, loading: true, busy: false, nodeOpen: false, nodeQ: '', armed: false, newSub: '', err: '' };
+  // a record task given to me: I can pass it on to someone else (Reassign)
+  const passOn = !!task && !mine && task.assigneeId === H.store.user?.uid && !!task.recordId;
+  M = { recordId, id: taskId, task, owner: mine, passOn, loading: true, busy: false, nodeOpen: false, nodeQ: '', armed: false, newSub: '', err: '' };
   paint();
-  const [items, ppl] = await Promise.all([mine ? loadCadenceItems() : Promise.resolve({}), mine ? people() : Promise.resolve([])]);
+  const [items, ppl] = await Promise.all([mine ? loadCadenceItems() : Promise.resolve({}), mine || passOn ? assignablePeople() : Promise.resolve([])]);
   if (!M || M.id !== taskId) return;
   M.lists = mine ? cadenceLists(items.settings) : {
     types: task.typeId ? [{ id: task.typeId, ...(task.typeSnap || { name: 'Their type', color: '#8C94A6' }) }] : [],
@@ -52,7 +54,7 @@ export async function open(recordId, taskId = null) {
   };
   M.nodes = mine ? mapNodes(items.map) : [];
   const cur = task?.assigneeId ? { uid: task.assigneeId, name: task.assigneeName || task.assigneeEmail || 'Someone', email: normEmail(task.assigneeEmail) } : null;
-  M.people = mine ? assignChoices(ppl, me(), cur) : [];
+  M.people = mine ? assignChoices(ppl, me(), cur) : passOn ? passChoices(ppl, task, me()) : [];
   M.draft = task ? {
     title: task.title || '', notes: task.notes || '', due: task.due || '', time: task.time || '', repeat: task.repeat || 'none',
     typeId: task.typeId || '', levelId: task.levelId || '', nodeId: task.nodeId || '', who: task.assigneeId || task.ownerId,
@@ -76,7 +78,7 @@ function paint() {
     return;
   }
   const d = M.draft, t = M.task, own = M.owner, dis = M.busy ? ' disabled' : '', ro = own ? '' : ' disabled';
-  const from = !own && t ? `<p class="help tk-from">From ${esc(t.ownerName || t.ownerEmail || 'someone')}. You can change the notes, date and checklist; the rest is theirs.</p>` : '';
+  const from = !own && t ? `<p class="help tk-from">From ${esc(t.ownerName || t.ownerEmail || 'someone')}. You can change the notes, date and checklist${M.passOn ? ', and pass it on to someone else' : ''}; the rest is theirs.</p>` : '';
   const levels = M.lists.levels || [];
   const node = (M.nodes || []).find((n) => n.id === d.nodeId);
   const q = M.nodeQ.trim().toLowerCase();
@@ -100,7 +102,10 @@ function paint() {
         <label class="tk-l"><span>Assigned to</span><select class="in" data-tki="who">${M.people.map((p) => `<option value="${esc(p.uid)}"${p.uid === d.who ? ' selected' : ''}${p.ok || p.uid === d.who ? '' : ' disabled'}>${esc(p.me ? 'Me (' + (p.name || 'you') + ')' : p.name || p.email)}${p.ok ? '' : ' (can’t be given tasks yet)'}</option>`).join('')}</select>
 </label>
         <label class="tk-l"><span>Type</span><select class="in" data-tki="typeId"><option value="">No type</option>${(M.lists.types || []).map((x) => `<option value="${esc(x.id)}"${d.typeId === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
-      </div>${blocked.length ? `<p class="help tk-who-help">Greyed-out people can’t be given tasks yet: they need Cadence switched on (an administrator does that in Users), then to sign in to Formwright or Cadence once.</p>` : ''}` : `<div class="tk-row2"><div class="tk-l"><span>Assigned to</span><p class="tk-ro">You</p></div><div class="tk-l"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div></div>`}
+      </div>${blocked.length ? `<p class="help tk-who-help">Greyed-out people can’t be given tasks yet: they need Cadence switched on (an administrator does that in Users), then to sign in to Formwright or Cadence once.</p>` : ''}` : M.passOn ? `<div class="tk-row2">
+        <label class="tk-l"><span>Assigned to</span><select class="in" data-tki="who">${M.people.map((p) => `<option value="${esc(p.uid)}"${p.uid === d.who ? ' selected' : ''}${p.ok ? '' : ' disabled'}>${esc(p.me ? 'Me (keep it)' : p.owner ? `${p.name} (owner): give it back` : p.name || p.email)}${p.ok ? '' : ' (can’t be given tasks yet)'}</option>`).join('')}</select></label>
+        <div class="tk-l"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div>
+      </div><p class="help tk-who-help">To pass this on, pick who should do it instead. ${esc(t.ownerName || 'The owner')} still sees it.</p>` : `<div class="tk-row2"><div class="tk-l"><span>Assigned to</span><p class="tk-ro">You</p></div><div class="tk-l"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div></div>`}
       ${own ? `<div class="tk-l tk-nodew"><span>On the map</span>
         <div class="tk-nodeline"><button type="button" class="tk-pill tk-pickn${node ? '' : ' tk-none'}" data-tk="nodes" aria-haspopup="listbox" aria-expanded="${M.nodeOpen}"${node ? ` style="--pc:${esc(node.hex)}"` : ''}><i></i>${esc(node ? node.title : d.nodeId ? 'Its node was deleted' : 'Link to a node')}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           ${d.nodeId ? `<button type="button" class="ibtn" data-tk="node" data-v="" aria-label="Unlink from the map" title="Unlink">✕</button>` : ''}${node?.parent ? `<span class="help">in ${esc(node.parent)}</span>` : ''}</div>
@@ -160,6 +165,14 @@ async function save() {
     } else {
       const patch = editPatch(M.task, d, mine, who && !who.me ? who : null, M.owner, M.lists, now);
       if (Object.keys(patch).length) { await updateTask(M.task.id, patch); H.toast('Task saved'); }
+      // passed on to someone else (or back to the owner): a change of its own, as Cadence's rules want
+      if (M.passOn && d.who !== mine.uid) {
+        const to = M.people.find((p) => p.uid === d.who);
+        if (to && to.ok) {
+          await updateTask(M.task.id, reassignPatch(M.task, to.owner ? null : to, mine.uid, now));
+          H.toast(to.owner ? `Given back to ${String(to.name).split(' ')[0]}` : `Passed to ${String(to.name).split(' ')[0]}`);
+        }
+      }
     }
     close();
   } catch (e) {
