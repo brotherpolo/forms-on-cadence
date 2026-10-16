@@ -63,6 +63,7 @@ src/
   formtext.js              Fields as text, change summaries, version files (pure, unit-tested)
   richtext.js              Formatted long text: clean, convert, plain text (pure, unit-tested)
   richui.js                The formatted long text editor and its toolbar
+  dzlogic.js               Designer canvas: type colours, sections, folding, moves (pure, unit-tested)
   formtextcolor.js         Text view colours, line problems and sections (pure, unit-tested)
   fieldnames.js            Captions and system names: lookups, shared captions (pure, unit-tested)
   formver.js               Fields → Text view, History tab, drafts, Make active
@@ -301,6 +302,8 @@ A field has a **caption** (what people see on the form, in lists and in the PDF)
 - Import templates head each column with the system name; a file headed with the caption still matches.
 
 ## Text view and version history (form designer)
+
+**Visual (the canvas).** Sections sit at the left edge on a tinted band with their field count; the fields under a section are indented beside a thin rail (fields before the first section aren't). Each field type's icon is a shade of its category's colour (Text slate, Contact teal, Numbers amber, Date & time violet, Choices green, Media pink, Links blue), the same in the field types palette and the outline. Sections fold (the chevron; **Collapse all** / **Expand all**): a folded section shows its fields' icons, is remembered per form on this device, and moves as a whole when dragged or moved with the arrow keys (it always lands between sections). Clicking a field in the outline, or adding one to a folded section, opens it. `src/dzlogic.js` (pure, unit-tested) holds the colours, rows, folding and moves.
 
 **Fields → Visual | Text.** Text shows every field and section as one line, for big changes: add many fields at once, rename, reorder by moving lines, delete lines, or paste a list. `src/formtext.js` reads and writes the format (pure, unit-tested); `src/formver.js` is the screen. The designer always opens in Visual; the switch is hidden on phone-width screens.
 
