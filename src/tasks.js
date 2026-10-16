@@ -238,3 +238,39 @@ export function assignChoices(people, me, current) {
   list.sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
   return [{ uid: me.uid, name: me.name, email: me.email, ok: true, me: true }, ...list];
 }
+
+/**
+ * Why Cadence's rules refused a new task, worked out from what they read. Mirrors firestore.rules
+ * (tasks create): Cadence switched on, owner email, the assignee's people entry, and the record link.
+ * me: { uid, email } (signed-in); account: users/{me} data or null; task: the doc that was refused;
+ * record: records/{task.recordId} data or null (undefined when there's no link);
+ * person: people/{task.assigneeEmail} data or null (undefined when unassigned);
+ * names: { assignee, record } for the messages. Returns a list of reasons (empty: none found).
+ */
+export function taskRefusal(me, account, task, record, person, names = {}) {
+  const out = [];
+  if (!account) return ['Your Formwright account wasn’t found on the server. Sign out and sign in again.'];
+  const admin = account.role === 'admin';
+  if (!admin && account.cadence !== true) out.push('Cadence isn’t switched on for you. An administrator can turn on “Can use Cadence” for you in Users.');
+  if (task.ownerEmail && task.ownerEmail !== normEmail(me.email)) out.push(`Your sign-in email (${normEmail(me.email) || 'none'}) doesn’t match the one on the task (${task.ownerEmail}). Sign out and sign in again.`);
+  if (task.assigneeId) {
+    const who = names.assignee || task.assigneeName || task.assigneeEmail;
+    if (!person) out.push(`${who} isn’t in Cadence’s people list under ${task.assigneeEmail}. They need to open Cadence once while signed in with that address.`);
+    else if (person.uid !== task.assigneeId) out.push(`Cadence’s people list has ${task.assigneeEmail} on a different account (${String(person.uid || 'none').slice(0, 8)}…) from the ${who} you picked (${String(task.assigneeId).slice(0, 8)}…). They should open Cadence once to fix it.`);
+  }
+  if (task.recordId) {
+    if (!record) out.push('This record isn’t saved on the server yet (or was deleted). Save it, check your connection, and try again.');
+    else if (record.formId !== task.formId) out.push('The task points at the wrong form for this record. Reload the page and try again.');
+    else if (!admin) {
+      const acc = account.access || {};
+      const lvl = acc[task.formId] || acc['*'] || {};
+      const view = lvl.view || 'none';
+      const responsible = record.assignee === me.uid || (record.assigneeGroup && (account.groups || []).includes(record.assigneeGroup));
+      const sees = view === 'all' || (view === 'own' && record.ownerId === me.uid) || responsible;
+      if (!sees) out.push(view === 'own'
+        ? `Your access to this form is “only records you created”, and someone else created this one. An administrator can give your group “All records” for this form.`
+        : `Your access doesn’t include this form (it says “${view}”). An administrator can change your security group, then press Recalculate access.`);
+    }
+  }
+  return out;
+}

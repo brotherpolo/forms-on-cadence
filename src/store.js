@@ -11,6 +11,7 @@ import {
   onSnapshot,
   setDoc,
   getDoc,
+  getDocFromServer,
   getDocs,
   updateDoc,
   deleteDoc,
@@ -404,6 +405,25 @@ export async function loadCadenceItems() {
 
 const peopleSeen = new Map(); // email → uid ('' when they can't be assigned)
 /** Who Cadence lets me assign: for each email, the uid in Cadence's people directory, or ''. */
+/** What Cadence's rules read when a task is refused, fresh from the server: my account, the
+ *  linked record, and the assignee's people entry. Each is the data, null if missing, or
+ *  { error } if it couldn't be read. */
+export async function taskCheckReads(task) {
+  const read = async (path) => { try { const s = await getDocFromServer(doc(db, ...path)); return s.exists() ? s.data() : null; } catch (e) { return { error: e?.code || 'error' }; } };
+  const [account, record, person] = await Promise.all([
+    read(['users', store.user.uid]),
+    task.recordId ? read(['records', task.recordId]) : undefined,
+    task.assigneeEmail ? read(['people', task.assigneeEmail]) : undefined,
+  ]);
+  return { account, record, person };
+}
+/** Try writing one task, then remove it again (diagnosis only). true if Cadence allowed it. */
+export async function probeTask(t) {
+  try { await setDoc(doc(db, 'tasks', t.id), plain(t)); } catch (e) { return false; }
+  try { await deleteDoc(doc(db, 'tasks', t.id)); } catch (e) { /* left behind; harmless */ }
+  return true;
+}
+
 export async function assignableUids(emails) {
   emails = emails.map((e) => String(e || '').trim().toLowerCase());
   await Promise.all([...new Set(emails.filter(Boolean))].filter((e) => !peopleSeen.has(e)).map(async (e) => {

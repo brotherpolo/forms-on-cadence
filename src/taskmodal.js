@@ -2,8 +2,8 @@
 // It reads and writes the same task documents Cadence does (tasks.js builds them; Cadence's security
 // rules check every write), so a task added here shows in Cadence at once, and the other way round.
 import { esc, colorOf } from './ui.js';
-import { normEmail, reassignPatch, passChoices, cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES } from './tasks.js';
-import { loadCadenceItems, assignableUids, writeTasks, updateTask, deleteTask } from './store.js';
+import { normEmail, reassignPatch, passChoices, cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES, taskRefusal } from './tasks.js';
+import { loadCadenceItems, assignableUids, writeTasks, updateTask, deleteTask, taskCheckReads, probeTask } from './store.js';
 
 let H = null;   // { store, recById, formById, recTitle, toast, cadenceUrl, tasks() }
 let M = null;   // the open pop-up
@@ -160,7 +160,13 @@ async function save() {
     if (!M.task) {
       const rec = H.recById(M.recordId), form = rec ? H.formById(rec.formId) : null;
       const link = rec && form ? { recordId: rec.id, formId: form.id, recordSnap: { title: String(H.recTitle(rec, form)).slice(0, 500), form: String(form.name || 'Untitled form').slice(0, 200), color: colorOf(form) } } : null;
-      await writeTasks([newTaskDoc(uid('t'), d, mine, who && !who.me ? who : null, link, M.lists, now)]);
+      const t = newTaskDoc(uid('t'), d, mine, who && !who.me ? who : null, link, M.lists, now);
+      try { await writeTasks([t]); }
+      catch (e) {
+        if (e?.code !== 'permission-denied') throw e;
+        const r = await explainRefusal(t, who);
+        if (!r.saved) { const err = new Error(r.msg); err.diag = r.msg; throw err; }
+      }
       H.toast(who && !who.me ? `Task added and given to ${who.name.split(' ')[0]}` : 'Task added');
     } else {
       const patch = editPatch(M.task, d, mine, who && !who.me ? who : null, M.owner, M.lists, now);
@@ -178,9 +184,29 @@ async function save() {
   } catch (e) {
     console.error('[formwright] task', e);
     M.busy = false;
-    M.err = e?.code === 'permission-denied' ? 'Cadence didn’t allow that. You may not have Cadence switched on, or the person you picked can’t be given tasks yet. If you use Brave or an ad blocker, turn it off for this site (Brave: the lion icon → Shields down) and try again.' : 'Saving didn’t work. Check your connection and try again.';
+    M.err = e?.diag ? e.diag : e?.code === 'permission-denied' ? 'Cadence didn’t allow that. You may not have Cadence switched on, or the person you picked can’t be given tasks yet. If you use Brave or an ad blocker, turn it off for this site (Brave: the lion icon → Shields down) and try again.' : 'Saving didn’t work. Check your connection and try again.';
     paint();
   }
+}
+
+/** A new task was refused: read what Cadence's rules read and say which check failed. When nothing
+ *  stands out, find the part it refuses with test tasks that are removed straight away. If only the
+ *  copied type and priority names were the problem, the task is saved without them ({ saved: true }). */
+async function explainRefusal(t, who) {
+  const reads = await taskCheckReads(t);
+  console.warn('[formwright] task refused. What the rules read:', { task: t, ...reads });
+  const err = (x) => !!(x && x.error);
+  if (err(reads.account)) return { msg: `Cadence didn’t allow that, and your own account couldn’t be read (${reads.account.error}). Sign out and sign in again. If you use Brave or an ad blocker, turn it off for this site.` };
+  const why = taskRefusal(me(), reads.account, t, err(reads.record) ? null : reads.record, err(reads.person) ? null : reads.person, { assignee: who?.name });
+  if (why.length) return { msg: 'Cadence didn’t allow that. ' + why.join(' ') };
+  if (t.typeSnap || t.levelSnap) {
+    try { await writeTasks([{ ...t, typeSnap: null, levelSnap: null }]); console.warn('[formwright] task saved without its type/priority copy'); return { saved: true }; } catch (e) { /* not that */ }
+  }
+  const self = { ...t, id: uid('t'), title: 'Formwright check (removed automatically)', assigneeId: null, assigneeName: null, assigneeEmail: null, members: [t.ownerId], typeSnap: null, levelSnap: null };
+  const ref = `ref: ${String(t.ownerId).slice(0, 6)} → ${String(t.assigneeId || '').slice(0, 6)} ${t.assigneeEmail || ''}`;
+  if (t.assigneeId && (await probeTask(self))) return { msg: `Cadence refused giving this task to ${who?.name || 'that person'}, but accepts it as your own task, and their Cadence entry looks right from here. Please send a screenshot of this message to your administrator. (${ref})` };
+  if (t.recordId && (await probeTask({ ...self, recordId: null, formId: null, recordSnap: null }))) return { msg: `Cadence refused linking a task to this record, though your access looks right from here. Ask an administrator to press Recalculate access in Security groups, then try again. (${ref})` };
+  return { msg: `Cadence didn’t allow any task from you just now, though your account looks right from here. Sign out and sign in again, then try once more. (${ref})` };
 }
 
 export function onClick(e) {
