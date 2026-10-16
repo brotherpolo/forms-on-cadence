@@ -76,6 +76,8 @@ src/
   reportlogic.js           Field joins, totals, time buckets and the gap-free grid (pure, unit-tested)
   tasks.js                 Cadence tasks: display helpers, and the documents the pop-up writes (pure, unit-tested)
   taskmodal.js             The Cadence task pop-up on records
+  comments.js              Comments with @mentions on records, and My work → Mentions
+  commentlogic.js          Threads, the @ list, who's mentioned and told (pure, unit-tested)
   lists.js, lists.css      Records list: saved views, columns, filters, select several
   grids.css                Sub-form grids on the record page
   listlogic.js             List columns, views, sorting, filters and CSV (pure, unit-tested)
@@ -126,6 +128,8 @@ Security rules, Storage rules, indexes and their tests live in the Cadence folde
 |---|---|---|
 | `forms/{formId}` | `name, itemName, description, color, showInSidebar, order, titleField, fields[], children[]` | admins |
 | `records/{id}` | `formId, values{fieldId: value}, parentId, parentFormId, ownerId, createdBy, createdAt, updatedAt, updatedBy`; `nums{fieldId: number}` and `autoLog[]` from the server; `stage, assignee, assigneeGroup, stageAt` with a workflow | per access; at a workflow stage only its assignee or admins (`nums`, `autoLog`: server only) |
+| `records/{id}/comments/{id}` | `by, byName, at, text, mentions[{uid, name}], parent, task, editedAt`; `notified{uid: sent, no-access, gone}` from the server | anyone who can see the record, as themselves; edit your own, delete your own (admins any) |
+| `mentions/{id}` | `to, by, byName, recordId, formId, recordTitle, formName, commentId, snippet, at, read` | server only; the person mentioned reads it and marks it read |
 | `records/{id}/stages/{id}` | `at, by, from, fromName, to, toName, label, comment, assignee, assigneeGroup`: stage history | whoever moves it, as themselves; never changed |
 | `forms/{id}/versions/{id}` | `n, at, by, kind (saved, draft, loaded, activated, baseline), note, from, fromN, summary[], form{…}`: version history; `forms/{id}.activeVersion` names the live one | admins (never changed or deleted) |
 | `settings/home` | `dashboardId, updatedAt, updatedBy`: the dashboard Home shows for anyone without their own | admins (everyone let in reads it) |
@@ -337,7 +341,7 @@ Name: text, system name "Contact name"
 - **Fields at each stage:** Edit, **Required** (must be filled before moving on to a later stage; saving is still allowed), **View only**, or **Hidden** (its value is kept). Hiding a section heading hides everything under it; child sections, grids and Tasks can be hidden per stage too. Show/hide rules still apply on top.
 - **On the record:** a bar shows the stages, where it is, its **Person responsible**, how long it's been there, its due date (Overdue, Due today) and that stage's buttons. While a record is at a stage, **only its assignee (or a member of its group) and administrators can change it**, enforced by the security rules; others see it read-only. Administrators can **Move to** any stage. **New records start at the first stage on their own**, however they're made (the app, an import, an automation, Duplicate): the server does it (`autoStart` in Cadence `automationOnWrite`), so the bar shows "Starting at …" for a moment. Records saved before the workflow was turned on show **Start**.
 - **Stage history** (a collapsible section on the record): every move, who made it, which button, the comment, and who it went to. Stored in `records/{id}/stages/`.
-- **My work** (in the sidebar once any form has a workflow): records you or your groups are the person responsible for, overdue first, then by due date, then longest waiting, with a **Due** column. Administrators can switch to **Everyone**.
+- **My work → Waiting on me** (the tab shows once any form has a workflow): records you or your groups are the person responsible for, overdue first, then by due date, then longest waiting, with a **Due** column. Administrators can switch to **Everyone**.
 - **Due dates:** a stage can be **due within N working days** (Monday to Friday) of arriving (`stage.dueDays`). The Cadence task for that stage gets the same due date (Toronto time).
 - **Stage in rules and automations:** "Stage" can be picked in show/hide rule conditions and automation conditions, and automations have a **moves to a workflow stage** trigger.
 - **Notices** (server, `automationOnWrite` in Cadence): when a record arrives at a stage, the previous stage's workflow tasks for it are ticked done, and the new assignee gets a task and/or email (a group: up to 10 members, each their own).
@@ -463,6 +467,16 @@ Admins see **Import and templates** at the top of each form's list.
 - **Import history** (also under Administration in the sidebar) lists every import. **Undo** is offered for 7 days. It removes what the import added, including rows added under those records since, and puts updated records back the way they were. Records someone has edited since the import are left alone, and the confirmation names them.
 
 The import is admins-only in the app and in the rules (`imports/…`). The records themselves are saved through the normal record rules.
+
+## Comments and @mentions
+
+Every saved record has a **Comments** section at the bottom (it folds like the others). Comments aren't part of the record's PDF.
+
+- **Who can comment:** anyone who can see the record, view-only included. You can **Edit** and **Delete** your own (an edited comment says "edited"); administrators can delete anyone's. **Reply** answers a comment (one level deep; replying to a reply goes under the same comment) and starts with an @mention of the person you're answering. Deleting a comment deletes its replies.
+- **@mentions:** type **@** and a few letters of a name (or email) to pick someone: arrows and Enter or Tab, or click. Typing a full "@Name" also counts. Administrators see people who can't open the record greyed out ("can't see this record"); for everyone else the server checks. **Ctrl+Enter** (⌘+Enter) posts.
+- **What the people you mention get** (Cadence `commentWritten`, `functions/comments.js`): an email from the company Gmail (with a link to the record when `FORMWRIGHT_URL` is set in the Cadence `functions/.env`), an entry in **My work → Mentions**, and, when you tick **Also give the people I mention a Cadence task**, a task from you to them linked to the record (only for people who use Cadence). Only people who can open the record are told; the comment then shows "Sam can't see this record and wasn't notified" to its writer and administrators. Editing a comment to add someone tells only the new person.
+- **My work** is always in the sidebar. **Mentions** lists comments that mention you, newest first, with unread ones marked; the sidebar shows how many are unread. Clicking one opens the record at that comment and marks it read; **Mark all as read** clears the rest. **Waiting on me** (workflow records) is the second tab when a form has a workflow.
+- **Audit trail:** deleting a comment is noted ("deleted a comment on", with its text), filterable as **Comments deleted**.
 
 ## Links and Cadence tasks
 

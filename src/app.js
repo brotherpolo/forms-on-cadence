@@ -40,6 +40,7 @@ import { checkWorkflow } from './workflow.js';
 import { fieldByName, sysOf, uniqueSysNames, shownName } from './fieldnames.js';
 import * as fv from './formver.js';
 import * as tm from './taskmodal.js';
+import * as cmt from './comments.js';
 import { typeColors, categoryStyle, canvasRows, blockOf, moveBefore, stepTarget, sectionOf, snapBefore, sectionStep } from './dzlogic.js';
 import { richEditorHTML, richViewHTML, initRichUI } from './richui.js';
 import { fromEditor, richBlocks, RICH_KEY } from './richtext.js';
@@ -426,7 +427,7 @@ function renderSide(){
     </div>
     <div class="navlabel" style="margin-top:12px">Insights</div>
     <button class="nav${onHome()?' on':''}" data-act="nav-home"${onHome()?' aria-current="page"':''}><span class="glyph navg">⌂</span><span class="t">Home</span></button>
-    ${store.forms.some(f=>wfOn(f))?`<button class="nav${view.name==='mywork'?' on':''}" data-act="nav-mywork"><span class="glyph navg">☰</span><span class="t">My work</span><span class="n">${myWorkCount()||''}</span></button>`:''}
+    <button class="nav${view.name==='mywork'?' on':''}" data-act="nav-mywork"${view.name==='mywork'?' aria-current="page"':''}><span class="glyph navg">☰</span><span class="t">My work</span>${cmt.unreadCount()?`<span class="nb" title="${cmt.unreadCount()} unread mention${cmt.unreadCount()===1?'':'s'}"><span class="sr">, </span>${cmt.unreadCount()}<span class="sr"> unread</span></span>`:''}<span class="n">${myWorkCount()||''}</span></button>
     <button class="nav${(view.name==='dashboards'||view.name==='dashboard')&&!onHome()?' on':''}" data-act="nav-dashboards"><span class="glyph navg">▦</span><span class="t">Dashboards</span><span class="n">${counts().dashboards}</span></button>
     <button class="nav${view.name==='reports'||view.name==='report'?' on':''}" data-act="nav-reports"><span class="glyph navg">▤</span><span class="t">Reports</span><span class="n">${counts().reports}</span></button>
     ${adm?`<div class="navlabel" style="margin-top:12px">Administration</div>
@@ -461,7 +462,9 @@ function renderMain(){
   else if(view.name==='home'){title='Home';h=`<div class="head"><div class="ttl"><div><h1>Home</h1><p class="sub">Home shows a dashboard: your own, or the one an administrator picked for everyone.</p></div></div></div><div class="panel empty"><h2>No home dashboard yet</h2><p>Open a dashboard and press <b>Set as my home</b>.${isAdmin(store.me)?' To give everyone a Home, share a dashboard and press <b>Make everyone’s default home</b>.':''}</p><button class="btn primary" data-act="nav-dashboards">Dashboards</button></div>`;}
   $('#topttl').textContent=title||'Formwright';
   const ae=document.activeElement,ks=ae&&ae.dataset?.ksearch?[ae.dataset.ksearch,ae.selectionStart]:null; // a redraw while searching keeps the cursor in the box
+  const ck=cmt.keep(); // a redraw while writing a comment keeps the cursor in it
   m.innerHTML=`<div class="wrap${wide?' wide':''}${wide==='full'?' full':''}">${h}</div>`;
+  cmt.restore(ck);
   if(ks){const s2=m.querySelector(`[data-ksearch="${CSS.escape(ks[0])}"]`);if(s2){s2.focus({preventScroll:true});try{s2.setSelectionRange(ks[1],ks[1])}catch(e){}}}
   document.querySelectorAll('canvas[data-sig]').forEach(initSig);
   if(view.name==='records')afterRecords();
@@ -469,7 +472,7 @@ function renderMain(){
   if(view.name==='record'&&rdraft){rdraft._rs=null;applyRules(rdraft);}
   if(view.name==='formEdit'&&pdraft&&(ui.tab==='rules'||ui.tab==='preview'))applyRules(pdraft);
   if(view.name==='dashboard')fitTiles();
-  syncTaskWatch();syncEmailWatch();syncStageWatch();
+  syncTaskWatch();syncEmailWatch();syncStageWatch();cmt.sync();cmt.afterRender();
 }
 
 /* ---------- Cadence tasks linked to the open record ---------- */
@@ -619,7 +622,7 @@ function viewRecord(form){
   <div class="panel">
     <fieldset class="fset"${ro?' disabled':''}>${formFieldsHTML(form,rdraft,'record')}</fieldset>
   </div>
-  ${sectionsHTML}${rec&&wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}${backHTML}${rec?`<div id="rec-emails">${sentEmailsHTML()}</div>`:''}
+  ${sectionsHTML}${rec&&wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}${backHTML}${rec?`<div id="rec-emails">${sentEmailsHTML()}</div>`:''}${rec?`<div id="rec-comments">${cmt.html()}</div>`:''}
   ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}
   ${cellPopup()}${ui.mail&&ui.mail.rec===rec?.id?mailDialog(form,rec):''}${ui.cascade&&ui.cascade.parentId===rec?.id?cascadeDialog():''}${ui.mailView&&ui.mailView.rec===rec?.id?mailViewDialog():''}${ui.mailDelAll?.stage===2&&ew.recordId===rec?.id&&ew.list.length?delAllDialog():''}${ui.wfAsk&&ui.wfAsk.recId===rec?.id?wfAskDialog(form,rec):''}`;
 }
@@ -732,8 +735,21 @@ async function doWfMove(rec,form,target,label,comment){
   }catch(e){console.error(e);toast(e?.code==='permission-denied'?'Only the person responsible, or an administrator, can move it. (Or the latest security rules aren’t deployed yet.)':'Moving it failed. Check your connection and try again.');}
   ui.wfBusy=false;renderMain();
 }
-/* My work: records waiting on you (or your groups) in any workflow. Admins can see everyone's. */
+/* My work: Mentions (comments where someone @mentioned you) and, when a form has a workflow,
+   Waiting on me (records waiting on you or your groups). Admins can see everyone's. */
+function myWorkTabs(tab,hasWf){
+  const unread=cmt.unreadCount(),n=myWorkCount();
+  const t=(v,label,extra)=>`<button type="button" role="tab" class="mw-tab" id="mw-t-${v}" aria-selected="${tab===v}" aria-controls="mw-p" data-act="mw-tab" data-v="${v}"${tab===v?'':' tabindex="-1"'}>${label}${extra}</button>`;
+  return `<div class="mw-tabs" role="tablist" aria-label="My work">${t('mentions','Mentions',unread?` <span class="nb">${unread}<span class="sr"> unread</span></span>`:'')}${hasWf?t('waiting','Waiting on me',n?` <span class="count">${n}</span>`:''):''}</div>`;
+}
 function viewMyWork(){
+  const hasWf=store.forms.some(f=>wfOn(f));
+  const tab=hasWf&&ui.mwTab==='waiting'?'waiting':'mentions';
+  if(tab==='mentions')return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">Comments where someone mentioned you${hasWf?', and records waiting on you in a workflow':''}.</p></div></div></div>
+    ${myWorkTabs(tab,hasWf)}<div id="mw-p" role="tabpanel" aria-labelledby="mw-t-mentions">${cmt.mentionsHTML()}</div>`;
+  return viewWaiting(tab,hasWf);
+}
+function viewWaiting(tab,hasWf){
   const me=store.user?.uid,groups=store.me?.groups||[],admin=isAdmin(store.me),who=admin?ui.wfWho||'me':'me',now=Date.now();
   const dues=new Map();
   const recs=store.records.filter(r=>{const f=formById(r.formId);if(!f||!wfOn(f)||!r.stage||!stageById(f,r.stage))return false;return who==='all'||r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup));});
@@ -746,7 +762,8 @@ function viewMyWork(){
     <div class="panel"><div class="tblwrap"><table class="tbl lv-tbl wf-tbl"><thead><tr><th>${esc(itemName(f))}</th><th>Stage</th>${who==='all'?'<th>Person responsible</th>':''}<th>Due</th><th class="num">Waiting</th></tr></thead><tbody>${rs.map(r=>`<tr data-act="open-record" data-id="${esc(r.id)}" class="${dues.get(r.id)?.state==='overdue'?'wf-over':''}"><td class="title">${esc(recTitle(r,f))}</td><td>${esc(stageName(f,r))}</td>${who==='all'?`<td>${esc(whoHas(r))}</td>`:''}<td>${dueChip(dues.get(r.id),true)||'<span class="help">–</span>'}</td><td class="num">${esc(waited(r.stageAt,now))}</td></tr>`).join('')}</tbody></table></div></div></section>`;}).join('');
   return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">${who==='all'?'Every record in a workflow and its person responsible':'Records you (or a group you’re in) are responsible for'}: overdue first, then by due date, then longest waiting.${nOver?` <b class="wf-overn">${nOver} overdue.</b>`:''}</p></div></div>
     ${admin?`<div class="actions"><div class="segs" role="group" aria-label="Whose work"><button type="button" class="${who==='me'?'on':''}" aria-pressed="${who==='me'}" data-act="wf-who" data-v="me">Mine</button><button type="button" class="${who==='all'?'on':''}" aria-pressed="${who==='all'}" data-act="wf-who" data-v="all">Everyone</button></div></div>`:''}</div>
-    ${recs.length?tables:`<div class="panel empty"><h2>Nothing waiting${who==='all'?'':' on you'}</h2><p>When a record reaches a stage that’s yours, it shows up here.</p></div>`}`;
+    ${myWorkTabs(tab,hasWf)}<div id="mw-p" role="tabpanel" aria-labelledby="mw-t-waiting">
+    ${recs.length?tables:`<div class="panel empty"><h2>Nothing waiting${who==='all'?'':' on you'}</h2><p>When a record reaches a stage that’s yours, it shows up here.</p></div>`}</div>`;
 }
 const myWorkCount=()=>{const me=store.user?.uid,groups=store.me?.groups||[];return store.records.filter(r=>r.stage&&(r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup)))&&wfOn(formById(r.formId))).length;};
 
@@ -2189,7 +2206,8 @@ document.addEventListener('click',async e=>{
     case 'wf-go':{const a=ui.wfAsk;if(!a||a.busy)return;if(a.need&&!String(a.comment||'').trim()){toast('Say why, so they know what to change.');document.querySelector('[data-wf-comment]')?.focus();return;}
       const rec=recById(a.recId),form=rec&&formById(rec.formId),t=form&&stageById(form,a.to);if(!t)return;a.busy=true;renderMain();await doWfMove(rec,form,t,a.label,a.comment);ui.wfAsk=null;renderMain();break;}
     case 'wf-who':ui.wfWho=el.dataset.v;renderMain();break;
-    case 'nav-mywork':go({name:'mywork'});break;
+    case 'nav-mywork':ui.mwTab=cmt.unreadCount()||!store.forms.some(f=>wfOn(f))?'mentions':'waiting';go({name:'mywork'});break;
+    case 'mw-tab':ui.mwTab=el.dataset.v;renderMain();document.querySelector(`[data-act="mw-tab"][data-v="${CSS.escape(el.dataset.v)}"]`)?.focus();break;
     case 'cs-no':if(ui.cascade&&!ui.cascade.busy){ui.cascade=null;renderMain();}break;
     case 'cs-scrim':if(e.target===el&&ui.cascade&&!ui.cascade.busy){ui.cascade=null;renderMain();}break;
     case 'cs-go':runCascade();break;
@@ -2281,6 +2299,7 @@ document.addEventListener('keydown',e=>{
   if(e.target?.id==='dq'&&e.key==='Escape'&&e.target.value){e.preventDefault();e.target.value='';ui.dq='';applyDq();}
 });
 document.addEventListener('pointerdown',e=>{if(ui.subPop&&!e.target.closest?.('.lv-anchor')){ui.subPop=null;renderMain();}},true);
+document.addEventListener('keydown',e=>{if(e.target?.classList?.contains('mw-tab')&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){const ts=[...document.querySelectorAll('.mw-tab')],i=ts.indexOf(e.target);const n=ts[(i+(e.key==='ArrowRight'?1:-1)+ts.length)%ts.length];if(n&&n!==e.target){e.preventDefault();n.click();}}});
 document.addEventListener('keydown',e=>{if(e.target?.dataset?.anval&&(e.key==='Enter'||e.key==='Escape')){e.preventDefault();document.querySelector(e.key==='Enter'?'[data-act="an-save"]':'[data-act="an-cancel"]')?.click();}});
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&ui.mailView&&!ui.mailView.busy){e.preventDefault();const id=ui.mailView.id;closeMailView();renderMain();document.querySelector(`[data-act="mail-view"][data-id="${CSS.escape(id)}"]`)?.focus();return;}
@@ -2481,6 +2500,8 @@ export function startApp(){
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
   initRichUI();
   tm.initTaskModal({store,recById,formById,recTitle,toast,cadenceUrl,tasks:()=>tw.tasks||[]});
+  cmt.initComments({store,view:()=>view,recById,formById,recTitle,itemName,toast,isAdmin:()=>isAdmin(store.me),canUseTasks,foldBtn,folded,
+    unfold:(fid,k)=>saveFolds(setFold(folds(),fid,k,false)),openRecord:id=>{const r=recById(id);if(!r)return;if(view.name==='record'&&view.recordId===id){renderMain();return;}goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
   fv.initFormVer({fdraft:()=>fdraft,setFdraft:f=>{fdraft=f;pdraft=null;},setFdirty,renderMain,saveForm,formById,recordsOf,isEmpty,toast,when,forms:()=>store.forms,newId:()=>uid('x'),me:()=>store.user?.uid,personName:id=>realName(id),closeField:()=>{ui.openField=null;}});
   initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
   initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});
@@ -2493,5 +2514,6 @@ export function startApp(){
 export function stopApp(){
   booted=false;store.onChange=()=>{};$('#app').hidden=true;document.getElementById('noaccess')?.remove();closeMenu();resetLists();resetImports();forgetDrafts();
   if(tw.unsub){tw.unsub();tw.unsub=null;}tw.recordId=null;
+  cmt.stop();
 }
 export { view as currentView, ui, byOrder, formById, recordsOf, renderMain };

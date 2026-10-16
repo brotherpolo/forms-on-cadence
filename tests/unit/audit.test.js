@@ -60,3 +60,10 @@ test('deleted sent emails: their own filter and wording, nothing to put back', (
   assert.equal(verb(e), 'deleted sent emails of');
   assert.equal(canPutBack(e, e.changes[0]), false);
 });
+test('a deleted comment', () => {
+  const e = { area: 'record', kind: 'commentdeleted', formName: 'Jobs', title: 'Job 12' };
+  assert.equal(verb(e), 'deleted a comment on');
+  assert.deepEqual(serverFilter({ kind: 'commentdeleted' }), ['kind', 'commentdeleted']);
+  assert.ok(matches(e, { kind: 'commentdeleted' }, () => ''));
+  assert.ok(!matches(e, { kind: 'deleted' }, () => ''), 'not a deleted record');
+});

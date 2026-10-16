@@ -43,6 +43,7 @@ export const store = {
   listViewsReady: false,
   imports: [], // admins: past imports, newest first
   automations: [], automationsError: null, // admins: Administration → Automations
+  mentions: [], // My work → Mentions: comments where someone @mentioned you, newest first
   recordsLoading: new Set(),
   onChange: () => {},
   onError: () => {},
@@ -164,6 +165,12 @@ export function startData(user) {
     changed();
   }));
   pair('listViews', 'list views', (list, ok) => { store.listViews = list; store.listViewsReady = ok; changed(); });
+  // My work → Mentions: written by the server when someone @mentions you in a comment
+  const onMentions = (s) => { store.mentions = s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.at || 0) - (a.at || 0)); changed(); };
+  const mentionsPlain = () => onSnapshot(query(collection(db, 'mentions'), where('to', '==', user.uid), limit(200)), onMentions, () => { store.mentions = []; });
+  let mUnsub = onSnapshot(query(collection(db, 'mentions'), where('to', '==', user.uid), orderBy('at', 'desc'), limit(200)), onMentions,
+    () => { mUnsub = mentionsPlain(); }); // the index isn't built yet (or older rules): without the order
+  baseUnsubs.push(() => mUnsub());
   // the dashboard Home shows for anyone who hasn't picked their own (settings/home, set by an admin)
   memberParts.push({
     start: () => onSnapshot(doc(db, 'settings', 'home'), (s) => { store.homeDefault = s.exists() ? String(s.data().dashboardId || '') : ''; store.homeDefaultReady = true; changed(); }, () => { store.homeDefault = ''; store.homeDefaultReady = true; changed(); }),
@@ -184,7 +191,7 @@ export function stopData() {
   recordsByForm.clear();
   if (assignedSub) { assignedSub(); assignedSub = null; }
   assigned = [];
-  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, imports: [], reportDefs: [], dashboards: [], dashReady: false, homeDefault: '', homeDefaultReady: false });
+  Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, imports: [], reportDefs: [], dashboards: [], dashReady: false, homeDefault: '', homeDefaultReady: false, mentions: [] });
   store.recordsLoading.clear();
 }
 
@@ -662,6 +669,26 @@ export async function deleteSentEmails(recordId, what) {
   return (await httpsCallable(fns(), 'deleteSentEmails')({ recordId, ...what })).data;
 }
 /** Live list of what's been emailed from a record, newest first. Returns an unsubscribe function. */
+/* ---------- Comments on a record, and @mentions ---------- */
+/** The record's comments, oldest first (replies are put under their comment by the app). */
+export function watchComments(recordId, onNext, onError) {
+  return onSnapshot(collection(db, 'records', recordId, 'comments'), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (a.at || 0) - (b.at || 0))), onError || (() => onNext([])));
+}
+export async function addComment(recordId, data) {
+  const ref = doc(collection(db, 'records', recordId, 'comments'));
+  await setDoc(ref, plain({ ...data, by: store.user.uid, at: Date.now() }));
+  return ref.id;
+}
+export async function updateComment(recordId, id, patch) { await updateDoc(doc(db, 'records', recordId, 'comments', id), plain({ ...patch, editedAt: Date.now() })); }
+export async function deleteComment(recordId, id) { await deleteDoc(doc(db, 'records', recordId, 'comments', id)); }
+export async function markMentionsRead(ids) {
+  for (let i = 0; i < ids.length; i += 400) {
+    const b = writeBatch(db);
+    ids.slice(i, i + 400).forEach((id) => b.update(doc(db, 'mentions', id), { read: true }));
+    await b.commit();
+  }
+}
+
 export function watchEmails(recordId, onNext, onError) {
   return onSnapshot(collection(db, 'records', recordId, 'emails'), (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => (b.at || 0) - (a.at || 0))), onError || (() => onNext([])));
 }
