@@ -61,3 +61,12 @@ test('who it can go to: me first, then everyone else by name', () => {
   assert.equal(c[0].me, true);
   assert.equal(assignChoices([], me, { uid: 'u7', name: 'Old' }).length, 2, 'the current assignee stays listed');
 });
+
+test('emails as Cadence keeps them: lowercase, trimmed', async () => {
+  const { normEmail, newTaskDoc } = await import('../../src/tasks.js');
+  assert.equal(normEmail(' Adam.Pollack@Gmail.com '), 'adam.pollack@gmail.com');
+  assert.equal(normEmail(null), '');
+  const t = newTaskDoc('t1', { title: 'x' }, { uid: 'a', name: 'A', email: normEmail('A@X.com') }, { uid: 'b', name: 'B', email: normEmail('B@X.com') }, null, {}, 1);
+  assert.equal(t.ownerEmail, 'a@x.com');
+  assert.equal(t.assigneeEmail, 'b@x.com');
+});

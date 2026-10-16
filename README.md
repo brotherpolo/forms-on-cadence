@@ -665,4 +665,6 @@ Manual deploy: `FIREBASE_HOSTING_SITE=cadence-forms npm run deploy` (with your s
 - **Scale.** The app subscribes to every record the person can see, one query per form. That's fine into the low thousands of records per form. Beyond that, add paging and an `orderBy('updatedAt')` index.
 - **Offline.** Firestore's persistent cache keeps forms and records readable without signal and queues edits. File uploads need a connection.
 - **Deleting a form** deletes its records (admins only). Child records in other forms are kept.
+- **Brave and ad blockers.** Brave's Shields (and some blockers) block part of Firestore's connection (`ERR_BLOCKED_BY_CLIENT` in the console). Saves can then fail with "Missing or insufficient permissions" and live updates arrive late. Turn Shields down for the Formwright and Cadence sites.
+- **Emails for Cadence tasks are lowercase.** Formwright puts addresses in Cadence's people directory and on tasks in lowercase, as Cadence and its rules do (`normEmail` in `src/tasks.js`); the profile keeps the address exactly as signed in.
 - **Renaming a field** updates calculations that reference it, including `CHILDSUM`/`PARENT` references in related forms.

@@ -387,9 +387,10 @@ async function registerForTasks() {
   if (!u || !email || registered === u.uid + (cadenceOn() ? '+' : '')) return;
   registered = u.uid + (cadenceOn() ? '+' : '');
   const name = store.me?.displayName || u.displayName || email.split('@')[0];
+  // the profile keeps the address exactly as signed in (the rules check that); Cadence's directory is lowercase
   try { await setDoc(doc(db, 'profiles', u.uid), { email: u.email }, { merge: true }); } catch (e) { /* rules not updated yet */ }
   if (cadenceOn() && u.emailVerified !== false) {
-    try { await setDoc(doc(db, 'people', u.email), { uid: u.uid, name: String(name).slice(0, 200) }); } catch (e) { console.warn('[formwright] people directory', e?.code || e); }
+    try { await setDoc(doc(db, 'people', email), { uid: u.uid, name: String(name).slice(0, 200) }); } catch (e) { console.warn('[formwright] people directory', e?.code || e); }
   }
 }
 
@@ -404,6 +405,7 @@ export async function loadCadenceItems() {
 const peopleSeen = new Map(); // email → uid ('' when they can't be assigned)
 /** Who Cadence lets me assign: for each email, the uid in Cadence's people directory, or ''. */
 export async function assignableUids(emails) {
+  emails = emails.map((e) => String(e || '').trim().toLowerCase());
   await Promise.all([...new Set(emails.filter(Boolean))].filter((e) => !peopleSeen.has(e)).map(async (e) => {
     try { const s = await getDoc(doc(db, 'people', e)); peopleSeen.set(e, s.exists() ? String(s.data().uid || '') : ''); } catch (err) { peopleSeen.set(e, ''); }
   }));

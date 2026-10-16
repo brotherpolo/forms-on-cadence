@@ -2,7 +2,7 @@
 // It reads and writes the same task documents Cadence does (tasks.js builds them; Cadence's security
 // rules check every write), so a task added here shows in Cadence at once, and the other way round.
 import { esc, colorOf } from './ui.js';
-import { cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES } from './tasks.js';
+import { normEmail, cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES } from './tasks.js';
 import { loadCadenceItems, assignableUids, writeTasks, updateTask, deleteTask } from './store.js';
 
 let H = null;   // { store, recById, formById, recTitle, toast, cadenceUrl, tasks() }
@@ -19,7 +19,7 @@ export function initTaskModal(helpers) {
 export const isOpen = () => !!M;
 
 const uid = (p) => p + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const me = () => { const u = H.store.user || {}; return { uid: u.uid, name: H.store.me?.displayName || u.displayName || (u.email || '').split('@')[0], email: u.email || '' }; };
+const me = () => { const u = H.store.user || {}; return { uid: u.uid, name: H.store.me?.displayName || u.displayName || (u.email || '').split('@')[0], email: normEmail(u.email) }; };
 const root = () => {
   let r = document.getElementById('tk-root');
   if (!r) { r = document.createElement('div'); r.id = 'tk-root'; document.body.appendChild(r); }
@@ -29,8 +29,8 @@ const root = () => {
 /** Everyone in Formwright who could be given a task, with whether Cadence lets them be. */
 async function people() {
   const byUid = new Map();
-  Object.entries(H.store.profiles || {}).forEach(([id, p]) => { if (p && !p.removed && p.email) byUid.set(id, { uid: id, name: p.displayName || p.email, email: String(p.email) }); });
-  (H.store.users || []).forEach((u) => { if (u.email && !byUid.has(u.id)) byUid.set(u.id, { uid: u.id, name: H.store.profiles?.[u.id]?.displayName || u.displayName || u.email, email: u.email, cadence: u.role === 'admin' || u.cadence === true }); else if (byUid.has(u.id)) byUid.get(u.id).cadence = u.role === 'admin' || u.cadence === true; });
+  Object.entries(H.store.profiles || {}).forEach(([id, p]) => { if (p && !p.removed && p.email) byUid.set(id, { uid: id, name: p.displayName || p.email, email: normEmail(p.email) }); });
+  (H.store.users || []).forEach((u) => { if (u.email && !byUid.has(u.id)) byUid.set(u.id, { uid: u.id, name: H.store.profiles?.[u.id]?.displayName || u.displayName || u.email, email: normEmail(u.email), cadence: u.role === 'admin' || u.cadence === true }); else if (byUid.has(u.id)) byUid.get(u.id).cadence = u.role === 'admin' || u.cadence === true; });
   const list = [...byUid.values()];
   const ok = await assignableUids(list.map((p) => p.email));
   list.forEach((p) => { p.ok = ok.get(p.email) === p.uid; });
@@ -51,7 +51,7 @@ export async function open(recordId, taskId = null) {
     levels: task.levelId ? [{ id: task.levelId, ...(task.levelSnap || { name: 'Their priority', color: '#8C94A6' }) }] : [],
   };
   M.nodes = mine ? mapNodes(items.map) : [];
-  const cur = task?.assigneeId ? { uid: task.assigneeId, name: task.assigneeName || task.assigneeEmail || 'Someone', email: task.assigneeEmail || '' } : null;
+  const cur = task?.assigneeId ? { uid: task.assigneeId, name: task.assigneeName || task.assigneeEmail || 'Someone', email: normEmail(task.assigneeEmail) } : null;
   M.people = mine ? assignChoices(ppl, me(), cur) : [];
   M.draft = task ? {
     title: task.title || '', notes: task.notes || '', due: task.due || '', time: task.time || '', repeat: task.repeat || 'none',
@@ -165,7 +165,7 @@ async function save() {
   } catch (e) {
     console.error('[formwright] task', e);
     M.busy = false;
-    M.err = e?.code === 'permission-denied' ? 'Cadence didn’t allow that. You may not have Cadence switched on, or the person you picked can’t be given tasks yet.' : 'Saving didn’t work. Check your connection and try again.';
+    M.err = e?.code === 'permission-denied' ? 'Cadence didn’t allow that. You may not have Cadence switched on, or the person you picked can’t be given tasks yet. If you use Brave or an ad blocker, turn it off for this site (Brave: the lion icon → Shields down) and try again.' : 'Saving didn’t work. Check your connection and try again.';
     paint();
   }
 }

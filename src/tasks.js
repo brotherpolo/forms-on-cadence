@@ -147,6 +147,9 @@ const snapOf = (x, keys) => (x ? Object.fromEntries(keys.map((k) => [k, x[k] ?? 
  * draft: { title, notes, due, time, repeat, typeId, levelId, nodeId, subtasks: [{ id, title, done }] };
  * link: { recordId, formId, recordSnap }; lists: from cadenceLists (for the assignee's copy of the names).
  */
+/** An email as Cadence keeps it: trimmed and lowercase (its people directory and rules compare that way). */
+export const normEmail = (e) => String(e || '').trim().toLowerCase();
+
 export function newTaskDoc(id, draft, me, who, link, lists, now) {
   const assigned = who && who.uid && who.uid !== me.uid;
   const t = {
