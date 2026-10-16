@@ -11,7 +11,7 @@
 // }
 // imgs: Map(key → { bytes: Uint8Array, type: 'png'|'jpg' })
 
-import { safeText, wrapText, planTable, fieldRows, fitBox } from './pdfdoc.js';
+import { safeText, wrapText, planTable, fieldRows, fitBox, layoutRich } from './pdfdoc.js';
 
 const M = 54, BOTTOM = M + 30, GUTTER = 24; // ¾-inch margins
 const PORTRAIT = [612, 792], LANDSCAPE = [792, 612]; // US Letter
@@ -34,6 +34,8 @@ export async function drawPdf(L, model, imgs = new Map()) {
   const F = await pdf.embedFont(StandardFonts.Helvetica);
   const B = await pdf.embedFont(StandardFonts.HelveticaBold);
   const I = await pdf.embedFont(StandardFonts.HelveticaOblique);
+  const BI = await pdf.embedFont(StandardFonts.HelveticaBoldOblique);
+  const FONT = { r: F, b: B, i: I, bi: BI };
   const chars = new Set(F.getCharacterSet());
   const T = (s) => safeText(s, (cp) => chars.has(cp));
 
@@ -166,6 +168,26 @@ export async function drawPdf(L, model, imgs = new Map()) {
     if (it.kind === 'color' && it.hex) {
       return { h: labH + VALH, draw: (x, top) => { drawLab(x, top); page.drawRectangle({ x, y: top - labH - 11, width: 11, height: 11, color: hexRgb(rgb, it.hex, MUTE), borderColor: RULE, borderWidth: 0.5 }); text(T(it.text), x + 16, top - labH - 10, F, VAL, INK); } };
     }
+    if (it.kind === 'long' && it.rich) {
+      const blocks = it.rich.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r, s: T(r.s) })) }));
+      const rl = layoutRich(blocks, w, (k, size, s) => FONT[k].widthOfTextAtSize(s, size), { size: VAL, lh: VALH });
+      const LINK = rgb(0.2, 0.27, 0.78);
+      const drawLine = (ln, x, top) => {
+        const bl = top - ln.base;
+        if (ln.bar) page.drawRectangle({ x: x + 1, y: top - ln.barH, width: 2, height: ln.barH, color: RULE });
+        if (ln.prefix) text(ln.prefix.s, x + 2, bl, F, ln.prefix.size, INK);
+        ln.items.forEach((t) => {
+          const f = FONT[t.font], tw = f.widthOfTextAtSize(t.s, t.size);
+          const col = t.c ? hexRgb(rgb, t.c, INK) : t.a ? LINK : t.mute ? MUTE : INK;
+          if (t.hl) page.drawRectangle({ x: x + t.x, y: bl - t.size * 0.24, width: tw, height: t.size * 1.12, color: hexRgb(rgb, t.hl, FAINT) });
+          text(t.s, x + t.x, bl, f, t.size, col);
+          if (t.u) page.drawLine({ start: { x: x + t.x, y: bl - 1.3 }, end: { x: x + t.x + tw, y: bl - 1.3 }, thickness: 0.6, color: col });
+          if (t.st) page.drawLine({ start: { x: x + t.x, y: bl + t.size * 0.3 }, end: { x: x + t.x + tw, y: bl + t.size * 0.3 }, thickness: 0.6, color: col });
+        });
+      };
+      const h = rl.reduce((a, l) => a + l.h, 0);
+      return { h: labH + h, rich: rl, drawLine, labH, drawLab, draw: (x, top) => { drawLab(x, top); let yy = top - labH; rl.forEach((ln) => { drawLine(ln, x, yy); yy -= ln.h; }); } };
+    }
     let val = T(it.text);
     let font = F;
     if ((it.kind === 'image' || it.kind === 'signature') && !pic && it.text) { val = it.kind === 'signature' ? 'Signed (the signature couldn’t be included)' : T(it.text) + ' (the photo couldn’t be included)'; font = I; }
@@ -179,6 +201,16 @@ export async function drawPdf(L, model, imgs = new Map()) {
     const w = row.cells.length === 2 || row.cells[0].width === 'half' ? halfW : CW;
     const cs = row.cells.map((it) => cell(it, w));
     const h = Math.max(...cs.map((c) => c.h));
+    if (cs.length === 1 && cs[0].rich && h > room()) {
+      // formatted long text: the same, line by line
+      const c = cs[0];
+      ensure(c.labH + VALH * 2);
+      c.drawLab(M, y);
+      y -= c.labH;
+      c.rich.forEach((ln) => { if (ln.h > room()) newPage(); c.drawLine(ln, M, y); y -= ln.h; });
+      y -= ROWGAP;
+      return;
+    }
     if (cs.length === 1 && cs[0].lines && h > room()) {
       // long text: flow it across pages, keeping the label with its first lines
       const c = cs[0];

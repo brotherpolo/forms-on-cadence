@@ -117,3 +117,12 @@ test('system names: written, read, and followed by calculations', () => {
   assert.match(textToFields('Name: text, system name "{x}"', { forms }).errors[0].msg, /can’t have/);
   assert.deepEqual(changeLines(fieldChanges([{ id: 'a', type: 'text', label: 'Name' }], [{ id: 'a', type: 'text', label: 'Name', sysName: 'Client name' }])), ['Settings changed: Name']);
 });
+
+test('long text: plain turns formatting off', () => {
+  assert.equal(fieldLine({ id: 'n', type: 'textarea', label: 'Notes', width: 'full', plain: true }), 'Notes: long text, plain  @n');
+  assert.equal(fieldLine({ id: 'n', type: 'textarea', label: 'Notes', width: 'full' }), 'Notes: long text  @n');
+  const r = textToFields('Notes: long text, plain  @n\nBrief: long text  @b', { fields: [{ id: 'n', type: 'textarea', label: 'Notes', width: 'full' }, { id: 'b', type: 'textarea', label: 'Brief', width: 'full', plain: true }], forms });
+  assert.deepEqual([r.errors, r.fields[0].plain, r.fields[1].plain], [[], true, undefined]);
+  assert.match(textToFields('Name: text, plain', { forms }).errors[0].msg, /doesn’t apply/);
+  assert.deepEqual(changeLines(fieldChanges([{ id: 'n', type: 'textarea', label: 'Notes' }], [{ id: 'n', type: 'textarea', label: 'Notes', plain: true }])), ['Settings changed: Notes']);
+});

@@ -16,6 +16,9 @@ export function copyValues(form, values, { titleId = null, suffix = ' (copy)' } 
     if (v === undefined || v === null || v === '') return;
     out[f.id] = JSON.parse(JSON.stringify(v));
   });
+  // formatting of copied long text comes too (it only shows while its words match)
+  const rich = values?._rich;
+  if (rich && typeof rich === 'object') { const r = {}; Object.keys(rich).forEach((k) => { if (out[k] !== undefined) r[k] = rich[k]; }); if (Object.keys(r).length) out._rich = r; }
   const tf = (form?.fields || []).find((f) => f.id === titleId);
   if (suffix && tf && tf.type === 'text' && typeof out[tf.id] === 'string' && out[tf.id].trim() && !out[tf.id].endsWith(suffix.trim())) out[tf.id] += suffix;
   return out;

@@ -61,6 +61,8 @@ src/
   access.js                Permission model (pure; mirrored by the rules)
   formulas.js              Formula parser and evaluator (no eval)
   formtext.js              Fields as text, change summaries, version files (pure, unit-tested)
+  richtext.js              Formatted long text: clean, convert, plain text (pure, unit-tested)
+  richui.js                The formatted long text editor and its toolbar
   formtextcolor.js         Text view colours, line problems and sections (pure, unit-tested)
   fieldnames.js            Captions and system names: lookups, shared captions (pure, unit-tested)
   formver.js               Fields → Text view, History tab, drafts, Make active
@@ -281,6 +283,14 @@ A view only decides how the list looks. It never shows anyone records they could
 - **Server code from Formwright:** the functions use `fwkit.cjs`, a bundle of `src/server/`, `formulas.js`, `rules.js`, `pdfdoc.js`/`pdfdraw.js` and `emaillogic.js`, plus `functions/vendor/pdf-lib.min.js`. After changing those, run `node scripts/build-fwkit.mjs ../cadence/functions/fwkit.cjs` and deploy the functions.
 
 **Email PDF** also has an **Attach the PDF** switch (on by default); off sends just the message.
+
+## Formatted long text
+
+Long text fields have a formatting toolbar that floats above the field while you're in it (gone while reading): Normal text / Heading / Subheading, bold, italic, underline, strikethrough, text colour and highlight, bulleted and numbered lists, quote, link (Ctrl+K) and clear formatting. Typing shortcuts: `# ` heading, `## ` subheading, `- ` or `* ` bullets, `1. ` numbers, `> ` quote, `**bold**`, `*italic*` or `_italic_`. Pasted text keeps only what the toolbar can do.
+- **Stored as two parts:** `values[fieldId]` stays plain text (bullets as •, numbers as 1.), so lists, search, exports, imports, calculations and email placeholders are unchanged; the formatting is cleaned HTML in `values._rich[fieldId]`, only when there is some. The formatting only shows while its words match the plain text, so anything that changes the text without the editor (an import, an automation, a rule) makes it fall away instead of showing stale words.
+- `src/richtext.js` reads, cleans and converts it (pure, unit-tested; also in the server kit). `src/richui.js` is the editor. `src/pdfdoc.js` `layoutRich` lays it out for PDFs (headings, bold/italic, colours, highlights, lists, quotes, links underlined).
+- **Allow formatting** (field settings) or `plain` in Text view turns it off for a field: an ordinary text box.
+- The audit trail notes "Notes (formatting): changed" when only the formatting changed.
 
 ## Captions and system names
 

@@ -45,7 +45,7 @@ const WORD_TYPE = new Map();
 TYPE_WORDS.forEach(([k, w, more]) => [w, ...more, k].forEach((x) => WORD_TYPE.set(x, k)));
 /** Every word Text view takes as a type, and every setting word (for colouring as you type). */
 export const TYPE_WORDS_ALL = [...WORD_TYPE.keys()];
-export const SETTING_WORDS = ['required', 'half', 'full', 'in list', 'help', 'placeholder', 'system name', 'min', 'max', 'step', 'stars', 'decimals', 'digits', 'start', 'prefix', 'yearly', 'suffix', 'currency', 'as'];
+export const SETTING_WORDS = ['required', 'half', 'full', 'in list', 'help', 'placeholder', 'system name', 'min', 'max', 'step', 'stars', 'decimals', 'digits', 'start', 'prefix', 'yearly', 'suffix', 'currency', 'as', 'plain'];
 export const TYPE_LIST = TYPE_WORDS.filter(([k]) => k !== 'relation').map(([, w]) => w).concat(['link to <form name>']);
 
 const CHOICE = new Set(['select', 'radio', 'multiselect']);
@@ -72,6 +72,7 @@ export function fieldLine(f, { formName = () => '', withId = true } = {}) {
   if (f.required && f.type !== 'formula' && f.type !== 'autonumber') o.push('required');
   if (widthOf(f) !== defaultWidth(f.type)) o.push(widthOf(f));
   if (f.inList) o.push('in list');
+  if (f.type === 'textarea' && f.plain) o.push('plain');
   if (f.placeholder) o.push('placeholder ' + quote(f.placeholder));
   if (f.type === 'rating') { if ((f.max ?? 5) !== 5) o.push('stars ' + numOut(f.max)); }
   else if (f.type === 'range') {
@@ -246,7 +247,7 @@ export function textToFields(text, ctx = {}) {
       if (!f.id) f.id = id || newId();
       const wasType = prev?.type;
       Object.assign(f, { type, label, required: false, width: defaultWidth(type), inList: false, help: '' });
-      for (const k of ['placeholder', 'min', 'max', 'step', 'suffix', 'sysName']) delete f[k];
+      for (const k of ['placeholder', 'min', 'max', 'step', 'suffix', 'sysName', 'plain']) delete f[k];
       if (type === 'decimal') f.decimals = 2; else if (type !== 'formula') delete f.decimals;
       if (type === 'currency') f.currency = 'CAD'; else if (type !== 'formula') delete f.currency;
       if (type === 'rating') f.max = 5;
@@ -267,6 +268,7 @@ export function textToFields(text, ctx = {}) {
           case 'required': if (type === 'formula' || type === 'autonumber') throw new Error(`A ${TYPE_NAME[type]} field fills itself in, so it can’t be required.`); f.required = true; break;
           case 'half': case 'full': f.width = key; break;
           case 'in list': f.inList = true; break;
+          case 'plain': only(['textarea'], 'it turns off formatting on a long text field'); f.plain = true; break;
           case 'help': f.help = unquote(val); break;
           case 'placeholder': f.placeholder = unquote(val); break;
           case 'min': only(['number', 'decimal', 'currency', 'percent', 'range']); f.min = num('min', val); break;
@@ -286,7 +288,7 @@ export function textToFields(text, ctx = {}) {
             if (!FORMATS.includes(fm)) throw new Error(`“as ${val}” isn’t a way to show a result. Use one of: ${FORMATS.join(', ')}.`);
             f.format = fm; if (fm === 'currency' && !f.currency) f.currency = 'CAD'; break;
           }
-          default: throw new Error(`“${p}” isn’t understood. You can use: required, half, full, in list, help "…", placeholder "…", system name "…", min, max${type === 'formula' ? ', as currency' : ''}${type === 'autonumber' ? ', prefix, start, digits, yearly' : ''}.`);
+          default: throw new Error(`“${p}” isn’t understood. You can use: required, half, full, in list, help "…", placeholder "…", system name "…", min, max${type === 'textarea' ? ', plain' : ''}${type === 'formula' ? ', as currency' : ''}${type === 'autonumber' ? ', prefix, start, digits, yearly' : ''}.`);
         }
       }
       out.push(f);
@@ -327,14 +329,14 @@ function lisLength(arr) {
   arr.forEach((x) => { let lo = 0, hi = t.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] < x) lo = mid + 1; else hi = mid; } t[lo] = x; });
   return t.length;
 }
-const SAY = ['type', 'label', 'sysName', 'required', 'width', 'inList', 'help', 'placeholder', 'options', 'min', 'max', 'step', 'decimals', 'currency', 'suffix', 'prefix', 'start', 'digits', 'year', 'expr', 'format', 'relForm'];
+const SAY = ['type', 'label', 'sysName', 'plain', 'required', 'width', 'inList', 'help', 'placeholder', 'options', 'min', 'max', 'step', 'decimals', 'currency', 'suffix', 'prefix', 'start', 'digits', 'year', 'expr', 'format', 'relForm'];
 const DEFAULTS = {
   decimal: { decimals: 2 }, currency: { currency: 'CAD' }, rating: { max: 5 }, range: { min: 0, max: 100, step: 1 },
   autonumber: { prefix: '', start: 1, digits: 1 }, formula: { format: 'decimal', decimals: 2 },
 };
 const norm = (f, k) => {
   if (k === 'width') return widthOf(f);
-  if (k === 'required' || k === 'inList' || k === 'year') return !!f[k];
+  if (k === 'required' || k === 'inList' || k === 'year' || k === 'plain') return !!f[k];
   const v = f[k] ?? DEFAULTS[f.type]?.[k] ?? '';
   return k === 'currency' && v ? String(v).toUpperCase() : v;
 };

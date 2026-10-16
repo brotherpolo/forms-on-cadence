@@ -18,14 +18,14 @@ const fsize = (n) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) 
 /**
  * One field as a printable item. `text` is the value as the app shows it (fmt), '' when empty.
  *   heading   { kind, label, help }
- *   text/long { kind, label, width, text }
+ *   text/long { kind, label, width, text, rich? }   rich: richtext.js blocks, when the long text is formatted
  *   image     { kind, label, width, src: {path,url}|dataURL, name, text }
  *   signature { kind, label, width, src: dataURL, text }
  *   file      { kind, label, width, text: 'name · size' }
  *   rating    { kind, label, width, n, max, text }
  *   color     { kind, label, width, hex, text }
  */
-export function fieldItem(f, v, text) {
+export function fieldItem(f, v, text, rich = null) {
   const kind = fieldKind(f.type);
   const width = f.width === 'half' && kind !== 'long' ? 'half' : 'full';
   const empty = v == null || v === '' || (Array.isArray(v) && !v.length);
@@ -46,7 +46,7 @@ export function fieldItem(f, v, text) {
     case 'color':
       return { ...base, hex: /^#[0-9a-f]{6}$/i.test(String(v)) ? String(v) : '', text: String(v) };
     default:
-      return base;
+      return kind === 'long' && rich && rich.length ? { ...base, rich } : base;
   }
 }
 
@@ -245,4 +245,59 @@ export function planTable(cols, rows, measure, { spaces, sizes = [9.5, 8.5, 7.5,
   const sp = spaces[spaces.length - 1], size = sizes[sizes.length - 1];
   const widths = colWidths(cols.map((c) => ({ label: c.label })), rows, (t, b) => measure(size, b)(t), sp.avail, { min: 30, cap, pad });
   return { size, widths, landscape: !!sp.landscape, broken: true };
+}
+
+/**
+ * Lay formatted long text out in lines (richtext.js blocks). measure(fontKey, size, str) → width,
+ * fontKey being 'r', 'b', 'i' or 'bi'. Returns [{ h, base, items: [{ s, x, font, size, c, h, u, x2, a }], bar }]:
+ * h is the line's height, base the baseline's distance from its top, x from the text's left.
+ */
+export function layoutRich(blocks, width, measure, { size = 10.5, lh = 14 } = {}) {
+  const STY = { p: { size, lh, b: false, gap: 4 }, h3: { size: size * 1.3, lh: lh * 1.3, b: true, gap: 4, before: 4 }, h4: { size: size * 1.08, lh: lh * 1.08, b: true, gap: 3, before: 2 }, quote: { size, lh, b: false, gap: 4, indent: 11, mute: true }, li: { size, lh, b: false, gap: 2, indent: 15 } };
+  const out = [];
+  (blocks || []).forEach((bk, bi) => {
+    const st = STY[bk.t] || STY.p;
+    const indent = st.indent || 0, avail = Math.max(20, width - indent);
+    const next = blocks[bi + 1];
+    const gap = !next ? 0 : bk.t === 'li' && next.t === 'li' ? st.gap : (STY[bk.t] || STY.p).gap + 1;
+    const lines = [];
+    let line = { items: [], w: 0 };
+    const push = () => { lines.push(line); line = { items: [], w: 0 }; };
+    const fk = (r) => ((r.b || st.b) && r.i ? 'bi' : (r.b || st.b) ? 'b' : r.i ? 'i' : 'r');
+    const put = (s, r) => {
+      const font = fk(r), w = measure(font, st.size, s);
+      const last = line.items[line.items.length - 1];
+      const same = last && last.font === font && last.c === r.c && last.hl === r.h && !!last.u === !!(r.u || r.a) && !!last.st === !!r.x && last.a === r.a;
+      if (same) { last.s += s; last.w += w; } else line.items.push({ s, x: indent + line.w, w, font, size: st.size, c: r.c || '', hl: r.h || '', u: !!(r.u || r.a), st: !!r.x, a: r.a || '', mute: !!st.mute });
+      line.w += w;
+    };
+    bk.runs.forEach((r) => {
+      String(r.s).split(/(\n| +)/).forEach((tok) => {
+        if (!tok) return;
+        if (tok === '\n') { push(); return; }
+        if (/^ +$/.test(tok)) { if (line.items.length) put(tok, r); return; }
+        let w = measure(fk(r), st.size, tok);
+        if (line.w + w > avail && line.items.length) {
+          // drop trailing spaces, then start a new line
+          const l = line.items[line.items.length - 1]; const t = l.s.replace(/ +$/, ''); if (t !== l.s) { const cut = measure(l.font, st.size, l.s) - measure(l.font, st.size, t); l.s = t; l.w -= cut; line.w -= cut; if (!l.s) line.items.pop(); }
+          push();
+        }
+        let rest = tok;
+        while (w > avail && rest.length > 1) { // one word wider than the line
+          let n = rest.length - 1;
+          while (n > 1 && measure(fk(r), st.size, rest.slice(0, n)) > avail - line.w) n--;
+          put(rest.slice(0, n), r); push(); rest = rest.slice(n); w = measure(fk(r), st.size, rest);
+        }
+        put(rest, r);
+      });
+    });
+    push();
+    lines.forEach((l, i) => {
+      const first = i === 0, lastL = i === lines.length - 1;
+      const top = first && bi > 0 ? st.before || 0 : 0;
+      out.push({ h: st.lh + top + (lastL ? gap : 0), base: top + st.size * 0.82 + (st.lh - st.size) / 2, items: l.items, bar: bk.t === 'quote', barH: st.lh,
+        prefix: first && bk.t === 'li' ? { s: bk.list === 'ol' ? `${bk.n || 1}.` : '•', size: st.size } : null });
+    });
+  });
+  return out;
 }

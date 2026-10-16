@@ -10,6 +10,7 @@ import { FX } from '../formulas.js';
 import { fieldItem } from '../pdfdoc.js';
 import { evaluate, NO_RULES } from '../rules.js';
 import { fieldByName } from '../fieldnames.js';
+import { richBlocks } from '../richtext.js';
 import { withStageField, stageName, STAGE_FIELD, stageView } from '../workflow.js';
 
 const POPUP = new Set(['textarea', 'file', 'image', 'signature', 'location', 'multiselect']);
@@ -142,7 +143,7 @@ export function makeKit({ forms = [], records = [], locale = 'en-CA', timeZone =
     const rs = rulesFor(form, rec), sv = stageView(form, rec.stage); // what the rules and the record's stage hide is left out
     const items = (form.fields || []).filter((f) => !rs.hiddenFields.has(f.id) && !rs.hidden.has('f:' + f.id) && !sv.hide.has(f.id) && !sv.keys.has('f:' + f.id)).map((f) => {
       const v = f.type === 'heading' || rs.cleared.has(f.id) ? null : valOf(f, rec, form);
-      const it = fieldItem(f, v, f.type === 'heading' ? '' : f.type === 'rating' ? (isEmpty(v) ? '' : `${v} of ${f.max || 5}`) : text(form, { ...rec, values: { ...rec.values, [f.id]: v } }, f));
+      const it = fieldItem(f, v, f.type === 'heading' ? '' : f.type === 'rating' ? (isEmpty(v) ? '' : `${v} of ${f.max || 5}`) : text(form, { ...rec, values: { ...rec.values, [f.id]: v } }, f), f.type === 'textarea' && v != null && !f.plain ? richBlocks(rec.values, f.id) : null);
       return it;
     });
     const sections = [];

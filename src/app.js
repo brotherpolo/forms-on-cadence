@@ -38,6 +38,8 @@ import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesi
 import { checkWorkflow } from './workflow.js';
 import { fieldByName, sysOf, uniqueSysNames, shownName } from './fieldnames.js';
 import * as fv from './formver.js';
+import { richEditorHTML, richViewHTML, initRichUI } from './richui.js';
+import { fromEditor, richBlocks, RICH_KEY } from './richtext.js';
 import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageName, stageView, withStageField, canWork, assigneeFor, movesOf, missingToMove, waited, stageDue, dueState, dayKey } from './workflow.js';
 import { initRules, viewRules, rulesClick, rulesChange, rulesInput, rulesListHTML, parentUse, rulesCtx } from './rulesui.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
@@ -939,7 +941,7 @@ function pdfText(f,v){if(f.type==='rating')return isEmpty(v)?'':`${v} of ${f.max
 const pdfNum=f=>(NUMERIC.has(f.type)||f.type==='formula')&&f.type!=='rating';
 function pdfModel(form,rec){
   const rs=withStage(rulesOf(form,rec,rec.parentId?recById(rec.parentId):null),form,rec.stage); // what the rules and the stage hide is left out
-  const items=(form.fields||[]).filter(f=>!rs.hiddenFields.has(f.id)&&!rs.hidden.has('f:'+f.id)).map(f=>{const v=f.type==='heading'||rs.cleared.has(f.id)?null:valOf(f,rec,form);return fieldItem(f,v,f.type==='heading'?'':pdfText(f,v));});
+  const items=(form.fields||[]).filter(f=>!rs.hiddenFields.has(f.id)&&!rs.hidden.has('f:'+f.id)).map(f=>{const v=f.type==='heading'||rs.cleared.has(f.id)?null:valOf(f,rec,form);return fieldItem(f,v,f.type==='heading'?'':pdfText(f,v),v==null||f.plain?null:richBlocks(rec.values,f.id));});
   const sections=[];
   const grels=gridRels(form),gmap=Object.fromEntries(grels.map(g=>[g.cf.id,g]));
   const kids=Object.fromEntries((form.children||[]).filter(c=>c.display!=='grid').map(c=>formById(c.formId)).filter(cf=>cf&&canViewForm(store.me,cf.id)).map(cf=>[cf.id,cf]));
@@ -1265,7 +1267,7 @@ function control(f,v,id,scope){
     case 'autonumber':return autoControl(f,scope);
     case 'formula':{const d=draftFor(scope);const form=d?formOfDraft(d):null;const r=form?calc(form,f,d===cdraft?rowRec(cdraft._row,form,rdraft):draftRec(d)):{e:''};return `<div class="calc${r.e?' bad':''}" id="calc-${scope}-${f.id}" aria-live="polite">${esc(r.e||fmtCalc(f,r.v)||'—')}</div><span class="fxsrc">= ${esc(f.expr||'')}</span>`;}
     case 'text':return `<input class="in" type="text" ${a} value="${val}"${ph}>`;
-    case 'textarea':return `<textarea class="in" ${a}${ph}>${val}</textarea>`;
+    case 'textarea':{if(f.plain)return `<textarea class="in" ${a}${ph}>${val}</textarea>`;const d=draftFor(scope);const vals=v==null?{}:d?.values||{[f.id]:v};return d?.readOnly?richViewHTML(vals,f.id,id):richEditorHTML(f,vals,id,f.placeholder||'');}
     case 'email':return `<input class="in" type="email" inputmode="email" autocomplete="email" ${a} value="${val}"${ph||' placeholder="name@example.com"'}>`;
     case 'phone':return `<input class="in" type="tel" inputmode="tel" autocomplete="tel" ${a} value="${val}"${ph||' placeholder="+1 555 555 0100"'}>`;
     case 'url':return `<input class="in" type="url" inputmode="url" ${a} value="${val}"${ph||' placeholder="https://"'}>`;
@@ -1402,6 +1404,7 @@ function setVal(t){
   else if(t.dataset.part){v={...(d.values[f.id]||{})};v[t.dataset.part]=t.dataset.part==='address'?t.value:(t.value===''?null:Number(t.value));const a=document.getElementById('map-'+t.closest('.fld').querySelector('[data-part=address]').id);if(a){const u=mapUrl(v);a.href=u;a.hidden=!u;}}
   else if(NUMERIC.has(f.type)){v=t.value===''?null:Number(t.value);if(f.type==='range'){const o=document.getElementById('out-'+t.id);if(o)o.textContent=t.value+(f.suffix||'');}}
   else if(f.type==='color'){v=t.value;const o=document.getElementById('out-'+t.id);if(o)o.textContent=v;}
+  else if('rich' in t.dataset){const r=fromEditor(t.innerHTML);v=r.text;const rich={...(d.values[RICH_KEY]||{})};if(r.html)rich[f.id]=r.html;else delete rich[f.id];if(Object.keys(rich).length)d.values[RICH_KEY]=rich;else delete d.values[RICH_KEY];}
   else v=t.value;
   d.values[f.id]=v;
   if(d.errors?.[f.id]){delete d.errors[f.id];const fb=t.closest('.fld');fb?.classList.remove('bad');fb?.querySelector('.err')?.remove();}
@@ -1771,7 +1774,7 @@ function fieldEditor(x){
   if(x.type==='rating')h+=P('Number of stars',num('max',x.max));
   if(x.type==='autonumber')h+=autoEditor(x,P,inp,num,sw);
   if(x.type==='relation')h+=P('Links to form',`<select class="in" data-prop="relForm"><option value="">Choose a form…</option>${[...store.forms].sort(byOrder).map(o=>`<option value="${o.id}"${o.id===x.relForm?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`);
-  if(x.type!=='heading')h+=`<div class="props-sw">${x.type==='formula'||x.type==='autonumber'?'':sw('required','Required')}${NOLIST.has(x.type)?'':sw('inList','Column in the starting list')}<label class="switch"><input type="checkbox" data-prop="width" data-kind="half"${x.width==='half'?' checked':''}><span class="tr"></span><span>Half width on wide screens</span></label></div>`;
+  if(x.type!=='heading')h+=`<div class="props-sw">${x.type==='formula'||x.type==='autonumber'?'':sw('required','Required')}${NOLIST.has(x.type)?'':sw('inList','Column in the starting list')}${x.type==='textarea'?`<label class="switch"><input type="checkbox" data-prop="plain" data-kind="neg"${x.plain?'':' checked'}><span class="tr"></span><span>Allow formatting</span></label>`:''}<label class="switch"><input type="checkbox" data-prop="width" data-kind="half"${x.width==='half'?' checked':''}><span class="tr"></span><span>Half width on wide screens</span></label></div>`;
   h+=`<div class="prop full"><span class="keyline">Field ID ${esc(x.id)}</span></div>`;
   return `<div class="fedit">${h}</div>`;
 }
@@ -2211,7 +2214,7 @@ document.addEventListener('change',async e=>{
   if(t.dataset.fprop==='titleField'){setFdirty();renderMain();return;}
   if(t.dataset.prop){
     const f=fdraft.fields.find(x=>x.id===t.closest('[data-feid]').dataset.feid);const p=t.dataset.prop,k=t.dataset.kind;
-    if(k==='bool')f[p]=t.checked;else if(k==='half')f.width=t.checked?'half':'full';
+    if(k==='bool')f[p]=t.checked;else if(k==='neg'){if(t.checked)delete f[p];else f[p]=true;}else if(k==='half')f.width=t.checked?'half':'full';
     else if(p==='type'){const nf=newField(t.value);Object.assign(f,{type:t.value},Object.fromEntries(Object.entries(nf).filter(([key])=>!['id','label','required','inList','help','width'].includes(key)&&f[key]==null)));if(NOLIST.has(f.type))f.inList=false;}
     else if(t.tagName==='SELECT')f[p]=t.value;
     setFdirty();
@@ -2436,6 +2439,7 @@ export function startApp(){
   initLists({ruleImpact,applyRuleChange,fmt,valOf,recTitle,titleFieldOf,parentsOf,formById,recById,recordsOf,renderMain,withFormulas,search:()=>ui.search});
   initAudit({fmt,formById,recById,recTitle:(r,f)=>recTitle(r,f),go,renderMain});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
+  initRichUI();
   fv.initFormVer({fdraft:()=>fdraft,setFdraft:f=>{fdraft=f;pdraft=null;},setFdirty,renderMain,saveForm,formById,recordsOf,isEmpty,toast,when,forms:()=>store.forms,newId:()=>uid('x'),me:()=>store.user?.uid,personName:id=>realName(id),closeField:()=>{ui.openField=null;}});
   initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
   initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});
