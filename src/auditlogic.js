@@ -13,6 +13,7 @@ export const KINDS = [
   { key: 'commentdeleted', label: 'Comments deleted', q: ['kind', 'commentdeleted'], test: (e) => e.kind === 'commentdeleted' },
   { key: 'reassigned', label: 'Tasks reassigned', q: ['kind', 'reassigned'], test: (e) => e.kind === 'reassigned' },
   { key: 'taskdone', label: 'Tasks completed', q: ['kind', 'taskdone'], test: (e) => e.kind === 'taskdone' },
+  { key: 'overdue', label: 'Overdue emails', q: ['kind', 'overdue'], test: (e) => e.kind === 'overdue' },
   { key: 'form', label: 'Form designs', q: ['area', 'form'], test: (e) => e.area === 'form' },
   { key: 'group', label: 'Security groups', q: ['area', 'group'], test: (e) => e.area === 'group' },
   { key: 'user', label: 'Users', q: ['area', 'user'], test: (e) => e.area === 'user' },
@@ -53,7 +54,7 @@ export function verb(e) {
   const v = {
     created: e.area === 'user' ? 'signed in for the first time:' : 'created',
     changed: 'changed', deleted: 'deleted', restored: 'restored', moved: 'moved', owner: 'gave to someone else',
-    emailed: 'emailed the PDF of', emaildeleted: 'deleted sent emails of', commentdeleted: 'deleted a comment on', reassigned: 'reassigned a task on', taskdone: 'completed a task on', removed: 'removed', numbered: 'numbered the records of',
+    emailed: 'emailed the PDF of', emaildeleted: 'deleted sent emails of', commentdeleted: 'deleted a comment on', reassigned: 'reassigned a task on', taskdone: 'completed a task on', overdue: 'sent an overdue email about', removed: 'removed', numbered: 'numbered the records of',
   }[e.kind];
   return v || e.kind || 'changed';
 }

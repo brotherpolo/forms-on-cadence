@@ -40,11 +40,23 @@ function stageCard(f, s, i, n) {
       ${a.type === 'role' ? `<select class="in am-sel" ${at} data-wfd="arole"><option value="">Pick a role…</option>${H.roles().map((r) => `<option value="${esc(r.id)}"${r.id === a.role ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select>${H.roles().length ? '' : '<span class="help">No roles yet: add them in Administration → Roles.</span>'}` : ''}
       ${a.type === 'group' ? `<select class="in am-sel" ${at} data-wfd="agroup"><option value="">Pick a group…</option>${H.groups().map((g) => `<option value="${esc(g.id)}"${g.id === a.group ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select>` : ''}</div>
     <div class="am-row"><label class="wf-due"><span class="am-lab">Due within</span><input class="in wf-duein" type="number" min="0" max="365" step="1" inputmode="numeric" ${at} data-wfd="due" value="${esc(s.dueDays ?? '')}" placeholder="–" aria-label="Due within how many working days"><span class="help">working days of arriving (Monday to Friday). Empty: no due date.</span></label></div>
+    ${s.dueDays != null && s.dueDays !== '' ? overdueRows(s, at) : ''}
     <div class="am-row"><label class="switch"><input type="checkbox" ${at} data-wfd="ntask"${s.notify?.task ? ' checked' : ''}><span class="tr"></span><span>Create a Cadence task for them</span></label>
       <label class="switch"><input type="checkbox" ${at} data-wfd="nemail"${s.notify?.email ? ' checked' : ''}><span class="tr"></span><span>Email them</span></label></div>
     <div class="wf-mvs"><span class="am-lab">Buttons</span>${moves || '<p class="help">No buttons: records stop here (the last stage), unless an administrator moves them.</p>'}
       <button type="button" class="btn sm ghost" ${at} data-wfa="madd">+ Button</button></div>
   </article>`;
+}
+
+/** When it's overdue: a reminder to whoever has it, then telling someone else. */
+function overdueRows(s, at) {
+  const od = s.overdue || {}, esc_ = od.escalateDays != null, to = od.escalateTo || { type: 'admins' };
+  return `<div class="am-row wf-od"><label class="switch"><input type="checkbox" ${at} data-wfd="odremind"${od.remind ? ' checked' : ''}><span class="tr"></span><span>When it’s overdue, email whoever has it (the morning after the due date)</span></label></div>
+    <div class="am-row wf-od"><label class="switch"><input type="checkbox" ${at} data-wfd="odesc"${esc_ ? ' checked' : ''}><span class="tr"></span><span>If it’s still overdue</span></label>
+      ${esc_ ? `<input class="in wf-duein" type="number" min="0" max="60" step="1" inputmode="numeric" ${at} data-wfd="oddays" value="${esc(od.escalateDays)}" aria-label="Working days after the reminder"><span class="help">working days later, also tell</span>
+      <select class="in am-sel" ${at} data-wfd="odto" aria-label="Who to tell"><option value="admins"${to.type === 'admins' ? ' selected' : ''}>the administrators</option><option value="role"${to.type === 'role' ? ' selected' : ''}>a role</option><option value="person"${to.type === 'person' ? ' selected' : ''}>a person</option></select>
+      ${to.type === 'role' ? `<select class="in am-sel" ${at} data-wfd="odrole" aria-label="Which role"><option value="">Pick a role…</option>${H.roles().map((r) => `<option value="${esc(r.id)}"${r.id === to.role ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select>` : ''}
+      ${to.type === 'person' ? `<select class="in am-sel" ${at} data-wfd="odperson" aria-label="Which person"><option value="">Pick someone…</option>${H.people().map((p) => `<option value="${esc(p.id)}"${p.id === to.person ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}` : ''}</div>`;
 }
 
 function fieldTable(f) {
@@ -119,7 +131,13 @@ export function wfChange(f, el) {
     case 'aperson': s.assign = { type: 'person', person: el.value }; changed(); return true;
     case 'agroup': s.assign = { type: 'group', group: el.value }; changed(); return true;
     case 'arole': s.assign = { type: 'role', role: el.value }; changed(); return true;
-    case 'due': { const v = el.value.trim(); if (v === '') delete s.dueDays; else s.dueDays = Math.max(0, Math.min(365, Math.round(+v) || 0)); H.setFdirty(); return true; }
+    case 'due': { const v = el.value.trim(); const had = s.dueDays != null; if (v === '') delete s.dueDays; else s.dueDays = Math.max(0, Math.min(365, Math.round(+v) || 0)); if (had !== (s.dueDays != null)) changed(); else H.setFdirty(); return true; }
+    case 'odremind': s.overdue = { ...(s.overdue || {}), remind: el.checked }; changed(); return true;
+    case 'odesc': { const od = { ...(s.overdue || {}) }; if (el.checked) { od.escalateDays = od.escalateDays ?? 2; od.escalateTo = od.escalateTo || { type: 'admins' }; } else { delete od.escalateDays; delete od.escalateTo; } s.overdue = od; changed(); return true; }
+    case 'oddays': { const v = el.value.trim(); s.overdue = { ...(s.overdue || {}), escalateDays: v === '' ? 0 : Math.max(0, Math.min(60, Math.round(+v) || 0)) }; H.setFdirty(); return true; }
+    case 'odto': s.overdue = { ...(s.overdue || {}), escalateTo: { type: el.value } }; changed(); return true;
+    case 'odrole': s.overdue = { ...(s.overdue || {}), escalateTo: { type: 'role', role: el.value } }; changed(); return true;
+    case 'odperson': s.overdue = { ...(s.overdue || {}), escalateTo: { type: 'person', person: el.value } }; changed(); return true;
     case 'ntask': s.notify = { ...(s.notify || {}), task: el.checked }; changed(); return true;
     case 'nemail': s.notify = { ...(s.notify || {}), email: el.checked }; changed(); return true;
     case 'mto': { const m = s.moves?.[+el.dataset.mi]; if (m) m.to = el.value; changed(); return true; }

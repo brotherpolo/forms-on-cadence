@@ -45,6 +45,7 @@ export const store = {
   listViewsReady: false,
   imports: [], // admins: past imports, newest first
   automations: [], automationsError: null, // admins: Administration → Automations
+  dashMails: {}, // admins: scheduled dashboard emails, by dashboard id
   mentions: [], // My work → Mentions: comments where someone @mentioned you, newest first
   recordsLoading: new Set(),
   onChange: () => {},
@@ -225,6 +226,9 @@ function syncAdminSubs() {
         fail('import history')
       )
     );
+    adminUnsubs.push(onSnapshot(collection(db, 'dashMails'),
+      (s) => { store.dashMails = Object.fromEntries(s.docs.map((d) => [d.id, { ...d.data(), id: d.id }])); changed(); },
+      () => { store.dashMails = {}; })); // older security rules: no schedules yet
     adminUnsubs.push(
       onSnapshot(
         collection(db, 'automations'),
@@ -253,6 +257,7 @@ function syncAdminSubs() {
     store.users = [];
     store.imports = [];
     store.automations = [];
+    store.dashMails = {};
   }
 }
 
@@ -700,6 +705,16 @@ export async function loadVersions(formId, n = 200) {
 }
 
 /** Test run: what an automation would do to one record (nothing is changed). */
+/** Admins: a dashboard's email schedule (dashMails/{dashboardId}). */
+export async function saveDashMail(dashboardId, data) {
+  const now = Date.now();
+  await setDoc(doc(db, 'dashMails', dashboardId), plain({ ...data, dashboardId, updatedBy: store.user.uid, updatedAt: now, createdAt: data.createdAt || now }), { merge: true });
+}
+export async function deleteDashMail(dashboardId) { await deleteDoc(doc(db, 'dashMails', dashboardId)); }
+/** Admins: email a dashboard to yourself now, to see how it looks. → { to } */
+export async function testDashMail(dashboardId) {
+  return (await httpsCallable(fns(), 'dashMailTest')({ dashboardId })).data;
+}
 export async function testAutomation(automation, recordId) {
   return (await httpsCallable(fns(), 'automationTest')({ automation, recordId })).data;
 }

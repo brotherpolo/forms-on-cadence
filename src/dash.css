@@ -388,3 +388,15 @@ button.db-li:hover{background:var(--accent-soft)}
 .db-pb.db-t-bar .rp-bt,.db-pb.db-t-bar .rp-bf{height:min(26px,60%)}
 .db-pb.db-t-bar .rp-bt{height:100%;display:flex;align-items:center}
 @media (max-width:760px){.db-pb.db-t-donut,.db-pb.db-t-kpi{height:clamp(260px,62vh,420px)}}
+
+/* Email schedule (dashmailui.js) */
+.dm-dlg{max-width:560px;display:flex;flex-direction:column;gap:12px}
+.dm-dlg h2{margin:0}
+.dm-f{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;min-width:0}
+.dm-f[disabled]{opacity:.55}
+.dm-row{display:flex;flex-wrap:wrap;gap:10px}
+.dm-l{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:13px;font-weight:600}
+.dm-l>span{color:var(--muted)}
+.dm-list{display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow:auto;font-weight:400}
+.dm-warn{background:var(--warn-soft);padding:8px 10px;border-radius:8px;color:var(--fg)}
+.dm-bad{color:var(--danger)}

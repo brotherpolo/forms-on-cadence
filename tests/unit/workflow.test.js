@@ -144,3 +144,22 @@ test('roles: a stage that goes to a role must name one that exists', () => {
   assert.ok(p.some((x) => /pick which role/.test(x)));
   assert.ok(p.some((x) => /no longer exists/.test(x)));
 });
+
+test('overdue: a reminder the morning after the due date, then telling someone else', () => {
+  // arrives Mon 2026-10-12, due within 2 working days → due Wed 10-14
+  const st = { dueDays: 2, overdue: { remind: true, escalateDays: 2, escalateTo: { type: 'admins' } } };
+  assert.deepEqual(W.overdueStep(st, '2026-10-12', '2026-10-14'), { remind: false, escalate: false, due: '2026-10-14' }, 'on the due date: nothing');
+  const thu = W.overdueStep(st, '2026-10-12', '2026-10-15');
+  assert.deepEqual([thu.remind, thu.escalate, thu.escalateOn], [true, false, '2026-10-19'], 'Thursday: reminder; tell others two working days later (Monday)');
+  assert.equal(W.overdueStep(st, '2026-10-12', '2026-10-16', { remind: true }).remind, false, 'only one reminder');
+  assert.equal(W.overdueStep(st, '2026-10-12', '2026-10-19', { remind: true }).escalate, true, 'Monday: tell the administrators');
+  assert.equal(W.overdueStep(st, '2026-10-12', '2026-10-20', { remind: true, escalate: true }).escalate, false, 'only once');
+  assert.equal(W.overdueStep({ dueDays: 2 }, '2026-10-12', '2026-10-20').remind, false, 'no overdue settings: nothing');
+  assert.equal(W.overdueStep({ overdue: { remind: true } }, '2026-10-12', '2026-10-20').remind, false, 'no due date: nothing');
+  assert.equal(W.overdueStep({ dueDays: 1, overdue: { escalateDays: 0 } }, '2026-10-12', '2026-10-14').escalate, true, 'escalate the first overdue day, no reminder');
+  assert.equal(W.daysOverdue('2026-10-14', '2026-10-19'), 3, 'Thu, Fri, Mon');
+  assert.equal(W.daysOverdue('2026-10-14', '2026-10-14'), 0);
+  const f = { workflow: { on: true, stages: [{ id: 's', name: 'Pay', overdue: { remind: true } }, { id: 't', name: 'Check', dueDays: 1, overdue: { escalateDays: 2, escalateTo: { type: 'role', role: '' } } }] } };
+  const p = W.checkWorkflow(f, { roles: new Set(['r']) });
+  assert.ok(p.some((x) => /“Pay”: set “Due within”/.test(x)) && p.some((x) => /pick which role to tell/.test(x)), JSON.stringify(p));
+});

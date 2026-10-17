@@ -291,6 +291,7 @@ body.pd-on .pgrip{cursor:grabbing}
 
 .wf-due{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .wf-duein{width:76px}
+.wf-od{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:6px;padding-left:12px;border-left:2px solid var(--line)}
 .sysn{font-family:var(--mono);font-size:11px}
 
 /* Field type colours: each category its own hue, each type a shade of it (dzlogic.js sets the variables) */

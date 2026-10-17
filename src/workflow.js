@@ -124,6 +124,16 @@ export function checkWorkflow(form, { people = new Set(), groups = new Set(), ro
     if (s.assign?.type === 'role' && !s.assign.role) out.push(`${n}: pick which role.`);
     if (s.assign?.type === 'role' && s.assign.role && roles.size && !roles.has(s.assign.role)) out.push(`${n}: that role no longer exists.`);
     if (s.dueDays != null && s.dueDays !== '' && !(Number.isInteger(+s.dueDays) && +s.dueDays >= 0 && +s.dueDays <= 365)) out.push(`${n}: the working days it’s due within should be a whole number from 0 to 365.`);
+    const od = s.overdue || {};
+    if ((od.remind || od.escalateDays != null) && (s.dueDays == null || s.dueDays === '')) out.push(`${n}: set “Due within” so it knows when it’s overdue.`);
+    if (od.escalateDays != null) {
+      const e = od.escalateTo || {};
+      if (!(Number.isInteger(+od.escalateDays) && +od.escalateDays >= 0 && +od.escalateDays <= 60)) out.push(`${n}: the working days before telling someone else should be a whole number from 0 to 60.`);
+      if (e.type === 'role' && !e.role) out.push(`${n}: pick which role to tell when it’s overdue.`);
+      if (e.type === 'role' && e.role && roles.size && !roles.has(e.role)) out.push(`${n}: the role to tell when it’s overdue no longer exists.`);
+      if (e.type === 'person' && !e.person) out.push(`${n}: pick who to tell when it’s overdue.`);
+      if (e.type === 'person' && e.person && people.size && !people.has(e.person)) out.push(`${n}: the person to tell when it’s overdue no longer has an account.`);
+    }
     (s.moves || []).forEach((m) => { if (!m.label?.trim()) out.push(`${n}: a button needs a label.`); if (!st.some((x) => x.id === m.to)) out.push(`${n}: “${m.label || 'a button'}” goes to a stage that no longer exists.`); });
   });
   return out;
@@ -164,4 +174,39 @@ export function dueState(dueKey, todayKey) {
 /** A local date key for a moment ('YYYY-MM-DD' in the given time zone, or the browser's). */
 export function dayKey(ms, timeZone) {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+}
+
+/* ---------- overdue: a reminder, then telling someone else ----------
+   stage.overdue = { remind: bool, escalateDays: n | null, escalateTo: { type: 'admins' | 'role' | 'person', role, person } }
+   Checked each working-day morning on the server (Cadence's functions, stageOverdue). */
+
+/**
+ * What's due for a record waiting at a stage today: { remind, escalate, due, escalateOn } (false when nothing).
+ * arrivedKey: the day it reached the stage; sent: { remind, escalate } already sent for this arrival.
+ * The reminder goes the first working day after the due date; telling someone else, escalateDays working days after that.
+ */
+export function overdueStep(stage, arrivedKey, todayKey, sent = {}) {
+  const od = stage && stage.overdue;
+  const due = stageDue(stage, arrivedKey);
+  if (!od || !due || todayKey <= due) return { remind: false, escalate: false, due };
+  const escalateOn = od.escalateDays != null && od.escalateDays !== '' ? addWorkdays(addWorkdays(due, 1), Math.max(0, Math.round(+od.escalateDays) || 0)) : '';
+  return {
+    remind: !!od.remind && !sent.remind,
+    escalate: !!escalateOn && todayKey >= escalateOn && !sent.escalate,
+    due, escalateOn,
+  };
+}
+/** Working days a record is past its due date (0 on the due date or before). */
+export function daysOverdue(dueKey, todayKey) {
+  if (!dueKey || todayKey <= dueKey) return 0;
+  let n = 0, k = dueKey;
+  while (n < 400) { k = addWorkdays(k, 1); if (k > todayKey) break; n++; }
+  return n;
+}
+/** Who's told when it's overdue, in words, for the designer: "administrators", "Accounts", "Bea". */
+export function escalateLabel(to, { roleName = () => '', personName = () => '' } = {}) {
+  const t = to || { type: 'admins' };
+  if (t.type === 'role') return roleName(t.role) || 'a role';
+  if (t.type === 'person') return personName(t.person) || 'someone';
+  return 'the administrators';
 }

@@ -21,6 +21,8 @@ import {
   drillRows, drillLabel, bucketOf, nounOf, shareOf,
   canvasTiles, gridTiles, resolveCanvas, placeTile, canvasHeight, tileSize, readingOrder, CANVAS_COLS, GRID, MIN_W, minH,
 } from './dashlogic.js';
+import { fmtMeasure, fmtShort, measureLabel, cellText, isNumRef } from './dashfmt.js';
+import { headerButton as dmHeader } from './dashmailui.js';
 
 let H = { fmt: null, valOf: null, recTitle: null, go: null, openRecord: null, renderMain: null, openLink: null, linkEnv: () => ({}), starterForms: () => [] };
 export function initReports(helpers) { H = { ...H, ...helpers }; }
@@ -99,48 +101,12 @@ export async function maybeMigrate() {
 
 /* ---------- formatting ---------- */
 
-function measureField(c, def) { const m = def.measure || { fn: 'count' }; return m.fn !== 'count' && m.ref ? fieldOf(c, m.ref) : null; }
-function fmtMeasure(c, def, v) {
-  if (v == null || (typeof v === 'number' && isNaN(v))) return '–';
-  const f = measureField(c, def);
-  if (!f) return Math.round(v).toLocaleString();
-  if (f.type === 'rating') return (Math.round(v * 10) / 10).toLocaleString() + ' ★';
-  const val = def.measure.fn === 'avg' ? Math.round(v * 100) / 100 : v;
-  if (f.type === 'currency' || (f.type === 'formula' && f.format === 'currency')) {
-    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: String(f.currency || 'CAD').toUpperCase(), maximumFractionDigits: Math.abs(val) >= 100 ? 0 : 2 }).format(val); } catch (e) { return String(val); }
-  }
-  if (f.type === 'percent' || (f.type === 'formula' && f.format === 'percent')) return (Math.round(val * 10) / 10).toLocaleString() + '%';
-  if (f.type === 'range') return (Math.round(val * 10) / 10) + (f.suffix || '');
-  return Number(val).toLocaleString(undefined, { maximumFractionDigits: def.measure.fn === 'avg' ? 2 : 1 });
-}
-function fmtShort(c, def, v) {
-  const f = measureField(c, def);
-  const cur = f && (f.type === 'currency' || (f.type === 'formula' && f.format === 'currency')) ? '$' : '';
-  const a = Math.abs(v);
-  if (a >= 1e6) return cur + (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (a >= 1e3) return cur + (v / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'k';
-  return cur + (Math.round(v * 10) / 10).toLocaleString();
-}
 /** A number written out in full, plus a short form (CA$91.5k) a cramped dashboard tile switches to. */
 function both(c, def, v) {
   const full = fmtMeasure(c, def, v);
   if (v == null || typeof v !== 'number' || Math.abs(v) < 1000) return esc(full);
   return `<span class="v-full">${esc(full)}</span><span class="v-short">${esc(fmtShort(c, def, v))}</span>`;
 }
-function measureLabel(c, def) {
-  const m = def.measure || { fn: 'count' };
-  const form = c.formById(def.form);
-  if (m.fn === 'count' || !m.ref) return 'Number of ' + (form ? nounOf(form, 2) : 'records');
-  const f = fieldOf(c, m.ref);
-  return (m.fn === 'avg' ? 'Average ' : 'Total ') + (f ? f.label.toLowerCase() : 'value');
-}
-function cellText(c, ref, rec) {
-  const f = fieldOf(c, ref); if (!f) return '';
-  const v = valueOf(c, rec, ref);
-  if (f.type === 'relation') { const t = v && c.recById(v); return t ? c.recTitle(t) : ''; }
-  return textOf(c, f, v);
-}
-const isNumRef = (c, r) => { const f = fieldOf(c, r); return !!f && kindOf(f) === 'num'; };
 
 /* ---------- one report's body ---------- */
 
@@ -859,6 +825,7 @@ export function viewDashboard(id) {
     ${edit ? `<input id="db-name" class="db-name" value="${esc(x.name)}" aria-label="Dashboard name" data-dv="dname">` : `<h1 class="db-title">${esc(x.name)}</h1>`}
     <button type="button" class="db-home${home ? ' on' : ''}" data-d="sethome" data-v="${home ? '' : esc(x.id)}" aria-pressed="${home}">${home ? 'My home' : 'Set as my home'}</button>
     ${admin() ? `<button type="button" class="db-home${isDefault ? ' on' : ''}" data-d="setdefhome" data-v="${isDefault ? '' : esc(x.id)}" aria-pressed="${isDefault}" title="What Home shows for anyone who hasn’t chosen their own">${isDefault ? 'Everyone’s default home' : 'Make everyone’s default home'}</button>` : isDefault ? '<span class="chip">Everyone’s default home</span>' : ''}
+    ${admin() && !edit && src ? dmHeader(src) : ''}
     ${x.shared ? `<span class="chip">Shared${(x.groups || []).length ? ' with ' + (x.groups || []).map((g) => esc(store.groups.find((y) => y.id === g)?.name || 'a group')).join(', ') : ''}</span>` : ''}
     <span class="grow"></span>
     ${edit ? `${D.confirm === 'deldash' ? `<button class="btn danger armed" data-d="deldash">Tap again to delete</button>` : `<button class="btn danger" data-d="deldash">Delete</button>`}

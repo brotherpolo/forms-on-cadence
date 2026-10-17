@@ -36,6 +36,7 @@ import { copyValues, relinkRow } from './duplogic.js';
 import { shrinkPhoto } from './photo.js';
 import { evaluate as evalRules, toClear, withoutCleared, NO_RULES, holdsValue, pruneRules, impactOf, sameRules, changedRuleLabels } from './rules.js';
 import { initAutos } from './autos.js';
+import { initDashMail } from './dashmailui.js';
 import { initWfDesign, viewWorkflow, wfClick, wfChange, wfInput } from './wfdesign.js';
 import { checkWorkflow } from './workflow.js';
 import { fieldByName, sysOf, uniqueSysNames, shownName } from './fieldnames.js';
@@ -650,7 +651,7 @@ function viewRecord(form){
   if(rec){
     const tabs=[];
     const mails=sentEmailsHTML();
-    if(wfOn(form)||isAdmin(store.me)||mails)tabs.push({k:'activity',label:'Activity',n:0,html:`${wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}<div id="rec-emails">${mails}</div>`});
+    if(wfOn(form)||mails)tabs.push({k:'activity',label:'Activity',n:0,html:`${wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}<div id="rec-emails">${mails}</div>`});
     const cur=tabs.some(t=>t.k===ui.rsTab)?ui.rsTab:(tabs[0]||{}).k;
     if(tabs.length)asideHTML=`<aside class="rec-aside" aria-label="Activity">
       <div class="rs-tabs" role="tablist" aria-label="Side panel">${tabs.map(t=>`<button type="button" role="tab" id="rs-t-${t.k}" aria-controls="rs-p-${t.k}" aria-selected="${t.k===cur}" class="rs-tab${t.k===cur?' on':''}" data-act="rs-tab" data-v="${t.k}"${t.k===cur?'':' tabindex="-1"'}>${t.label}${t.n?` <span class="rs-n">${t.n}</span>`:''}</button>`).join('')}</div>
@@ -902,7 +903,8 @@ function sentEmailsHTML(){
   return `<section class="section" id="sent-emails">${head}<div class="panel subsec">${toolBar({tools:showMenu(k,p.show,list.length),buttons:delAll})}
     <div class="mail-list">${lim.rows.map(row).join('')}</div>${moreLine(k,lim.rows.length,list.length,list.length===1?'email':'emails')}</div></section>`;
 }
-function repaintEmails(){const el=$('#rec-emails');if(el)el.innerHTML=sentEmailsHTML();}
+// Activity shows only when there's something in it: the first sent email (or the last one deleted) redraws the page
+function repaintEmails(){const el=$('#rec-emails'),h=sentEmailsHTML();const f=rdraft&&formById(rdraft.formId);if(!wfOn(f)&&!!el!==!!h){renderMain();return;}if(el)el.innerHTML=h;}
 
 /* One sent email in a pop-up: who, when, to, subject, message and the PDF as it was sent. */
 function closeMailView(){const v=ui.mailView;if(v?.url)try{URL.revokeObjectURL(v.url)}catch(e){/* already gone */}ui.mailView=null;}
@@ -2665,6 +2667,7 @@ export function startApp(){
   tm.initTaskModal({store,recById,formById,recTitle,toast,cadenceUrl,tasks:()=>tw.tasks||[]});
   cmt.initComments({store,view:()=>view,recById,formById,recTitle,itemName,toast,isAdmin:()=>isAdmin(store.me),canUseTasks,foldBtn,folded,
     unfold:(fid,k)=>saveFolds(setFold(folds(),fid,k,false)),openRecord:id=>{const r=recById(id);if(!r)return;if(view.name==='record'&&view.recordId===id){renderMain();return;}goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
+  initDashMail();
   allwork.initAllWork({store,recById,formById,recTitle,view:()=>view,tab:()=>ui.mwTab,showComment:(r,c)=>cmt.showComment(r,c),openRecord:id=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});else toast('That record was deleted, or you can no longer see it.');},toast,renderMain,isAdmin:()=>isAdmin(store.me)});
   wordui.initWordUI({store,view:()=>view,recById,formById,recTitle,itemName,valOf,fmt,realName,stageName,wfOn,parentsOf,calcExpr:docCalc,checkExpr:docCheck,
     isAdmin:()=>isAdmin(store.me),toast,dirty:()=>!!rdraft?.dirty,busy:exportBusy,gridCols});
