@@ -996,3 +996,23 @@ tr.wf-over td.title{color:var(--danger)}
 :root[data-density="compact"] .fset.reading .rte-view{padding:0;min-height:0}
 /* the sidebar's pop-ups (Search forms list, Appearance) float over the page beside it */
 @media (min-width:821px){.side{z-index:25}}
+
+/* ---------- Sidebar folded to a strip of icons (Alt+B, or « at its top; wide screens) ---------- */
+.side-tog{margin-left:auto;font-size:18px;line-height:1;width:30px;height:30px}
+.rail-only,.rail-sep{display:none}
+@media (max-width:820px){.side-tog{display:none}}
+@media (min-width:821px){
+  .app{transition:grid-template-columns .18s ease}
+  :root[data-rail] .app{grid-template-columns:68px minmax(0,1fr)}
+  :root[data-rail] .side{padding-inline:10px;align-items:center;overflow-x:hidden}
+  :root[data-rail] .brand{flex-direction:column;gap:10px;padding:4px 0 12px}
+  :root[data-rail] .brand b,:root[data-rail] .fsearch,:root[data-rail] .navlabel,:root[data-rail] .nav span.t,:root[data-rail] .nav .n,
+  :root[data-rail] .nav-fold,:root[data-rail] .nav-empty,:root[data-rail] .side-foot .who,:root[data-rail] .side-foot [data-act="sign-out"]{display:none}
+  :root[data-rail] .nav{justify-content:center;width:46px;padding:7px;position:relative;flex:none}
+  :root[data-rail] .nav .nb{position:absolute;top:1px;right:0;min-width:16px;height:16px;padding:0 4px;font-size:10px}
+  :root[data-rail] .rail-only{display:grid}
+  :root[data-rail] .rail-sep{display:block;width:32px;height:1px;background:var(--side-line);margin:10px 0 6px;flex:none}
+  :root[data-rail] .nav-adm{display:flex;flex-direction:column;align-items:center;gap:4px}
+  :root[data-rail] .side-foot{flex-direction:column;padding:10px 0 0;justify-content:center}
+  :root[data-rail] .nav-find{margin-bottom:6px}
+}

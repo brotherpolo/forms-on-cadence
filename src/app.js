@@ -424,6 +424,15 @@ function themeButton(){
 const RECENT_KEY='fw.recentForms';
 function recentForms(){try{const v=JSON.parse(localStorage.getItem(RECENT_KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
 function noteRecentForm(id){try{localStorage.setItem(RECENT_KEY,JSON.stringify(pushRecent(recentForms(),id)));}catch(e){/* private mode */}}
+/** The sidebar folded to a strip of icons on wide screens (remembered on this device; boot.js applies it before the page draws). */
+const railOn=()=>document.documentElement.dataset.rail==='1';
+function setRail(on,quiet){
+  if(on)document.documentElement.dataset.rail='1';else delete document.documentElement.dataset.rail;
+  try{localStorage.setItem('fw.rail',on?'1':'0');}catch(e){/* private mode */}
+  closeFormSearch();
+  renderSide();
+  if(!quiet){$('[data-act="side-rail"]')?.focus({preventScroll:true});window.dispatchEvent(new Event('resize'));}
+}
 /** Administration in the sidebar: folded unless you open it (remembered on this device) or you're on one of its pages. */
 const admOpen=()=>{if(ADMIN_VIEWS.has(view.name))return true;try{return localStorage.getItem('fw.adminOpen')==='1';}catch(e){return false;}};
 function renderSide(){
@@ -433,10 +442,13 @@ function renderSide(){
   const adm=isAdmin(me),can=f=>canViewForm(store.me,f.id);
   const total=allSearchable(store.forms,can).length;
   const list=sidebarFormList(store.forms,can,recentForms(),6);
-  const navBtn=(act,on,label,glyph,extra='')=>`<button class="nav${on?' on':''}" data-act="${act}"${on?' aria-current="page"':''}><span class="glyph navg">${glyph}</span><span class="t">${label}</span>${extra}</button>`;
-  const ao=adm&&admOpen();
+  const rail=railOn();
+  const tip=label=>rail?` title="${esc(label)}" aria-label="${esc(label)}"`:'';
+  const navBtn=(act,on,label,glyph,extra='')=>`<button class="nav${on?' on':''}" data-act="${act}"${on?' aria-current="page"':''}${tip(label)}><span class="glyph navg">${glyph}</span><span class="t">${label}</span>${extra}</button>`;
+  const ao=adm&&(admOpen()||rail);
   $('#side').innerHTML=`
-    <div class="brand"><span class="brand-mark"><i></i></span><b>Formwright</b></div>
+    <div class="brand"><span class="brand-mark"><i></i></span><b>Formwright</b><button type="button" class="ibtn side-tog" data-act="side-rail" aria-pressed="${rail}" aria-keyshortcuts="Alt+B" aria-label="${rail?'Expand the sidebar':'Collapse the sidebar'}" title="${rail?'Expand the sidebar':'Collapse the sidebar'} (Alt+B)">${rail?'»':'«'}</button></div>
+    ${rail?`<button type="button" class="nav nav-find" data-act="palette"${tip('Search everything (Ctrl K)')}><span class="glyph navg"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span><span class="t">Search</span></button>`:''}
     <div class="fsearch">
       <svg class="fs-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
       <input type="search" class="in" id="fs-q" role="combobox" aria-autocomplete="list" aria-controls="fs-res" aria-expanded="${fsShown()?'true':'false'}" aria-label="Search forms" placeholder="Search forms" autocomplete="off" value="${esc(ui.fq||'')}">
@@ -445,13 +457,13 @@ function renderSide(){
     </div>
     <div class="navlabel">Workspace</div>
     ${navBtn('nav-home',onHome(),'Home','⌂')}
-    <button class="nav${view.name==='mywork'?' on':''}" data-act="nav-mywork"${view.name==='mywork'?' aria-current="page"':''}><span class="glyph navg">☰</span><span class="t">My work</span>${cmt.unreadCount()?`<span class="nb" title="${cmt.unreadCount()} unread mention${cmt.unreadCount()===1?'':'s'}"><span class="sr">, </span>${cmt.unreadCount()}<span class="sr"> unread</span></span>`:''}<span class="n">${myWorkCount()||''}</span></button>
+    <button class="nav${view.name==='mywork'?' on':''}" data-act="nav-mywork"${view.name==='mywork'?' aria-current="page"':''}${tip('My work')}><span class="glyph navg">☰</span><span class="t">My work</span>${cmt.unreadCount()?`<span class="nb" title="${cmt.unreadCount()} unread mention${cmt.unreadCount()===1?'':'s'}"><span class="sr">, </span>${cmt.unreadCount()}<span class="sr"> unread</span></span>`:''}<span class="n">${myWorkCount()||''}</span></button>
     ${navBtn('nav-dashboards',(view.name==='dashboards'||view.name==='dashboard')&&!onHome(),'Dashboards','▦',`<span class="n">${counts().dashboards}</span>`)}
     ${navBtn('nav-reports',view.name==='reports'||view.name==='report','Reports','▤',`<span class="n">${counts().reports}</span>`)}
     <div class="navlabel">Forms</div>
-    ${list.length?list.map(f=>`<button class="nav nav-form${f.id===activeForm?' on':''}" data-act="nav-form" data-id="${f.id}"${f.id===activeForm?' aria-current="page"':''} title="${esc(f.name)}">${badge(f)}<span class="t">${esc(f.name)}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join(''):'<p class="nav-empty">No forms shared with you yet.</p>'}
-    ${total>list.length?`<button class="nav nav-all" data-act="fs-all"><span class="t">All forms (${total})</span><span aria-hidden="true">→</span></button>`:''}
-    ${adm?`<button class="nav nav-fold" data-act="adm-fold" aria-expanded="${ao}"><span class="t">Administration</span><span class="fold-ic" aria-hidden="true">${ao?'▾':'▸'}</span></button>
+    ${list.length?list.map(f=>`<button class="nav nav-form${f.id===activeForm?' on':''}" data-act="nav-form" data-id="${f.id}"${f.id===activeForm?' aria-current="page"':''} title="${esc(f.name)}"${rail?` aria-label="${esc(f.name)}"`:''}>${badge(f)}<span class="t">${esc(f.name)}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join(''):'<p class="nav-empty">No forms shared with you yet.</p>'}
+    ${total>list.length?`<button class="nav nav-all" data-act="${rail?'palette':'fs-all'}"${tip(`All forms (${total})`)}><span class="glyph navg rail-only" aria-hidden="true">⋯</span><span class="t">All forms (${total})</span><span aria-hidden="true">→</span></button>`:''}
+    ${adm?`${rail?'<div class="rail-sep" role="separator"></div>':''}<button class="nav nav-fold" data-act="adm-fold" aria-expanded="${ao}"><span class="t">Administration</span><span class="fold-ic" aria-hidden="true">${ao?'▾':'▸'}</span></button>
     ${ao?`<div class="nav-adm">
     ${navBtn('nav-designer',view.name==='designer'||view.name==='formEdit','Form designer','⚙',`<span class="n">${store.forms.length}</span>`)}
     ${navBtn('nav-groups',view.name==='groups'||view.name==='groupEdit','Security groups','◫',`<span class="n">${store.groups.length}</span>`)}
@@ -630,17 +642,16 @@ function viewRecord(form){
   grels.forEach(({rel,cf})=>{sec[cf.id]=gridSection(form,rel,cf,rdraft,ro||reading);});
   if(rec)children.forEach(({cf})=>{sec[cf.id]=childSection(form,cf,rec,ro);});
   if(rec)sec[TASKS_KEY]=`<section class="section" id="rec-tasks">${tasksInner()}</section>`;
-  const sectionsHTML=sectionOrder(form).filter(k=>k!==TASKS_KEY).map(k=>sec[k]||'').join('');
-  // Comments, Tasks and Activity: a side panel with tabs on wide screens, one after another below the form otherwise
+  const sectionsHTML=sectionOrder(form).map(k=>sec[k]||'').join(''); // Tasks among them, full width, in the form's order
+  // Comments and Activity: a side panel with tabs on wide screens, one after another below the form otherwise
   let asideHTML='';
   if(rec){
     const cHTML=`<div id="rec-comments">${cmt.html()}</div>`;
     const tabs=[{k:'comments',label:'Comments',n:cmt.count(),html:cHTML}];
-    if(sec[TASKS_KEY])tabs.push({k:'tasks',label:'Tasks',n:tw.recordId===rec.id&&tw.status==='ready'?(tw.tasks||[]).length:0,html:sec[TASKS_KEY]});
     const mails=sentEmailsHTML();
     if(wfOn(form)||isAdmin(store.me)||mails)tabs.push({k:'activity',label:'Activity',n:0,html:`${wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}<div id="rec-emails">${mails}</div>`});
     const cur=tabs.some(t=>t.k===ui.rsTab)?ui.rsTab:'comments';
-    asideHTML=`<aside class="rec-aside" aria-label="Comments, tasks and activity">
+    asideHTML=`<aside class="rec-aside" aria-label="Comments and activity">
       <div class="rs-tabs" role="tablist" aria-label="Side panel">${tabs.map(t=>`<button type="button" role="tab" id="rs-t-${t.k}" aria-controls="rs-p-${t.k}" aria-selected="${t.k===cur}" class="rs-tab${t.k===cur?' on':''}" data-act="rs-tab" data-v="${t.k}"${t.k===cur?'':' tabindex="-1"'}>${t.label}${t.n?` <span class="rs-n">${t.n}</span>`:''}</button>`).join('')}</div>
       ${tabs.map(t=>`<div class="rs-panel${t.k===cur?' on':''}" id="rs-p-${t.k}" role="tabpanel" aria-labelledby="rs-t-${t.k}">${t.html}</div>`).join('')}
     </aside>`;
@@ -2184,10 +2195,11 @@ document.addEventListener('click',async e=>{
       break;}
     case 'rec-history':if(view.recordId)go({name:'audit',recordId:view.recordId});break;
     case 'nav-exports':if(view.name!=='exports')exportLeave();go({name:'exports'});break;
-    case 'appear':ui.appear=!ui.appear;renderSide();if(ui.appear)setTimeout(()=>$('.appear button.on')?.focus(),0);else $('[data-act="appear"]')?.focus();break;
+    case 'appear':if(railOn()&&!ui.appear)setRail(false,true);ui.appear=!ui.appear;renderSide();if(ui.appear)setTimeout(()=>$('.appear button.on')?.focus(),0);else $('[data-act="appear"]')?.focus();break;
     case 'ap-mode':applyTheme(document,el.dataset.v,localStorage);renderSide();$('[data-act="ap-mode"].on')?.focus();break;
     case 'ap-scheme':applyScheme(document,el.dataset.v,localStorage);renderSide();$('[data-act="ap-scheme"].on')?.focus();break;
     case 'ap-density':applyDensity(document,el.dataset.v,localStorage);renderSide();$('[data-act="ap-density"].on')?.focus();break;
+    case 'side-rail':setRail(!railOn());break;
     case 'adm-fold':{const open=!admOpen();try{localStorage.setItem('fw.adminOpen',open?'1':'0');}catch(e){}renderSide();$('[data-act="adm-fold"]')?.focus();break;}
     case 'fs-all':{const q=$('#fs-q');if(q){q.focus();ui.fsOpen=true;paintFormResults();}break;}
     case 'palette':palette.open();break;
@@ -2430,6 +2442,12 @@ document.addEventListener('keydown',e=>{
   }
   if(e.target?.id==='dq'&&e.key==='Escape'&&e.target.value){e.preventDefault();e.target.value='';ui.dq='';applyDq();}
 });
+// Alt+B (Option+B on a Mac): fold the sidebar to icons, or open it again (wide screens)
+document.addEventListener('keydown',e=>{
+  if(!(e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&e.code==='KeyB'))return;
+  if(!booted||window.matchMedia('(max-width:820px)').matches)return;
+  e.preventDefault();setRail(!railOn());
+},true);
 // Alt+E (Option+E on a Mac), or Ctrl+Shift+C when the browser's developer tools are closed:
 // Read view ⇄ Edit view on a saved record. e.code, because Option+E on a Mac types an accent.
 document.addEventListener('keydown',e=>{

@@ -10,6 +10,8 @@ try {
   var s = localStorage.getItem('fw.scheme');
   if (s === 'spruce' || s === 'sand') document.documentElement.dataset.scheme = s;
   if (localStorage.getItem('fw.density') === 'compact') document.documentElement.dataset.density = 'compact';
+  // the sidebar folded to a strip of icons (Alt+B, or « at its top)
+  if (localStorage.getItem('fw.rail') === '1') document.documentElement.dataset.rail = '1';
 } catch (e) { /* storage blocked */ }
 // 2. Lets Android install Formwright as an app (see public/sw.js).
 if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
