@@ -642,16 +642,17 @@ function viewRecord(form){
   grels.forEach(({rel,cf})=>{sec[cf.id]=gridSection(form,rel,cf,rdraft,ro||reading);});
   if(rec)children.forEach(({cf})=>{sec[cf.id]=childSection(form,cf,rec,ro);});
   if(rec)sec[TASKS_KEY]=`<section class="section" id="rec-tasks">${tasksInner()}</section>`;
+  // Comments sit right under Tasks (or at the end when Tasks isn't shown)
+  if(rec)sec[TASKS_KEY]=(sec[TASKS_KEY]||'')+`<div id="rec-comments" class="rec-comments-sec">${cmt.html()}</div>`;
   const sectionsHTML=sectionOrder(form).map(k=>sec[k]||'').join(''); // Tasks among them, full width, in the form's order
-  // Comments and Activity: a side panel with tabs on wide screens, one after another below the form otherwise
+  // Activity: a side panel on wide screens, below the form otherwise
   let asideHTML='';
   if(rec){
-    const cHTML=`<div id="rec-comments">${cmt.html()}</div>`;
-    const tabs=[{k:'comments',label:'Comments',n:cmt.count(),html:cHTML}];
+    const tabs=[];
     const mails=sentEmailsHTML();
     if(wfOn(form)||isAdmin(store.me)||mails)tabs.push({k:'activity',label:'Activity',n:0,html:`${wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}<div id="rec-emails">${mails}</div>`});
-    const cur=tabs.some(t=>t.k===ui.rsTab)?ui.rsTab:'comments';
-    asideHTML=`<aside class="rec-aside" aria-label="Comments and activity">
+    const cur=tabs.some(t=>t.k===ui.rsTab)?ui.rsTab:(tabs[0]||{}).k;
+    if(tabs.length)asideHTML=`<aside class="rec-aside" aria-label="Activity">
       <div class="rs-tabs" role="tablist" aria-label="Side panel">${tabs.map(t=>`<button type="button" role="tab" id="rs-t-${t.k}" aria-controls="rs-p-${t.k}" aria-selected="${t.k===cur}" class="rs-tab${t.k===cur?' on':''}" data-act="rs-tab" data-v="${t.k}"${t.k===cur?'':' tabindex="-1"'}>${t.label}${t.n?` <span class="rs-n">${t.n}</span>`:''}</button>`).join('')}</div>
       ${tabs.map(t=>`<div class="rs-panel${t.k===cur?' on':''}" id="rs-p-${t.k}" role="tabpanel" aria-labelledby="rs-t-${t.k}">${t.html}</div>`).join('')}
     </aside>`;
@@ -685,7 +686,7 @@ function viewRecord(form){
   </div>
   <div class="crumbs">${crumbs}</div>
   <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}${rec&&rec.stage&&wfOn(form)&&stageById(form,rec.stage)?` <span class="stage-chip">${esc(stageName(form,rec))}</span>`:''}</h1>${rec?`<p class="sub">${recordMeta(rec)}</p>`:''}${!rec&&rdraft.duplicateOf?`<p class="sub dupnote">A copy of <b>${esc(rdraft.duplicateTitle||'')}</b>${rdraft.dupRows?` with its ${rdraft.dupRows} row${rdraft.dupRows>1?'s':''}`:''}. Nothing is saved until you click Save${rdraft.dupKids?`; its ${esc(rdraft.dupKids)} aren’t copied`:''}.</p>`:''}${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
-  <div class="rec-layout${rec?' has-aside':''}"><div class="rec-main">
+  <div class="rec-layout${asideHTML?' has-aside':''}"><div class="rec-main">
   ${parentPick}
   ${wfBar(form,rec)}
   <div class="panel">
