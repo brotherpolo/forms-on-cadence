@@ -609,7 +609,7 @@ function viewRecord(form){
   if(!rdraft||rdraft.formId!==form.id||rdraft.recordId!==(view.recordId||null)){rdraft=rec?{formId:form.id,recordId:rec.id,values:{},errors:{},dirty:false}:newRecordDraft(form,null);}
   if(rec&&!rdraft.dirty){rdraft.values=clone(rec.values||{});rdraft.parentId=rec.parentId||null;rdraft.parentFormId=rec.parentFormId||null;}
   const ro=rec?(rec.stage&&wfOn(form)?!canWork(rec,store.me):!canEditRecord(store.me,rec)):!canCreate(store.me,form.id);rdraft.readOnly=ro;
-  // Read view (existing records, and always for people who can't edit) or Edit view (new records); Ctrl+Shift+C swaps
+  // Read view (existing records, and always for people who can't edit) or Edit view (new records); Alt+E (or Ctrl+Shift+C) swaps
   if(!rdraft.mode)rdraft.mode=rec?'read':'edit';
   const reading=!!rec&&(ro||rdraft.mode==='read');rdraft.reading=reading;
   const grels=gridRels(form);syncGrids(rdraft,rec,grels);
@@ -667,8 +667,8 @@ function viewRecord(form){
     <span class="grow" id="dirtynote" role="status">${rdraft.dirty?'Unsaved changes':ro?'Read only':''}</span>
     ${rec?wordui.exportButton(ui.pdfBusy):''}
     ${moreHTML}
-    ${rec&&!ro&&!reading?`<button class="btn ghost" data-act="rec-mode" aria-keyshortcuts="Control+Shift+C" title="Back to Read view (Ctrl+Shift+C)">Done</button>`:''}
-    ${rec&&!ro&&reading?`<button class="btn primary" data-act="rec-mode" aria-keyshortcuts="Control+Shift+C" title="Edit (Ctrl+Shift+C)"><span aria-hidden="true">✎</span> Edit</button>`:''}
+    ${rec&&!ro&&!reading?`<button class="btn ghost" data-act="rec-mode" aria-keyshortcuts="Alt+E Control+Shift+C" title="Back to Read view (Alt+E)">Done</button>`:''}
+    ${rec&&!ro&&reading?`<button class="btn primary" data-act="rec-mode" aria-keyshortcuts="Alt+E Control+Shift+C" title="Edit (Alt+E)"><span aria-hidden="true">✎</span> Edit</button>`:''}
     ${ro||reading?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
   </div>
   <div class="crumbs">${crumbs}</div>
@@ -691,7 +691,7 @@ function modeAskDialog(form){
     <div class="lv-dlgacts"><button type="button" class="btn ghost" data-act="mode-keep">Keep editing</button><button type="button" class="btn danger" data-act="mode-discard">Discard</button><button type="button" class="btn primary" id="ma-save" data-act="mode-save">Save</button></div>
   </div></div>`;
 }
-/** Read view ⇄ Edit view on a saved record (the Edit/Done button and Ctrl+Shift+C). */
+/** Read view ⇄ Edit view on a saved record (the Edit/Done button, Alt+E and Ctrl+Shift+C). */
 function toggleRecMode(){
   if(view.name!=='record'||!rdraft||!rdraft.recordId||rdraft.readOnly)return false;
   if(rdraft.mode==='read'){rdraft.mode='edit';renderMain();setTimeout(()=>{const el=document.querySelector('.fset .in:not([disabled]), .fset input:not([disabled]), .fset textarea, .fset [contenteditable="true"]');el?.focus({preventScroll:true});},0);return true;}
@@ -2421,9 +2421,12 @@ document.addEventListener('keydown',e=>{
   }
   if(e.target?.id==='dq'&&e.key==='Escape'&&e.target.value){e.preventDefault();e.target.value='';ui.dq='';applyDq();}
 });
-// Ctrl+Shift+C (⌘+Shift+C on a Mac): Read view ⇄ Edit view on a saved record
+// Alt+E (Option+E on a Mac), or Ctrl+Shift+C when the browser's developer tools are closed:
+// Read view ⇄ Edit view on a saved record. e.code, because Option+E on a Mac types an accent.
 document.addEventListener('keydown',e=>{
-  if(!(e.ctrlKey||e.metaKey)||!e.shiftKey||e.altKey||e.code!=='KeyC'&&String(e.key).toLowerCase()!=='c')return;
+  const altE=e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&e.code==='KeyE';
+  const ctrlC=(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&(e.code==='KeyC'||String(e.key).toLowerCase()==='c');
+  if(!altE&&!ctrlC)return;
   if(view.name!=='record'||ui.modeAsk||document.querySelector('#tk-root .tk-dlg, #aw-root .aw-dlg, .lv-scrim'))return;
   if(toggleRecMode()){e.preventDefault();e.stopPropagation();}
 },true);
