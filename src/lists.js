@@ -149,6 +149,7 @@ export function viewRecords(form) {
       <div class="lv-seg" role="group" aria-label="Row height">
         ${[['cozy', 'Comfortable'], ['compact', 'Compact']].map(([d, n]) => `<button type="button" class="${cfg.density === d ? 'on' : ''}" aria-pressed="${cfg.density === d}" data-lv="density" data-v="${d}">${n}</button>`).join('')}
       </div>
+      ${sortTool(c, shown, cfg)}
       <span class="lv-count">${rows.length} of ${all.length}</span>
     </div>
     ${LV.sel.size ? bulkBar(form, selRecs, editable, selHidden, settable) : ''}
@@ -257,6 +258,23 @@ async function setOwnerOf(to) {
   try { const n = await setOwner(recs.map((r) => r.id), to); toast(`${n} record${n === 1 ? '' : 's'} given to ${name}`); }
   catch (e) { console.error('[formwright] set owner', e); toast('Couldn’t change the owner. Nothing was changed.'); }
   LV.busy = false; repaint();
+}
+
+/** Phones (cards have no headings to tap): sort by the main field or a shown column, and which way. */
+function sortTool(c, shown, cfg) {
+  const opts = [{ key: 'title', label: c.titleField?.label || 'Title', field: c.titleField }].concat(shown.map((x) => ({ key: x.key, label: x.label, field: x.field, num: x.num })));
+  // the record's own dates are always there (the list starts sorted by Last updated)
+  ['sys:updated', 'sys:created'].forEach((k) => { if (!opts.some((o) => o.key === k) && c.byKey.has(k)) opts.push({ key: k, label: c.byKey.get(k).label, date: true }); });
+  const cur = opts.find((o) => o.key === cfg.sort.key) || opts[0];
+  const t = cur.field?.type || '';
+  const date = cur.date || ['date', 'datetime', 'time'].includes(t) || /^sys:(created|updated)$/.test(cur.key);
+  const num = !date && (cur.num || ['number', 'decimal', 'currency', 'percent', 'range', 'rating', 'autonumber', 'formula'].includes(t));
+  const asc = cfg.sort.key === cur.key ? cfg.sort.dir === 'asc' : cur.key === 'title';
+  const words = date ? (asc ? 'Oldest first' : 'Newest first') : num ? (asc ? 'Low to high' : 'High to low') : (asc ? 'A to Z' : 'Z to A');
+  return `<div class="lv-sortm" role="group" aria-label="Sort">
+    <label class="lv-sortsel"><span class="sr">Sort by</span><select class="in" data-lvc="sortby" aria-label="Sort by">${opts.map((o) => `<option value="${esc(o.key)}"${o.key === cur.key ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>
+    <button type="button" class="btn lv-sortdir" data-lv="sortdir" aria-label="Order: ${esc(words)}. Tap to reverse." title="Tap to reverse"><span aria-hidden="true">${asc ? '↑' : '↓'}</span> ${esc(words)}</button>
+  </div>`;
 }
 
 function headCell(col, label, cfg) {
@@ -564,6 +582,12 @@ document.addEventListener('click', (e) => {
     case 'pop': LV.pop = LV.pop === v ? null : v; repaint(); break;
     case 'pop-close': LV.pop = null; repaint(); break;
     case 'density': setCfg({ density: v }); break;
+    case 'sortdir': {
+      const cur = LV.cfg.sort;
+      setCfg({ sort: { key: cur.key || 'title', dir: cur.dir === 'asc' ? 'desc' : 'asc' } });
+      document.querySelector('#lv [data-lv="sortdir"]')?.focus();
+      break;
+    }
     case 'sort': {
       const cur = LV.cfg.sort;
       const form = formNow(); const col = form ? ctxFor(form).byKey.get(v) : null;
@@ -608,6 +632,12 @@ document.addEventListener('change', (e) => {
   const k = t.dataset.lvc;
   const where = t.closest('.lv-cards') ? '#lv .lv-cards ' : '#lv ';
   const refocus = (sel) => document.querySelector(where + sel)?.focus();
+  if (k === 'sortby') {
+    const form = formNow(); const col = form ? ctxFor(form).byKey.get(t.value) : null;
+    setCfg({ sort: { key: t.value, dir: t.value === 'title' ? 'asc' : firstDir(col) } });
+    document.querySelector('#lv [data-lvc="sortby"]')?.focus();
+    return;
+  }
   if (k === 'sel') { if (t.checked) LV.sel.add(t.dataset.v); else LV.sel.delete(t.dataset.v); repaint(); refocus(`input[data-lvc="sel"][data-v="${CSS.escape(t.dataset.v)}"]`); return; }
   if (k === 'all') {
     const ids = [...document.querySelectorAll('#lv .lv-tbl tbody input[data-lvc="sel"]')].map((i) => i.dataset.v);
