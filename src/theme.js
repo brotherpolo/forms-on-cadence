@@ -24,3 +24,26 @@ export function applyTheme(doc, t, storage) {
   if (storage) { try { if (theme === 'auto') storage.removeItem(THEME_KEY); else storage.setItem(THEME_KEY, theme); } catch (e) { /* private mode */ } }
   return theme;
 }
+
+/* Colour scheme and density, also per device. The scheme recolours the accent, the background and
+   the sidebar; each has a light and a dark version (Light / Dark / Auto above still applies). */
+export const SCHEMES = ['indigo', 'spruce', 'sand'];
+export const SCHEME_KEY = 'fw.scheme';
+export const schemeLabel = (s) => ({ indigo: 'Indigo', spruce: 'Spruce', sand: 'Sand' })[s] || 'Indigo';
+export const DENSITIES = ['comfortable', 'compact'];
+export const DENSITY_KEY = 'fw.density';
+export const densityLabel = (d) => ({ comfortable: 'Comfortable', compact: 'Compact' })[d] || 'Comfortable';
+
+function readOne(storage, key, list) {
+  try { const v = storage && storage.getItem(key); return list.includes(v) ? v : list[0]; } catch (e) { return list[0]; }
+}
+function applyOne(doc, storage, key, list, attr, v) {
+  const val = list.includes(v) ? v : list[0];
+  if (val === list[0]) delete doc.documentElement.dataset[attr]; else doc.documentElement.dataset[attr] = val;
+  if (storage) { try { if (val === list[0]) storage.removeItem(key); else storage.setItem(key, val); } catch (e) { /* private mode */ } }
+  return val;
+}
+export const readScheme = (storage) => readOne(storage, SCHEME_KEY, SCHEMES);
+export const applyScheme = (doc, s, storage) => applyOne(doc, storage, SCHEME_KEY, SCHEMES, 'scheme', s);
+export const readDensity = (storage) => readOne(storage, DENSITY_KEY, DENSITIES);
+export const applyDensity = (doc, d, storage) => applyOne(doc, storage, DENSITY_KEY, DENSITIES, 'density', d);

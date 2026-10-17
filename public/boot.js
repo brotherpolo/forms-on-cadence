@@ -6,6 +6,10 @@ try {
     document.documentElement.dataset.theme = t;
     document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) { m.content = t === 'dark' ? '#171a23' : '#ffffff'; });
   }
+  // colour scheme and density (src/theme.js)
+  var s = localStorage.getItem('fw.scheme');
+  if (s === 'spruce' || s === 'sand') document.documentElement.dataset.scheme = s;
+  if (localStorage.getItem('fw.density') === 'compact') document.documentElement.dataset.density = 'compact';
 } catch (e) { /* storage blocked */ }
 // 2. Lets Android install Formwright as an app (see public/sw.js).
 if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });

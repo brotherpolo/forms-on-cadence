@@ -1,7 +1,7 @@
 // Formwright application: navigation, record screens and the form designer.
 import './designer.css';
 import './grids.css';
-import { readTheme, applyTheme, nextTheme, themeLabel } from './theme.js';
+import { readTheme, applyTheme, nextTheme, themeLabel, readScheme, applyScheme, schemeLabel, SCHEMES, readDensity, applyDensity, densityLabel, DENSITIES } from './theme.js';
 // Admin screens (users and groups) live in admin.js; data access in store.js.
 
 import { fillAutoNumbers, setAutoNumber, autoCounter, emailRecord, watchEmails, deleteSentEmails, fileBlob, getExportSettings } from './store.js';
@@ -21,7 +21,8 @@ import { storeKey as subStoreKey, readSubs, prefsOf, setPrefs, colsFor, toggleCo
 import { colsTool, showMenu, sortMenu, toolBar, moreLine, headCell as subHead } from './subui.js';
 import { headingOf, readFolds, isFolded, setFold, setFolds, foldKeys } from './foldlogic.js';
 import { sectionOrder, moveSection, TASKS as TASKS_KEY } from './sectionlogic.js';
-import { searchForms, allSearchable, designerMatch } from './navlogic.js';
+import { searchForms, allSearchable, designerMatch, pushRecent, sidebarFormList } from './navlogic.js';
+import * as palette from './palette.js';
 import { copyPatch, linkPatch, attachChange, detachChange, searchHit } from './attachlogic.js';
 import { initImports, viewImport, viewImports, importBusy, importRunning, importTitle, resetImports } from './imports.js';
 import { sortTasks, dueInfo, whoLine, cadenceLink, donePatch, repeats, repeatLabel, dateKey, taskText } from './tasks.js';
@@ -183,10 +184,11 @@ const ui={search:'',openField:null,tab:'fields',palette:false,confirm:null,leave
 function dirty(){return (view.name==='record'&&rdraft?.dirty)||(view.name==='formEdit'&&fdraft?.dirty)||(view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId))||admin.isDirty(view)}
 function guard(){if(importRunning()){toast('The import is still running. Wait for it to finish.');return false;}if(dirty()&&!ui.leaveOk){ui.leaveOk=true;toast('You have unsaved changes. Tap again to leave without saving.');setTimeout(()=>ui.leaveOk=false,4000);return false;}ui.leaveOk=true;return true;}
 export function goRec(draft,v){if(!guard())return;rdraft=draft;go(v);}
-export function go(v,push=true){ui.subPop=null;ui.anEdit=null;if(!ui.cascade?.busy)ui.cascade=null;if(!ui.mail?.busy)ui.mail=null;
+export function go(v,push=true){ui.subPop=null;ui.recMore=false;if(v.name==='record'&&v.recordId!==view.recordId)ui.rsTab='comments';ui.anEdit=null;if(!ui.cascade?.busy)ui.cascade=null;if(!ui.mail?.busy)ui.mail=null;
   if(ADMIN_VIEWS.has(v.name)&&!isAdmin(store.me)){toast('Only administrators can open that.');return false;}
   if((v.name==='records'||v.name==='record')&&!canViewForm(store.me,v.formId)){toast('You don’t have access to that form.');return false;}
   if(!guard())return false;
+  if((v.name==='records'||v.name==='record')&&v.formId)noteRecentForm(v.formId);
   ui.leaveOk=false;ui.confirm=null;
   if(view.name==='report')leaveReport();
   if((view.name==='report'&&reportDirty(view.reportId))||(view.name==='dashboard'&&dashDirty(view.dashboardId)))forgetDrafts();
@@ -402,6 +404,9 @@ function formResults(){
 function paintFormResults(){
   const box=$('#fs-res'),q=$('#fs-q');if(!box||!q)return;
   box.innerHTML=formResults();box.hidden=!fsShown();
+  // wide enough for full form names: it floats over the page beside the sidebar (not in the phone drawer)
+  if(!box.hidden&&window.innerWidth>820){const r=q.getBoundingClientRect();Object.assign(box.style,{position:'fixed',left:r.left+'px',top:(r.bottom+4)+'px',right:'auto',minWidth:r.width+'px',maxWidth:Math.max(r.width,Math.min(520,window.innerWidth-r.left-16))+'px',maxHeight:Math.max(200,Math.min(480,window.innerHeight-r.bottom-20))+'px'});}
+  else box.removeAttribute('style');
   q.setAttribute('aria-expanded',box.hidden?'false':'true');
   const hi=box.querySelector('.fs-item.hi');if(hi){q.setAttribute('aria-activedescendant',hi.id);hi.scrollIntoView({block:'nearest'});}else q.removeAttribute('aria-activedescendant');
 }
@@ -415,35 +420,59 @@ function themeButton(){
   const now=t==='auto'?'Auto (follows this device)':themeLabel(t);
   return `<button type="button" class="ibtn theme-btn" data-act="theme" aria-label="Theme: ${now}. Switch to ${themeLabel(nx)}" title="Theme: ${now} · click for ${themeLabel(nx)}">${THEME_ICON[t]}</button>`;
 }
+/* Forms opened recently on this device (the sidebar's Forms list leans on them). */
+const RECENT_KEY='fw.recentForms';
+function recentForms(){try{const v=JSON.parse(localStorage.getItem(RECENT_KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
+function noteRecentForm(id){try{localStorage.setItem(RECENT_KEY,JSON.stringify(pushRecent(recentForms(),id)));}catch(e){/* private mode */}}
+/** Administration in the sidebar: folded unless you open it (remembered on this device) or you're on one of its pages. */
+const admOpen=()=>{if(ADMIN_VIEWS.has(view.name))return true;try{return localStorage.getItem('fw.adminOpen')==='1';}catch(e){return false;}};
 function renderSide(){
   const fsFocus=document.activeElement?.id==='fs-q'?document.activeElement.selectionStart:null; // a redraw while searching keeps the cursor
-  const fs=sidebarForms();
   const activeForm=(view.name==='records'||view.name==='record')?view.formId:null;
   const me=store.me||{};const name=store.profiles[me.uid]?.displayName||store.user?.displayName||store.user?.email||'You';
-  const adm=isAdmin(me);
+  const adm=isAdmin(me),can=f=>canViewForm(store.me,f.id);
+  const total=allSearchable(store.forms,can).length;
+  const list=sidebarFormList(store.forms,can,recentForms(),6);
+  const navBtn=(act,on,label,glyph,extra='')=>`<button class="nav${on?' on':''}" data-act="${act}"${on?' aria-current="page"':''}><span class="glyph navg">${glyph}</span><span class="t">${label}</span>${extra}</button>`;
+  const ao=adm&&admOpen();
   $('#side').innerHTML=`
     <div class="brand"><span class="brand-mark"><i></i></span><b>Formwright</b></div>
-    <div class="navlabel" id="fs-lab">Forms</div>
     <div class="fsearch">
       <svg class="fs-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-      <input type="search" class="in" id="fs-q" role="combobox" aria-autocomplete="list" aria-controls="fs-res" aria-expanded="${fsShown()?'true':'false'}" aria-labelledby="fs-lab" placeholder="Search forms" autocomplete="off" value="${esc(ui.fq||'')}">
+      <input type="search" class="in" id="fs-q" role="combobox" aria-autocomplete="list" aria-controls="fs-res" aria-expanded="${fsShown()?'true':'false'}" aria-label="Search forms" placeholder="Search forms" autocomplete="off" value="${esc(ui.fq||'')}">
+      <button type="button" class="fs-k" data-act="palette" aria-keyshortcuts="Control+K" title="Search everything: forms, records, pages (Ctrl K)">Ctrl K</button>
       <div id="fs-res" class="fs-res" role="listbox" aria-label="Forms"${fsShown()?'':' hidden'}>${formResults()}</div>
     </div>
-    <div class="navlabel" style="margin-top:12px">Insights</div>
-    <button class="nav${onHome()?' on':''}" data-act="nav-home"${onHome()?' aria-current="page"':''}><span class="glyph navg">⌂</span><span class="t">Home</span></button>
+    <div class="navlabel">Workspace</div>
+    ${navBtn('nav-home',onHome(),'Home','⌂')}
     <button class="nav${view.name==='mywork'?' on':''}" data-act="nav-mywork"${view.name==='mywork'?' aria-current="page"':''}><span class="glyph navg">☰</span><span class="t">My work</span>${cmt.unreadCount()?`<span class="nb" title="${cmt.unreadCount()} unread mention${cmt.unreadCount()===1?'':'s'}"><span class="sr">, </span>${cmt.unreadCount()}<span class="sr"> unread</span></span>`:''}<span class="n">${myWorkCount()||''}</span></button>
-    <button class="nav${(view.name==='dashboards'||view.name==='dashboard')&&!onHome()?' on':''}" data-act="nav-dashboards"><span class="glyph navg">▦</span><span class="t">Dashboards</span><span class="n">${counts().dashboards}</span></button>
-    <button class="nav${view.name==='reports'||view.name==='report'?' on':''}" data-act="nav-reports"><span class="glyph navg">▤</span><span class="t">Reports</span><span class="n">${counts().reports}</span></button>
-    ${adm?`<div class="navlabel" style="margin-top:12px">Administration</div>
-    <button class="nav${view.name==='designer'||view.name==='formEdit'?' on':''}" data-act="nav-designer"><span class="glyph navg">⚙</span><span class="t">Form designer</span><span class="n">${store.forms.length}</span></button>
-    <button class="nav${view.name==='groups'||view.name==='groupEdit'?' on':''}" data-act="nav-groups"><span class="glyph navg">◫</span><span class="t">Security groups</span><span class="n">${store.groups.length}</span></button>
-    <button class="nav${view.name==='users'?' on':''}" data-act="nav-users"><span class="glyph navg">☺</span><span class="t">Users</span><span class="n">${store.users.length}</span></button>
-    <button class="nav${view.name==='imports'?' on':''}" data-act="nav-imports"><span class="glyph navg">⇪</span><span class="t">Import history</span><span class="n">${store.imports.length}</span></button>
-    <button class="nav${view.name==='exports'?' on':''}" data-act="nav-exports"><span class="glyph navg">⇩</span><span class="t">PDF exports</span></button>
-    <button class="nav${view.name==='automations'||view.name==='automation'?' on':''}" data-act="nav-automations"><span class="glyph navg">↯</span><span class="t">Automations</span><span class="n">${store.automations.filter(a=>a.on).length||''}</span></button>
-    <button class="nav${view.name==='audit'?' on':''}" data-act="nav-audit"><span class="glyph navg">⌕</span><span class="t">Audit trail</span></button>`:''}
-    <div class="side-foot"><div class="who"><b>${esc(name)}</b><span>${adm?'Administrator':'Member'}</span></div>${themeButton()}<button class="btn sm ghost" data-act="sign-out">Sign out</button></div>`;
+    ${navBtn('nav-dashboards',(view.name==='dashboards'||view.name==='dashboard')&&!onHome(),'Dashboards','▦',`<span class="n">${counts().dashboards}</span>`)}
+    ${navBtn('nav-reports',view.name==='reports'||view.name==='report','Reports','▤',`<span class="n">${counts().reports}</span>`)}
+    <div class="navlabel">Forms</div>
+    ${list.length?list.map(f=>`<button class="nav nav-form${f.id===activeForm?' on':''}" data-act="nav-form" data-id="${f.id}"${f.id===activeForm?' aria-current="page"':''} title="${esc(f.name)}">${badge(f)}<span class="t">${esc(f.name)}</span><span class="n">${recordsOf(f.id).length}</span></button>`).join(''):'<p class="nav-empty">No forms shared with you yet.</p>'}
+    ${total>list.length?`<button class="nav nav-all" data-act="fs-all"><span class="t">All forms (${total})</span><span aria-hidden="true">→</span></button>`:''}
+    ${adm?`<button class="nav nav-fold" data-act="adm-fold" aria-expanded="${ao}"><span class="t">Administration</span><span class="fold-ic" aria-hidden="true">${ao?'▾':'▸'}</span></button>
+    ${ao?`<div class="nav-adm">
+    ${navBtn('nav-designer',view.name==='designer'||view.name==='formEdit','Form designer','⚙',`<span class="n">${store.forms.length}</span>`)}
+    ${navBtn('nav-groups',view.name==='groups'||view.name==='groupEdit','Security groups','◫',`<span class="n">${store.groups.length}</span>`)}
+    ${navBtn('nav-users',view.name==='users','Users','☺',`<span class="n">${store.users.length}</span>`)}
+    ${navBtn('nav-imports',view.name==='imports','Import history','⇪',`<span class="n">${store.imports.length}</span>`)}
+    ${navBtn('nav-exports',view.name==='exports','PDF exports','⇩')}
+    ${navBtn('nav-automations',view.name==='automations'||view.name==='automation','Automations','↯',`<span class="n">${store.automations.filter(a=>a.on).length||''}</span>`)}
+    ${navBtn('nav-audit',view.name==='audit','Audit trail','⌕')}</div>`:''}`:''}
+    <div class="side-foot">${ui.appear?appearanceHTML():''}<div class="who"><b>${esc(name)}</b><span>${adm?'Administrator':'Member'}</span></div><button type="button" class="ibtn theme-btn" data-act="appear" aria-expanded="${!!ui.appear}" aria-label="Appearance: mode, colour and density" title="Appearance">${THEME_ICON[readTheme(localStorage)]}</button><button class="btn sm ghost" data-act="sign-out">Sign out</button></div>`;
   if(fsFocus!=null){const q=$('#fs-q');if(q){q.focus({preventScroll:true});try{q.setSelectionRange(fsFocus,fsFocus)}catch(e){}paintFormResults();}}
+}
+/** Appearance (the sidebar's footer button): Light / Dark / Auto, a colour scheme and density, kept on this device. */
+function appearanceHTML(){
+  const t=readTheme(localStorage),sc=readScheme(localStorage),dn=readDensity(localStorage);
+  const sw={indigo:['#3346c8','#f3f4f7'],spruce:['#0f6b5c','#13332d'],sand:['#a8481a','#f6f1e8']};
+  return `<div class="appear" role="dialog" aria-label="Appearance" data-stop-scrim="1">
+    <b class="ap-h">Appearance</b>
+    <div class="ap-row"><span class="ap-l" id="ap-mode">Mode</span><div class="segs" role="group" aria-labelledby="ap-mode">${['auto','light','dark'].map(k=>`<button type="button" class="${t===k?'on':''}" aria-pressed="${t===k}" data-act="ap-mode" data-v="${k}">${themeLabel(k)}</button>`).join('')}</div></div>
+    <div class="ap-row"><span class="ap-l" id="ap-col">Colour</span><div class="ap-sw" role="group" aria-labelledby="ap-col">${SCHEMES.map(k=>`<button type="button" class="ap-scheme${sc===k?' on':''}" aria-pressed="${sc===k}" data-act="ap-scheme" data-v="${k}"><span class="ap-dot" style="background:${sw[k][0]};box-shadow:6px 0 0 ${sw[k][1]}" aria-hidden="true"></span>${schemeLabel(k)}</button>`).join('')}</div></div>
+    <div class="ap-row"><span class="ap-l" id="ap-den">Density</span><div class="segs" role="group" aria-labelledby="ap-den">${DENSITIES.map(k=>`<button type="button" class="${dn===k?'on':''}" aria-pressed="${dn===k}" data-act="ap-density" data-v="${k}">${densityLabel(k)}</button>`).join('')}</div></div>
+    <p class="help">Saved on this device only.</p></div>`;
 }
 function renderMain(){
   const m=$('#main');let h='',title='Formwright';
@@ -600,7 +629,21 @@ function viewRecord(form){
   grels.forEach(({rel,cf})=>{sec[cf.id]=gridSection(form,rel,cf,rdraft,ro||reading);});
   if(rec)children.forEach(({cf})=>{sec[cf.id]=childSection(form,cf,rec,ro);});
   if(rec)sec[TASKS_KEY]=`<section class="section" id="rec-tasks">${tasksInner()}</section>`;
-  const sectionsHTML=sectionOrder(form).map(k=>sec[k]||'').join('');
+  const sectionsHTML=sectionOrder(form).filter(k=>k!==TASKS_KEY).map(k=>sec[k]||'').join('');
+  // Comments, Tasks and Activity: a side panel with tabs on wide screens, one after another below the form otherwise
+  let asideHTML='';
+  if(rec){
+    const cHTML=`<div id="rec-comments">${cmt.html()}</div>`;
+    const tabs=[{k:'comments',label:'Comments',n:cmt.count(),html:cHTML}];
+    if(sec[TASKS_KEY])tabs.push({k:'tasks',label:'Tasks',n:tw.recordId===rec.id&&tw.status==='ready'?(tw.tasks||[]).length:0,html:sec[TASKS_KEY]});
+    const mails=sentEmailsHTML();
+    if(wfOn(form)||isAdmin(store.me)||mails)tabs.push({k:'activity',label:'Activity',n:0,html:`${wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}<div id="rec-emails">${mails}</div>`});
+    const cur=tabs.some(t=>t.k===ui.rsTab)?ui.rsTab:'comments';
+    asideHTML=`<aside class="rec-aside" aria-label="Comments, tasks and activity">
+      <div class="rs-tabs" role="tablist" aria-label="Side panel">${tabs.map(t=>`<button type="button" role="tab" id="rs-t-${t.k}" aria-controls="rs-p-${t.k}" aria-selected="${t.k===cur}" class="rs-tab${t.k===cur?' on':''}" data-act="rs-tab" data-v="${t.k}"${t.k===cur?'':' tabindex="-1"'}>${t.label}${t.n?` <span class="rs-n">${t.n}</span>`:''}</button>`).join('')}</div>
+      ${tabs.map(t=>`<div class="rs-panel${t.k===cur?' on':''}" id="rs-p-${t.k}" role="tabpanel" aria-labelledby="rs-t-${t.k}">${t.html}</div>`).join('')}
+    </aside>`;
+  }
   let backHTML='';
   if(rec){
     const links=[];
@@ -611,27 +654,34 @@ function viewRecord(form){
   const foldAllBtn=fk.length>1||(fk.length===1&&fk[0].startsWith('h:'))?`<div class="actions"><button type="button" class="btn" data-act="fold-all" aria-label="${anyOpen?'Collapse all sections':'Expand all sections'}">${anyOpen?'Collapse all':'Expand all'}</button></div>`:'';
   const delKey='rec-'+(rec?.id||'');
   const kids=rec?store.records.filter(r=>r.parentId===rec.id).length:0;
+  // ⋯ More: the less-used actions, Delete last (it asks twice)
+  const more=[];
+  if(rec&&isAdmin(store.me))more.push(`<button type="button" role="menuitem" class="rb-item" data-act="rec-history">History</button>`);
+  if(rec&&canCreate(store.me,form.id))more.push(`<button type="button" role="menuitem" class="rb-item" data-act="rec-duplicate">Duplicate</button>`);
+  if(rec&&isAdmin(store.me))more.push(`<button type="button" role="menuitem" class="rb-item" data-act="email-pdf">Email PDF</button>`);
+  if(rec&&!ro)more.push(`<button type="button" role="menuitem" class="rb-item danger${ui.confirm===delKey?' armed':''}" data-act="del-record">${ui.confirm===delKey?(kids?`Tap again to delete (${kids} child record${kids>1?'s':''} stay)`:'Tap again to delete'):'Delete'}</button>`);
+  const moreHTML=more.length?`<div class="rb-more"><button type="button" class="btn" data-act="rec-more" aria-haspopup="menu" aria-expanded="${!!ui.recMore}" aria-label="More actions"><span aria-hidden="true">⋯</span> More</button>${ui.recMore?`<div class="rb-menu" role="menu" aria-label="More actions">${more.join('')}</div>`:''}</div>`:'';
   return `
   <div class="recbar" role="toolbar" aria-label="${esc(itemName(form))} actions">
-    ${rec&&!ro&&!reading?`<button class="btn danger${ui.confirm===delKey?' armed':''}" data-act="del-record">${ui.confirm===delKey?(kids?`Tap again to delete (${kids} child record${kids>1?'s':''} stay)`:'Tap again to delete'):'Delete'}</button>`:''}
+    <button class="btn ghost" data-act="back">${rdraft.dirty?'Discard':'<span aria-hidden="true">←</span> Back'}</button>
     <span class="grow" id="dirtynote" role="status">${rdraft.dirty?'Unsaved changes':ro?'Read only':''}</span>
-    ${rec&&!ro?`<button class="btn${reading?'':' ghost'}" data-act="rec-mode" aria-keyshortcuts="Control+Shift+C" title="${reading?'Edit':'Back to Read view'} (Ctrl+Shift+C)">${reading?'<span aria-hidden="true">✎</span> Edit':'Done'}</button>`:''}
-    ${rec&&isAdmin(store.me)?`<button class="btn ghost" data-act="rec-history" title="This ${esc(itemName(form).toLowerCase())} in the audit trail">History</button>`:''}
-    ${rec&&isAdmin(store.me)?`<button class="btn" data-act="email-pdf" title="Email this ${esc(itemName(form).toLowerCase())} as a PDF">Email PDF</button>`:''}
-    ${rec&&canCreate(store.me,form.id)?`<button class="btn ghost" data-act="rec-duplicate" title="Start a new ${esc(itemName(form).toLowerCase())} with this one’s details">Duplicate</button>`:''}
     ${rec?wordui.exportButton(ui.pdfBusy):''}
-    <button class="btn ghost" data-act="back">${rdraft.dirty?'Discard':'Back'}</button>
+    ${moreHTML}
+    ${rec&&!ro&&!reading?`<button class="btn ghost" data-act="rec-mode" aria-keyshortcuts="Control+Shift+C" title="Back to Read view (Ctrl+Shift+C)">Done</button>`:''}
+    ${rec&&!ro&&reading?`<button class="btn primary" data-act="rec-mode" aria-keyshortcuts="Control+Shift+C" title="Edit (Ctrl+Shift+C)"><span aria-hidden="true">✎</span> Edit</button>`:''}
     ${ro||reading?'':`<button class="btn primary" data-act="save-record">${rec?'Save':'Save '+esc(itemName(form).toLowerCase())}</button>`}
   </div>
   <div class="crumbs">${crumbs}</div>
-  <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}</h1>${rec?`<p class="sub">${recordMeta(rec)}</p>`:''}${!rec&&rdraft.duplicateOf?`<p class="sub dupnote">A copy of <b>${esc(rdraft.duplicateTitle||'')}</b>${rdraft.dupRows?` with its ${rdraft.dupRows} row${rdraft.dupRows>1?'s':''}`:''}. Nothing is saved until you click Save${rdraft.dupKids?`; its ${esc(rdraft.dupKids)} aren’t copied`:''}.</p>`:''}${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
+  <div class="head"><div class="ttl">${badge(form,1)}<div><h1>${esc(title)}${rec&&rec.stage&&wfOn(form)&&stageById(form,rec.stage)?` <span class="stage-chip">${esc(stageName(form,rec))}</span>`:''}</h1>${rec?`<p class="sub">${recordMeta(rec)}</p>`:''}${!rec&&rdraft.duplicateOf?`<p class="sub dupnote">A copy of <b>${esc(rdraft.duplicateTitle||'')}</b>${rdraft.dupRows?` with its ${rdraft.dupRows} row${rdraft.dupRows>1?'s':''}`:''}. Nothing is saved until you click Save${rdraft.dupKids?`; its ${esc(rdraft.dupKids)} aren’t copied`:''}.</p>`:''}${!rec&&rdraft.copied?`<p class="sub">${rdraft.copied} field${rdraft.copied>1?'s':''} copied from the ${esc(itemName(pform||{}).toLowerCase())}.</p>`:''}</div></div>${foldAllBtn}</div>
+  <div class="rec-layout${rec?' has-aside':''}"><div class="rec-main">
   ${parentPick}
   ${wfBar(form,rec)}
   <div class="panel">
     <fieldset class="fset${reading?' reading':''}"${ro&&!reading?' disabled':''}>${formFieldsHTML(form,rdraft,'record')}</fieldset>
   </div>
-  ${sectionsHTML}${rec&&wfOn(form)?`<div id="rec-history">${historyHTML(form)}</div>`:''}${backHTML}${rec?`<div id="rec-emails">${sentEmailsHTML()}</div>`:''}${rec?`<div id="rec-comments">${cmt.html()}</div>`:''}
+  ${sectionsHTML}${backHTML}
   ${!rec&&children.length?`<p class="help">Save this ${esc(itemName(form).toLowerCase())} to add ${children.map(c=>esc(c.cf.name.toLowerCase())).join(' and ')}.</p>`:''}
+  </div>${asideHTML}</div>
   ${cellPopup()}${ui.mail&&ui.mail.rec===rec?.id?mailDialog(form,rec):''}${ui.cascade&&ui.cascade.parentId===rec?.id?cascadeDialog():''}${ui.mailView&&ui.mailView.rec===rec?.id?mailViewDialog():''}${ui.mailDelAll?.stage===2&&ew.recordId===rec?.id&&ew.list.length?delAllDialog():''}${ui.wfAsk&&ui.wfAsk.recId===rec?.id?wfAskDialog(form,rec):''}${ui.modeAsk&&rec?modeAskDialog(form):''}`;
 }
 /** Leaving Edit view with unsaved changes: Save, Discard or Keep editing. */
@@ -811,7 +861,7 @@ function syncEmailWatch(){
     // the email open in the pop-up was deleted (here or by another admin): close it
     if(ui.mailView&&!list.some(m=>m.id===ui.mailView.id)&&!ui.mailView.busy){closeMailView();renderMain();return;}
     if(ui.mailDelAll&&!list.length)ui.mailDelAll=null;
-    const el=$('#rec-emails');if(el)el.innerHTML=sentEmailsHTML();
+    const el=$('#rec-emails');if(el)el.innerHTML=sentEmailsHTML();else if(ew.list.length&&view.name==='record')renderMain(); // the Activity tab appears
   });
 }
 /** "Sent emails" under a record: folds like the other sections; Show 5–20 or all; click one to open it. */
@@ -2072,6 +2122,11 @@ document.addEventListener('change',e=>{
 });
 function closeFormSearch(){ui.fq='';ui.fi=0;ui.fsOpen=false;const q=$('#fs-q');if(q)q.value='';paintFormResults();}
 document.addEventListener('pointerdown',e=>{if(fsShown()&&!e.target.closest?.('.fsearch'))closeFormSearch();},true);
+document.addEventListener('pointerdown',e=>{if(ui.recMore&&!e.target.closest?.('.rb-more')){ui.recMore=false;if(ui.confirm?.startsWith?.('rec-'))ui.confirm=null;renderMain();}},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ui.recMore){e.preventDefault();ui.recMore=false;renderMain();$('[data-act="rec-more"]')?.focus();}});
+document.addEventListener('pointerdown',e=>{if(ui.appear&&!e.target.closest?.('.appear,[data-act="appear"]')){ui.appear=false;renderSide();}},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ui.appear){e.preventDefault();ui.appear=false;renderSide();$('[data-act="appear"]')?.focus();}});
+window.addEventListener('resize',()=>{if(fsShown())paintFormResults();});
 // clicking or tapping into Search forms lists every form you can open; leaving it closes the list
 document.addEventListener('focusin',e=>{
   if(e.target?.id==='fs-q'){if(!ui.fsOpen){ui.fsOpen=true;ui.fi=0;paintFormResults();}return;}
@@ -2083,6 +2138,7 @@ document.addEventListener('click',async e=>{
   const el=e.target.closest('[data-act]');if(!el)return;
   const a=el.dataset.act,id=el.dataset.id;
   if(a!=='del-record'&&a!=='del-form'&&a!=='field-del'&&ui.confirm&&!a.startsWith('nav')){ui.confirm=null;}
+  if(ui.recMore&&a!=='rec-more'&&a!=='del-record')ui.recMore=false;
   switch(a){
     case 'menu':$('#side').classList.add('open');$('#scrim').classList.add('open');break;
     case 'close-menu':closeMenu();break;
@@ -2119,6 +2175,13 @@ document.addEventListener('click',async e=>{
       break;}
     case 'rec-history':if(view.recordId)go({name:'audit',recordId:view.recordId});break;
     case 'nav-exports':if(view.name!=='exports')exportLeave();go({name:'exports'});break;
+    case 'appear':ui.appear=!ui.appear;renderSide();if(ui.appear)setTimeout(()=>$('.appear button.on')?.focus(),0);else $('[data-act="appear"]')?.focus();break;
+    case 'ap-mode':applyTheme(document,el.dataset.v,localStorage);renderSide();$('[data-act="ap-mode"].on')?.focus();break;
+    case 'ap-scheme':applyScheme(document,el.dataset.v,localStorage);renderSide();$('[data-act="ap-scheme"].on')?.focus();break;
+    case 'ap-density':applyDensity(document,el.dataset.v,localStorage);renderSide();$('[data-act="ap-density"].on')?.focus();break;
+    case 'adm-fold':{const open=!admOpen();try{localStorage.setItem('fw.adminOpen',open?'1':'0');}catch(e){}renderSide();$('[data-act="adm-fold"]')?.focus();break;}
+    case 'fs-all':{const q=$('#fs-q');if(q){q.focus();ui.fsOpen=true;paintFormResults();}break;}
+    case 'palette':palette.open();break;
     case 'theme':{const t=applyTheme(document,nextTheme(readTheme(localStorage)),localStorage);renderSide();toast(themeLabel(t)==='Auto'?'Theme: Auto (follows this device)':'Theme: '+themeLabel(t)+' on this device');$('[data-act="theme"]')?.focus({preventScroll:true});break;}
     case 'sign-out':if(!guard())return;await signOutUser();break;
     case 'back':back();break;
@@ -2127,6 +2190,8 @@ document.addEventListener('click',async e=>{
     case 'add-child':{const parent=recById(view.recordId);const cf=formById(id);if(!parent||!cf)return;if(rdraft?.dirty){toast('Save this record first.');return;}goRec(newRecordDraft(cf,parent),{name:'record',formId:cf.id,recordId:null});break;}
     case 'save-record':saveRecord();break;
     case 'rec-mode':toggleRecMode();break;
+    case 'rs-tab':ui.rsTab=el.dataset.v;renderMain();$(`#rs-t-${CSS.escape(el.dataset.v)}`)?.focus();break;
+    case 'rec-more':ui.recMore=!ui.recMore;renderMain();if(ui.recMore)setTimeout(()=>$('.rb-menu .rb-item')?.focus(),0);else $('[data-act="rec-more"]')?.focus();break;
     case 'mode-keep':if(el.dataset.act==='mode-keep'&&(e.target===el||el.tagName==='BUTTON')){ui.modeAsk=false;renderMain();}break;
     case 'mode-discard':ui.modeAsk=false;rdraft=null;renderMain();break;
     case 'mode-save':ui.modeAsk=false;saveRecord();break;
@@ -2214,7 +2279,7 @@ document.addEventListener('click',async e=>{
     case 'sub-cols-reset':{const fid=rdraft?.formId;if(!fid)return;saveSub(fid,el.dataset.k,{cols:undefined});renderMain();break;}
     case 'sub-sort':{const fid=rdraft?.formId;if(!fid)return;const k=el.dataset.k,c=subCols(fid,k);if(!c)return;const cur=subPrefs(fid,k).sort;saveSub(fid,k,{sort:subNext(cur,el.dataset.v,c.firstDir(el.dataset.v))});renderMain();document.querySelector(`[data-act="sub-sort"][data-k="${CSS.escape(k)}"][data-v="${CSS.escape(el.dataset.v)}"]`)?.focus();break;}
     case 'sub-showall':{const fid=rdraft?.formId;if(!fid)return;saveSub(fid,el.dataset.k,{show:'all'});renderMain();break;}
-    case 'del-record':{const k='rec-'+view.recordId;if(ui.confirm!==k){ui.confirm=k;renderMain();return;}ui.confirm=null;const rid=view.recordId;rdraft.dirty=false;try{await store.del('records',rid);toast('Deleted');}catch(err){toast('Delete failed. Try again.');}break;}
+    case 'del-record':{const k='rec-'+view.recordId;if(ui.confirm!==k){ui.confirm=k;renderMain();$('.rb-item.danger')?.focus();return;}ui.recMore=false;ui.confirm=null;const rid=view.recordId;rdraft.dirty=false;try{await store.del('records',rid);toast('Deleted');}catch(err){toast('Delete failed. Try again.');}break;}
     case 'rate':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);const n=+el.dataset.n;d.values[f.id]=d.values[f.id]===n?0:n;markDirty(d);repaint(d,f);break;}
     case 'file-clear':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);d.values[f.id]=null;markDirty(d);repaint(d,f);break;}
     case 'sig-clear':{const d=draftOf(el);const f=formOfDraft(d).fields.find(x=>x.id===el.dataset.fid);d.values[f.id]=null;markDirty(d);repaint(d,f);break;}
@@ -2564,6 +2629,8 @@ export function startApp(){
   initAudit({fmt,formById,recById,recTitle:(r,f)=>recTitle(r,f),go,renderMain});
   initAttach({fmt,valOf,recTitle,titleFieldOf,formById,recById});
   initRichUI();
+  palette.initPalette({store,formById,recTitle,isAdmin:()=>isAdmin(store.me),canView:f=>canViewForm(store.me,f.id),canCreate:id=>canCreate(store.me,id),searchable:()=>allSearchable(store.forms,f=>canViewForm(store.me,f.id)).map(x=>x.form),
+    go:v=>go(v),home:()=>home(),newRecord:id=>{const f=formById(id);if(f)goRec(newRecordDraft(f,null),{name:'record',formId:id,recordId:null});},openRecord:id=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});
   tm.initTaskModal({store,recById,formById,recTitle,toast,cadenceUrl,tasks:()=>tw.tasks||[]});
   cmt.initComments({store,view:()=>view,recById,formById,recTitle,itemName,toast,isAdmin:()=>isAdmin(store.me),canUseTasks,foldBtn,folded,
     unfold:(fid,k)=>saveFolds(setFold(folds(),fid,k,false)),openRecord:id=>{const r=recById(id);if(!r)return;if(view.name==='record'&&view.recordId===id){renderMain();return;}goRec(null,{name:'record',formId:r.formId,recordId:r.id});}});

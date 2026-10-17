@@ -39,3 +39,21 @@ export function designerMatch(form, q) {
   const t = String(q || '').trim().toLowerCase();
   return !t || String((form && form.name) || '').toLowerCase().includes(t);
 }
+
+/** Recently opened forms, newest first, without repeats. */
+export function pushRecent(list, id, max = 8) {
+  return [id, ...(list || []).filter((x) => x !== id)].slice(0, max);
+}
+
+/**
+ * The sidebar's Forms list: up to n forms — the ones you opened recently, topped up with the rest
+ * in their own order — shown in the forms' own order so the list doesn't jump around.
+ */
+export function sidebarFormList(forms, canView, recentIds, n = 6) {
+  const can = searchableForms(forms, canView);
+  const ord = (a, b) => (a.order ?? 0) - (b.order ?? 0) || can.indexOf(a) - can.indexOf(b);
+  const byId = new Map(can.map((f) => [f.id, f]));
+  const pick = (recentIds || []).map((id) => byId.get(id)).filter(Boolean).slice(0, n);
+  for (const f of [...can].sort(ord)) { if (pick.length >= n) break; if (!pick.includes(f)) pick.push(f); }
+  return pick.sort(ord);
+}

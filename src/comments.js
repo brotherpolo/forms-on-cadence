@@ -326,6 +326,8 @@ async function remove(id) {
 }
 
 /* ---------- My work → Mentions ---------- */
+/** How many comments the open record has (after html() has drawn them). */
+export const count = () => shownCount(S.list);
 export const unreadCount = () => unreadOf(H?.store.mentions).length;
 
 export function mentionsHTML() {
