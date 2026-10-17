@@ -55,7 +55,7 @@ import { signOutUser } from './auth.js';
 import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
 import examples from './examples.json';
 
-const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'import', 'imports', 'exports', 'audit', 'automations', 'automation']);
+const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'roles', 'roleEdit', 'import', 'imports', 'exports', 'audit', 'automations', 'automation']);
 
 // other words people search field types by
 const TYPE_WORDS={text:'short single line string name title',textarea:'long paragraph notes description multi line memo comments',email:'mail address',phone:'telephone mobile cell number',url:'website link web address',location:'address map gps place',number:'integer whole count quantity',decimal:'float number fraction',currency:'money price cost dollar amount',percent:'percentage rate',rating:'stars score',range:'slider scale',formula:'calculation calculated computed formula sum total',autonumber:'auto number automatic sequence serial counter invoice id reference numbering',date:'day calendar',time:'clock hour',datetime:'timestamp date time when',checkbox:'yes no toggle boolean switch tick check',select:'dropdown choice pick list menu options',radio:'single choice option buttons one of',multiselect:'multiple choice checkboxes tags many',file:'upload attachment document pdf',image:'photo picture camera',signature:'sign autograph',color:'colour',relation:'link to record lookup reference relationship connect',heading:'section heading title divider group fold'};
@@ -455,6 +455,7 @@ function renderSide(){
     ${ao?`<div class="nav-adm">
     ${navBtn('nav-designer',view.name==='designer'||view.name==='formEdit','Form designer','⚙',`<span class="n">${store.forms.length}</span>`)}
     ${navBtn('nav-groups',view.name==='groups'||view.name==='groupEdit','Security groups','◫',`<span class="n">${store.groups.length}</span>`)}
+    ${navBtn('nav-roles',view.name==='roles'||view.name==='roleEdit','Roles','◉',`<span class="n">${(store.roles||[]).length}</span>`)}
     ${navBtn('nav-users',view.name==='users','Users','☺',`<span class="n">${store.users.length}</span>`)}
     ${navBtn('nav-imports',view.name==='imports','Import history','⇪',`<span class="n">${store.imports.length}</span>`)}
     ${navBtn('nav-exports',view.name==='exports','PDF exports','⇩')}
@@ -723,8 +724,11 @@ function syncStageWatch(){
   if(want)sw.unsub=watchStages(want,list=>{sw.list=list;const el=$('#rec-history');if(el){const f=formById(recById(want)?.formId);if(f)el.innerHTML=historyHTML(f);}});
 }
 const groupName=id=>store.groups.find(g=>g.id===id)?.name||'';
+const roleName=id=>store.roles.find(r=>r.id===id)?.name||'';
+const myRoles=()=>store.me?.roles||[];
 function whoHas(rec){
   if(rec.assignee)return rec.assignee===store.user?.uid?'you':realName(rec.assignee);
+  if(rec.assigneeRole){const n=roleName(rec.assigneeRole);return n?`anyone in ${n}${myRoles().includes(rec.assigneeRole)?' (you’re in it)':''}`:'a role';}
   if(rec.assigneeGroup){const n=groupName(rec.assigneeGroup);return n?`the ${n} group`:'a group';}
   return 'nobody yet';
 }
@@ -765,8 +769,8 @@ function historyHTML(form){
   const last=list[0];
   const head=`<div class="section-h"><h2>${foldBtn(k,open,`<span class="badge wf-badge" aria-hidden="true">⇢</span><span>Stage history</span> <span class="count">${list.length}</span>`,last?`${last.toName||''} · ${when(last.at)}`:'')}</h2></div>`;
   if(!open)return `<section class="section" id="wf-history">${head}</section>`;
-  const row=e=>`<li><div class="wf-h1"><b>${esc(realName(e.by))}</b> ${e.fromName?`moved it from <b>${esc(e.fromName)}</b> to <b>${esc(e.toName||'')}</b>`:`started it at <b>${esc(e.toName||'')}</b>`}${e.label?` <span class="chip">${esc(e.label)}</span>`:''}</div>
-    <div class="wf-h2">${esc(when(e.at))}${e.assignee?` · for ${esc(realName(e.assignee))}`:e.assigneeGroup?` · for ${esc(groupName(e.assigneeGroup)?'the '+groupName(e.assigneeGroup)+' group':'a group')}`:''}</div>${e.comment?`<blockquote class="wf-c">${esc(e.comment)}</blockquote>`:''}</li>`;
+  const row=e=>`<li><div class="wf-h1"><b>${esc(e.asRoleName?`${e.asRoleName} (${realName(e.by)})`:realName(e.by))}</b> ${e.fromName?`moved it from <b>${esc(e.fromName)}</b> to <b>${esc(e.toName||'')}</b>`:`started it at <b>${esc(e.toName||'')}</b>`}${e.label?` <span class="chip">${esc(e.label)}</span>`:''}</div>
+    <div class="wf-h2">${esc(when(e.at))}${e.assignee?` · for ${esc(realName(e.assignee))}`:e.assigneeRole?` · for ${esc(roleName(e.assigneeRole)||e.assigneeRoleName||'a role')}`:e.assigneeGroup?` · for ${esc(groupName(e.assigneeGroup)?'the '+groupName(e.assigneeGroup)+' group':'a group')}`:''}</div>${e.comment?`<blockquote class="wf-c">${esc(e.comment)}</blockquote>`:''}</li>`;
   return `<section class="section" id="wf-history">${head}<div class="panel subsec">${list.length?`<ol class="wf-hist">${list.map(row).join('')}</ol>`:'<p class="note">No moves yet.</p>'}</div></section>`;
 }
 function wfAskDialog(form,rec){
@@ -800,8 +804,11 @@ async function doWfMove(rec,form,target,label,comment){
   const next=assigneeFor(target,rec,store.user?.uid);
   ui.wfBusy=true;
   try{
-    await moveStage(rec.id,{stage:target.id,assignee:next.assignee||null,assigneeGroup:next.assigneeGroup||null,stageAt:Date.now()},
-      {from:rec.stage||null,fromName:rec.stage?stageName(form,rec):null,to:target.id,toName:target.name,label:String(label||'').slice(0,80),comment:String(comment||'').slice(0,2000),assignee:next.assignee||null,assigneeGroup:next.assigneeGroup||null});
+    // credit: a record waiting on a role I hold is moved "as" that role: Accounts (Farren)
+    const asRole=rec.assigneeRole&&myRoles().includes(rec.assigneeRole)?rec.assigneeRole:null;
+    await moveStage(rec.id,{stage:target.id,assignee:next.assignee||null,assigneeGroup:next.assigneeGroup||null,assigneeRole:next.assigneeRole||null,stageAt:Date.now()},
+      {from:rec.stage||null,fromName:rec.stage?stageName(form,rec):null,to:target.id,toName:target.name,label:String(label||'').slice(0,80),comment:String(comment||'').slice(0,2000),assignee:next.assignee||null,assigneeGroup:next.assigneeGroup||null,
+        assigneeRole:next.assigneeRole||null,assigneeRoleName:next.assigneeRole?roleName(next.assigneeRole).slice(0,80)||null:null,asRole,asRoleName:asRole?roleName(asRole).slice(0,80)||null:null});
     toast(`Moved to ${target.name} · ${whoHas({...rec,...next})}`);
     if(rdraft?.errors)Object.keys(rdraft.errors).forEach(k=>{if(rdraft.errors[k]==='Needed before moving on.')delete rdraft.errors[k];});
   }catch(e){console.error(e);toast(e?.code==='permission-denied'?'Only the person responsible, or an administrator, can move it. (Or the latest security rules aren’t deployed yet.)':'Moving it failed. Check your connection and try again.');}
@@ -828,7 +835,8 @@ function viewMyWork(){
 function viewWaiting(tab,hasWf){
   const me=store.user?.uid,groups=store.me?.groups||[],admin=isAdmin(store.me),who=admin?ui.wfWho||'me':'me',now=Date.now();
   const dues=new Map();
-  const recs=store.records.filter(r=>{const f=formById(r.formId);if(!f||!wfOn(f)||!r.stage||!stageById(f,r.stage))return false;return who==='all'||r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup));});
+  const roles=myRoles();
+  const recs=store.records.filter(r=>{const f=formById(r.formId);if(!f||!wfOn(f)||!r.stage||!stageById(f,r.stage))return false;return who==='all'||r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup))||(r.assigneeRole&&roles.includes(r.assigneeRole));});
   recs.forEach(r=>dues.set(r.id,dueOf(formById(r.formId),r)));
   const rank=r=>{const x=dues.get(r.id);return x?{overdue:0,today:1,soon:2,later:3}[x.state]:4;};
   recs.sort((a,b)=>rank(a)-rank(b)||String(dues.get(a.id)?.due||'').localeCompare(String(dues.get(b.id)?.due||''))||(a.stageAt||0)-(b.stageAt||0)); // overdue first, then by due date, then longest waiting
@@ -836,12 +844,12 @@ function viewWaiting(tab,hasWf){
   const byForm=new Map();recs.forEach(r=>{if(!byForm.has(r.formId))byForm.set(r.formId,[]);byForm.get(r.formId).push(r);});
   const tables=[...byForm].map(([fid,rs])=>{const f=formById(fid);return `<section class="section"><div class="section-h"><h2>${badge(f)}<span>${esc(f.name)}</span> <span class="count">${rs.length}</span></h2></div>
     <div class="panel"><div class="tblwrap"><table class="tbl lv-tbl wf-tbl"><thead><tr><th>${esc(itemName(f))}</th><th>Stage</th>${who==='all'?'<th>Person responsible</th>':''}<th>Due</th><th class="num">Waiting</th></tr></thead><tbody>${rs.map(r=>`<tr data-act="open-record" data-id="${esc(r.id)}" class="${dues.get(r.id)?.state==='overdue'?'wf-over':''}"><td class="title">${esc(recTitle(r,f))}</td><td>${esc(stageName(f,r))}</td>${who==='all'?`<td>${esc(whoHas(r))}</td>`:''}<td>${dueChip(dues.get(r.id),true)||'<span class="help">–</span>'}</td><td class="num">${esc(waited(r.stageAt,now))}</td></tr>`).join('')}</tbody></table></div></div></section>`;}).join('');
-  return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">${who==='all'?'Every record in a workflow and its person responsible':'Records you (or a group you’re in) are responsible for'}: overdue first, then by due date, then longest waiting.${nOver?` <b class="wf-overn">${nOver} overdue.</b>`:''}</p></div></div>
+  return `<div class="head"><div class="ttl"><div><h1>My work</h1><p class="sub">${who==='all'?'Every record in a workflow and its person responsible':'Records you (or a group or role you’re in) are responsible for'}: overdue first, then by due date, then longest waiting.${nOver?` <b class="wf-overn">${nOver} overdue.</b>`:''}</p></div></div>
     ${admin?`<div class="actions"><div class="segs" role="group" aria-label="Whose work"><button type="button" class="${who==='me'?'on':''}" aria-pressed="${who==='me'}" data-act="wf-who" data-v="me">Mine</button><button type="button" class="${who==='all'?'on':''}" aria-pressed="${who==='all'}" data-act="wf-who" data-v="all">Everyone</button></div></div>`:''}</div>
     ${myWorkTabs(tab,hasWf)}<div id="mw-p" role="tabpanel" aria-labelledby="mw-t-waiting">
     ${recs.length?tables:`<div class="panel empty"><h2>Nothing waiting${who==='all'?'':' on you'}</h2><p>When a record reaches a stage that’s yours, it shows up here.</p></div>`}</div>`;
 }
-const myWorkCount=()=>{const me=store.user?.uid,groups=store.me?.groups||[];return store.records.filter(r=>r.stage&&(r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup)))&&wfOn(formById(r.formId))).length;};
+const myWorkCount=()=>{const me=store.user?.uid,groups=store.me?.groups||[],roles=myRoles();return store.records.filter(r=>r.stage&&(r.assignee===me||(r.assigneeGroup&&groups.includes(r.assigneeGroup))||(r.assigneeRole&&roles.includes(r.assigneeRole)))&&wfOn(formById(r.formId))).length;};
 
 /* ---------- Email PDF (administrators) ----------
    Email PDF opens a short form: who to send to (addresses found on this record and the
@@ -1976,7 +1984,7 @@ async function saveForm(meta){
   if(meta)ui.saveMeta=meta;
   if(fv.textPending()){ui.saveMeta=null;toast('Apply your text changes first (or press Reset).');return;}
   if(!f.name.trim()){toast('Give the form a name first.');$('.title-in')?.focus();return;}
-  {const wp=checkWorkflow(f,{people:new Set(store.users.map(u=>u.id)),groups:new Set(store.groups.map(g=>g.id))});if(wp.length){ui.tab='workflow';renderMain();toast('Workflow: '+wp[0]);return;}}
+  {const wp=checkWorkflow(f,{people:new Set(store.users.map(u=>u.id)),groups:new Set(store.groups.map(g=>g.id)),roles:new Set((store.roles||[]).map(r=>r.id))});if(wp.length){ui.tab='workflow';renderMain();toast('Workflow: '+wp[0]);return;}}
   if(f.workflow?.stages){f.workflow.stages.forEach(x=>{x.name=String(x.name||'').trim();x.moves=(x.moves||[]).filter(m=>m.label&&m.label.trim()&&f.workflow.stages.some(y=>y.id===m.to));});}
   f.fields.forEach(x=>{if(!x.label.trim())x.label='Untitled field';if(CHOICE.has(x.type))x.options=(x.options||[]).filter(Boolean);});
   // system names: unique on the form; one the same as the caption isn't stored
@@ -2150,6 +2158,7 @@ document.addEventListener('click',async e=>{
     case 'nav-dashboards':go({name:'dashboards'});break;
     case 'nav-home':goHome();break;
     case 'nav-groups':go({name:'groups'});break;
+    case 'nav-roles':go({name:'roles'});break;
     case 'nav-users':go({name:'users'});break;
     case 'nav-imports':go({name:'imports'});break;
     case 'nav-audit':go({name:'audit'});break;
@@ -2644,7 +2653,7 @@ export function startApp(){
     openRecord:id=>{const r=recById(id);if(r)goRec(null,{name:'record',formId:r.formId,recordId:r.id});},
     openMyWork:tab=>{ui.mwTab=tab;if(view.name==='mywork')renderMain();else go({name:'mywork'});}});
   fv.initFormVer({fdraft:()=>fdraft,setFdraft:f=>{fdraft=f;pdraft=null;},setFdirty,renderMain,saveForm,formById,recordsOf,isEmpty,toast,when,forms:()=>store.forms,newId:()=>uid('x'),me:()=>store.user?.uid,personName:id=>realName(id),closeField:()=>{ui.openField=null;}});
-  initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
+  initWfDesign({setFdirty,renderMain,ui:()=>ui,people:()=>store.users.map(u=>({id:u.id,name:store.profiles[u.id]?.displayName||u.displayName||(u.email||'').split('@')[0]||'Unnamed'})).sort((a,b)=>a.name.localeCompare(b.name)),groups:()=>[...store.groups].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),roles:()=>[...(store.roles||[])].sort((a,b)=>(a.name||'').localeCompare(b.name||'')),sections:f=>rulesCtx(f).targets.filter(t=>['grid','child','tasks'].includes(t.kind))});
   initAutos({formById,recById,parentsOf,recordsOf,recTitle,go,renderMain,forms:()=>[...store.forms].sort(byOrder)});
   initRules({fdraft:()=>fdraft,formById,recById,parentsOf,recordsOf,recTitle,setFdirty,renderMain,ui:()=>ui});
   initImports({ruleClears:(form,r)=>toClear(form,r.values,rulesOf(form,r,r.parentId?recById(r.parentId):null)),fmt,recTitle,formById,go,renderMain,computeFormulas:(form,rec)=>{const out={};(form.fields||[]).filter(f=>f.type==='formula').forEach(f=>{const r=calc(form,f,rec);out[f.id]=r.e?null:r.v;});return out;}});

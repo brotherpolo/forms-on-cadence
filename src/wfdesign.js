@@ -4,12 +4,13 @@ import { esc, uid } from './ui.js';
 import { shownName } from './fieldnames.js';
 import { FIELD_MODES, defaultMoves, checkWorkflow } from './workflow.js';
 
-let H = { setFdirty: null, renderMain: null, people: () => [], groups: () => [], sections: () => [], ui: () => ({}) };
+let H = { setFdirty: null, renderMain: null, people: () => [], groups: () => [], roles: () => [], sections: () => [], ui: () => ({}) };
 export function initWfDesign(helpers) { H = { ...H, ...helpers }; }
 
 const ASSIGN = [
   { key: 'owner', label: 'the record’s owner' },
   { key: 'person', label: 'a specific person' },
+  { key: 'role', label: 'a role (anyone in it)' },
   { key: 'group', label: 'a security group' },
   { key: 'mover', label: 'whoever moved it here' },
   { key: 'keep', label: 'the same person as before' },
@@ -36,6 +37,7 @@ function stageCard(f, s, i, n) {
       <button type="button" class="btn sm danger${ui.confirm === 'wfs-' + s.id ? ' armed' : ''}" ${at} data-wfa="del">${ui.confirm === 'wfs-' + s.id ? 'Tap again to delete' : 'Delete'}</button></header>
     <div class="am-row"><span class="am-lab">Goes to</span><select class="in am-sel" ${at} data-wfd="atype">${ASSIGN.map((x) => `<option value="${x.key}"${x.key === a.type ? ' selected' : ''}>${esc(x.label)}</option>`).join('')}</select>
       ${a.type === 'person' ? `<select class="in am-sel" ${at} data-wfd="aperson"><option value="">Pick someone…</option>${H.people().map((p) => `<option value="${esc(p.id)}"${p.id === a.person ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}
+      ${a.type === 'role' ? `<select class="in am-sel" ${at} data-wfd="arole"><option value="">Pick a role…</option>${H.roles().map((r) => `<option value="${esc(r.id)}"${r.id === a.role ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select>${H.roles().length ? '' : '<span class="help">No roles yet: add them in Administration → Roles.</span>'}` : ''}
       ${a.type === 'group' ? `<select class="in am-sel" ${at} data-wfd="agroup"><option value="">Pick a group…</option>${H.groups().map((g) => `<option value="${esc(g.id)}"${g.id === a.group ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select>` : ''}</div>
     <div class="am-row"><label class="wf-due"><span class="am-lab">Due within</span><input class="in wf-duein" type="number" min="0" max="365" step="1" inputmode="numeric" ${at} data-wfd="due" value="${esc(s.dueDays ?? '')}" placeholder="–" aria-label="Due within how many working days"><span class="help">working days of arriving (Monday to Friday). Empty: no due date.</span></label></div>
     <div class="am-row"><label class="switch"><input type="checkbox" ${at} data-wfd="ntask"${s.notify?.task ? ' checked' : ''}><span class="tr"></span><span>Create a Cadence task for them</span></label>
@@ -66,7 +68,7 @@ function fieldTable(f) {
 export function viewWorkflow(f) {
   const w = f.workflow;
   const on = !!w?.on;
-  const probs = on ? checkWorkflow(f, { people: new Set(H.people().map((p) => p.id)), groups: new Set(H.groups().map((g) => g.id)) }) : [];
+  const probs = on ? checkWorkflow(f, { people: new Set(H.people().map((p) => p.id)), groups: new Set(H.groups().map((g) => g.id)), roles: new Set(H.roles().map((r) => r.id)) }) : [];
   return `<div class="wf-design">
     <section class="panel am-sec"><label class="switch"><input type="checkbox" data-wfd="on"${on ? ' checked' : ''}><span class="tr"></span><span>Use a workflow for ${esc((f.name || 'this form').toLowerCase())}</span></label>
       <p class="help">Records move through stages, like Draft → Review → Approved. At each stage one person (or a security group) is responsible: only they and administrators can change the record, and it shows in their <b>My work</b>. Each stage has its own buttons to move on, and decides which fields show, can change, or must be filled first. Records already saved join the workflow when someone starts them.</p></section>
@@ -116,6 +118,7 @@ export function wfChange(f, el) {
     case 'atype': s.assign = { type: el.value }; changed(); return true;
     case 'aperson': s.assign = { type: 'person', person: el.value }; changed(); return true;
     case 'agroup': s.assign = { type: 'group', group: el.value }; changed(); return true;
+    case 'arole': s.assign = { type: 'role', role: el.value }; changed(); return true;
     case 'due': { const v = el.value.trim(); if (v === '') delete s.dueDays; else s.dueDays = Math.max(0, Math.min(365, Math.round(+v) || 0)); H.setFdirty(); return true; }
     case 'ntask': s.notify = { ...(s.notify || {}), task: el.checked }; changed(); return true;
     case 'nemail': s.notify = { ...(s.notify || {}), email: el.checked }; changed(); return true;

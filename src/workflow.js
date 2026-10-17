@@ -12,7 +12,7 @@
 //   moves: [{ id, label, to: stageId, comment: bool }]           (the buttons)
 //   dueDays: n                                                   (optional: due within n working days, Monday to Friday)
 // }] }
-// record: stage (stage id), assignee (uid|null), assigneeGroup (group id|null), stageAt (ms)
+// record: stage (stage id), assignee (uid|null), assigneeGroup (group id|null), assigneeRole (role id|null), stageAt (ms)
 import { headingOf } from './foldlogic.js';
 
 export const STAGE_FIELD = '_stage';
@@ -62,17 +62,29 @@ export function canWork(rec, me) {
   if (me.role === 'admin') return true;
   if (!rec || !rec.stage) return true; // not in the workflow yet: ordinary access applies
   const id = me.uid || me.id;
-  return rec.assignee === id || (!!rec.assigneeGroup && (me.groups || []).includes(rec.assigneeGroup));
+  return rec.assignee === id || (!!rec.assigneeGroup && (me.groups || []).includes(rec.assigneeGroup))
+    || (!!rec.assigneeRole && (me.roles || []).includes(rec.assigneeRole));
 }
 
-/** Who a stage goes to when a record arrives there: { assignee, assigneeGroup }. */
+/**
+ * Who gets the credit for moving a record on: "Accounts (Farren)" when it was waiting on a role
+ * the mover holds, otherwise just the mover's name. roles: [{ id, name }].
+ */
+export function creditName(rec, me, myName, roles) {
+  const r = rec && rec.assigneeRole && (me?.roles || []).includes(rec.assigneeRole) ? (roles || []).find((x) => x.id === rec.assigneeRole) : null;
+  return r ? `${r.name || 'Role'} (${myName})` : myName;
+}
+
+/** Who a stage goes to when a record arrives there: { assignee, assigneeGroup, assigneeRole }. */
 export function assigneeFor(stage, rec, moverId) {
   const a = stage?.assign || { type: 'owner' };
-  if (a.type === 'person' && a.person) return { assignee: a.person, assigneeGroup: null };
-  if (a.type === 'group' && a.group) return { assignee: null, assigneeGroup: a.group };
-  if (a.type === 'mover') return { assignee: moverId || rec?.ownerId || null, assigneeGroup: null };
-  if (a.type === 'keep' && rec && (rec.assignee || rec.assigneeGroup)) return { assignee: rec.assignee || null, assigneeGroup: rec.assigneeGroup || null };
-  return { assignee: rec?.ownerId || moverId || null, assigneeGroup: null };
+  const one = (assignee, assigneeGroup = null, assigneeRole = null) => ({ assignee, assigneeGroup, assigneeRole });
+  if (a.type === 'person' && a.person) return one(a.person);
+  if (a.type === 'group' && a.group) return one(null, a.group);
+  if (a.type === 'role' && a.role) return one(null, null, a.role);
+  if (a.type === 'mover') return one(moverId || rec?.ownerId || null);
+  if (a.type === 'keep' && rec && (rec.assignee || rec.assigneeGroup || rec.assigneeRole)) return one(rec.assignee || null, rec.assigneeGroup || null, rec.assigneeRole || null);
+  return one(rec?.ownerId || moverId || null);
 }
 
 /** A stage's buttons with their target stages (moves to stages that no longer exist are left out). */
@@ -96,7 +108,7 @@ export function defaultMoves(stages, i) {
 }
 
 /** Problems in a workflow's set-up: [text]. */
-export function checkWorkflow(form, { people = new Set(), groups = new Set() } = {}) {
+export function checkWorkflow(form, { people = new Set(), groups = new Set(), roles = new Set() } = {}) {
   if (!form?.workflow?.on) return [];
   const out = [], st = form.workflow.stages || [];
   if (!st.length) out.push('Add at least one stage.');
@@ -109,6 +121,8 @@ export function checkWorkflow(form, { people = new Set(), groups = new Set() } =
     if (s.assign?.type === 'person' && s.assign.person && people.size && !people.has(s.assign.person)) out.push(`${n}: that person no longer has an account.`);
     if (s.assign?.type === 'group' && !s.assign.group) out.push(`${n}: pick which security group.`);
     if (s.assign?.type === 'group' && s.assign.group && groups.size && !groups.has(s.assign.group)) out.push(`${n}: that security group no longer exists.`);
+    if (s.assign?.type === 'role' && !s.assign.role) out.push(`${n}: pick which role.`);
+    if (s.assign?.type === 'role' && s.assign.role && roles.size && !roles.has(s.assign.role)) out.push(`${n}: that role no longer exists.`);
     if (s.dueDays != null && s.dueDays !== '' && !(Number.isInteger(+s.dueDays) && +s.dueDays >= 0 && +s.dueDays <= 365)) out.push(`${n}: the working days it’s due within should be a whole number from 0 to 365.`);
     (s.moves || []).forEach((m) => { if (!m.label?.trim()) out.push(`${n}: a button needs a label.`); if (!st.some((x) => x.id === m.to)) out.push(`${n}: “${m.label || 'a button'}” goes to a stage that no longer exists.`); });
   });

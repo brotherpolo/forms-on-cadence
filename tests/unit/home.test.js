@@ -33,7 +33,7 @@ test('screens: admin ones only for admins; My work only with a workflow', () => 
   assert.equal(linkInfo({ to: 'page', page: 'mywork' }, env({ wf: true })).sub, '2 waiting on you');
   assert.equal(linkInfo({ to: 'page', page: 'dashboards' }, env()).sub, '3 dashboards');
   assert.equal(linkInfo({ to: 'page', page: 'reports' }, env()).sub, '1 report');
-  assert.equal(PAGES.filter((p) => p.admin).length, 7);
+  assert.equal(PAGES.filter((p) => p.admin).length, 8);
 });
 
 test('who sees which tiles', () => {

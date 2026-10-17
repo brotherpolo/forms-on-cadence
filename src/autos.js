@@ -13,7 +13,7 @@ export function initAutos(helpers) { H = { ...H, ...helpers }; }
 const AM = { id: null, draft: null, dirty: false, busy: false, armed: false, problems: null, runs: null, runsBusy: false, test: { recordId: '', busy: false, out: null, err: null }, leaveArmed: false };
 const people = () => [...store.users].map((u) => ({ id: u.id, name: store.profiles[u.id]?.displayName || u.displayName || (u.email || '').split('@')[0] || 'Unnamed', email: u.email || '' })).sort((a, b) => a.name.localeCompare(b.name));
 const personName = (id) => people().find((p) => p.id === id)?.name || 'someone';
-const ctxText = { formById: (id) => H.formById(id), parentsOf: (id) => H.parentsOf(id), person: personName };
+const ctxText = { formById: (id) => H.formById(id), parentsOf: (id) => H.parentsOf(id), person: personName, role: (id) => (store.roles || []).find((r) => r.id === id)?.name || 'a removed role' };
 const when = (t) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const fieldsOf = (f, pred = () => true) => (f?.fields || []).filter((x) => x.type !== 'heading' && pred(x));
 
@@ -134,6 +134,7 @@ function actHTML(x, ai, form) {
         ${parents.flatMap((p) => fieldsOf(p, (g) => g.type === 'email').map((g) => chk('topfield', g.id, (to.parentFields || []).includes(g.id), `${itemName(p)} › ${g.label}`))).join('')}
         ${chk('toowner', '1', !!to.owner, 'The record’s owner')}</span>
         <details class="am-people"><summary>People${(to.people || []).length ? ` (${to.people.length})` : ''}</summary><span class="rl-many">${people().filter((p) => p.email).map((p) => chk('toperson', p.id, (to.people || []).includes(p.id), p.name)).join('')}</span></details>
+        ${(store.roles || []).length || (to.roles || []).length ? `<details class="am-people"><summary>Roles${(to.roles || []).length ? ` (${to.roles.length})` : ''}</summary><span class="rl-many">${[...(store.roles || [])].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((r) => chk('torole', r.id, (to.roles || []).includes(r.id), r.name || 'Untitled role')).join('')}</span><span class="help">Everyone in the role at the time.</span></details>` : ''}
         <input class="in" ${at} data-ama="toaddr" value="${esc(to.addresses || '')}" placeholder="Other addresses, separated by commas"></div>
       <label class="am-f"><span class="am-lab">Subject</span><input class="in" ${at} data-ama="subject" value="${esc(x.subject || '')}" maxlength="200"></label>
       <label class="am-f"><span class="am-lab">Message</span><textarea class="in" rows="5" ${at} data-ama="message" maxlength="10000">${esc(x.message || '')}</textarea></label>
@@ -288,7 +289,7 @@ export function onChange(t) {
     case 'assign': x.assign = t.value; if (t.value !== 'person') delete x.person; redraw(); return true;
     case 'person': x.person = t.value; redraw(); return true;
     case 'dueDays': x.dueDays = t.value === '' ? '' : Math.max(0, Math.min(365, Math.round(Number(t.value) || 0))); redraw(); return true;
-    case 'tofield': case 'topfield': case 'toperson': { x.to = x.to || {}; const k = { tofield: 'fields', topfield: 'parentFields', toperson: 'people' }[t.dataset.ama]; const have = new Set(x.to[k] || []); if (t.checked) have.add(t.value); else have.delete(t.value); x.to[k] = [...have]; redraw(); return true; }
+    case 'tofield': case 'topfield': case 'toperson': case 'torole': { x.to = x.to || {}; const k = { tofield: 'fields', topfield: 'parentFields', toperson: 'people', torole: 'roles' }[t.dataset.ama]; const have = new Set(x.to[k] || []); if (t.checked) have.add(t.value); else have.delete(t.value); x.to[k] = [...have]; redraw(); return true; }
     case 'toowner': x.to = x.to || {}; x.to.owner = t.checked; redraw(); return true;
     case 'pdf': x.pdf = t.checked; redraw(); return true;
     case 'cform': x.formId = t.value; x.sets = []; redraw(); return true;

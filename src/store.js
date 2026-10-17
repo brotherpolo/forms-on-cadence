@@ -33,6 +33,7 @@ export const store = {
   records: [],
   profiles: {},
   groups: [],
+  roles: [], // job roles (Administration → Roles): who does the work, separate from access
   users: [],
   reports: [], // my reports and reports shared with everyone, newest first
   reportsReady: false,
@@ -58,6 +59,7 @@ const recordSubs = new Map(); // formId -> { key, unsub }
 const recordsByForm = new Map(); // formId -> records[]
 // records waiting on this person in a workflow, which they might not otherwise see ("own" access)
 let assignedSub = null, assigned = [];
+const roleSubs = new Map(), roleRecs = new Map(); // roles: records waiting on a role I hold
 const got = { forms: false, me: false };
 
 const fail = (where) => (err) => {
@@ -137,6 +139,9 @@ export function startData(user) {
   // someone removed keeps their name, marked so: "Jane Smith (removed)" (baseName is the plain name)
   const onProfiles = (docs) => { store.profiles = Object.fromEntries(docs.map((d) => { const p = d.data(); return [d.id, p.removed ? { ...p, baseName: p.displayName, displayName: (p.displayName || 'Someone') + ' (removed)' } : p]; })); changed(); };
   memberParts.push({ start: () => onSnapshot(collection(db, 'profiles'), (s) => onProfiles(s.docs), fail('profiles')), empty: () => onProfiles([]) });
+  // roles: everyone with access reads their names (a workflow stage or a stage history line names them)
+  const onRoles = (docs) => { store.roles = docs.map((d) => ({ ...d.data(), id: d.id })).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))); changed(); };
+  memberParts.push({ start: () => onSnapshot(collection(db, 'roles'), (s) => onRoles(s.docs), (err) => { console.warn('[formwright] roles', err?.code || err); onRoles([]); }), empty: () => onRoles([]) });
 
   /**
    * Mine plus shared, as two queries, because the rules only let a list through when it asks
@@ -191,6 +196,7 @@ export function stopData() {
   recordSubs.clear();
   recordsByForm.clear();
   if (assignedSub) { assignedSub(); assignedSub = null; }
+  roleSubs.forEach((u) => u()); roleSubs.clear(); roleRecs.clear();
   assigned = [];
   Object.assign(store, { ready: false, user: null, me: null, forms: [], records: [], profiles: {}, groups: [], users: [], reports: [], reportsReady: false, listViews: [], listViewsReady: false, imports: [], reportDefs: [], dashboards: [], dashReady: false, homeDefault: '', homeDefaultReady: false, mentions: [] });
   store.recordsLoading.clear();
@@ -301,12 +307,22 @@ function syncRecordSubs() {
       (s) => { assigned = s.docs.map((d) => withNums({ ...d.data(), id: d.id })); flattenRecords(); changed(); },
       () => { assigned = []; }); // older security rules: only the usual access applies
   }
+  // roles: one listener per role I hold (a stage can go to a role)
+  const wantRoles = new Set(store.forms.some((f) => f.workflow?.on) ? ((store.me && store.me.roles) || []).slice(0, 20) : []);
+  roleSubs.forEach((u, r) => { if (!wantRoles.has(r)) { u(); roleSubs.delete(r); roleRecs.delete(r); } });
+  wantRoles.forEach((r) => {
+    if (roleSubs.has(r)) return;
+    roleSubs.set(r, onSnapshot(query(collection(db, 'records'), where('assigneeRole', '==', r)),
+      (s) => { roleRecs.set(r, s.docs.map((d) => withNums({ ...d.data(), id: d.id }))); flattenRecords(); changed(); },
+      () => { roleRecs.delete(r); }));
+  });
   flattenRecords();
 }
 
 function flattenRecords() {
   const all = [...recordsByForm.values()].flat();
-  if (assigned.length) { const have = new Set(all.map((r) => r.id)); assigned.forEach((r) => { if (!have.has(r.id)) all.push(r); }); }
+  const extra = assigned.concat(...roleRecs.values());
+  if (extra.length) { const have = new Set(all.map((r) => r.id)); extra.forEach((r) => { if (!have.has(r.id)) { have.add(r.id); all.push(r); } }); }
   store.records = all;
 }
 
@@ -947,6 +963,31 @@ export async function deleteGroup(groupId) {
 
 export async function setUserGroups(userId, groupIds) {
   await updateDoc(doc(db, 'users', userId), { groups: groupIds, access: accessFor(groupIds, store.groups) });
+}
+
+/* ---------- Admin: job roles (who does the work; access stays with security groups) ---------- */
+/** Save a role and who holds it (users/{uid}.roles). */
+export async function saveJobRole(role, memberIds) {
+  const data = plain({ name: String(role.name || '').trim().slice(0, 80), description: String(role.description || '').slice(0, 500), updatedAt: Date.now(), createdAt: role.createdAt || Date.now() });
+  const ops = [(b) => b.set(doc(db, 'roles', role.id), data)];
+  for (const u of store.users) {
+    const had = (u.roles || []).includes(role.id), has = memberIds.includes(u.id);
+    if (had === has) continue;
+    const roles = (u.roles || []).filter((r) => r !== role.id).concat(has ? [role.id] : []);
+    ops.push((b) => b.update(doc(db, 'users', u.id), { roles }));
+  }
+  await commitOps(ops);
+}
+export async function deleteJobRole(roleId) {
+  const ops = [(b) => b.delete(doc(db, 'roles', roleId))];
+  for (const u of store.users) {
+    if (!(u.roles || []).includes(roleId)) continue;
+    ops.push((b) => b.update(doc(db, 'users', u.id), { roles: u.roles.filter((r) => r !== roleId) }));
+  }
+  await commitOps(ops);
+}
+export async function setUserJobRoles(userId, roleIds) {
+  await updateDoc(doc(db, 'users', userId), { roles: [...new Set(roleIds)] });
 }
 
 export async function setUserRole(userId, role) {

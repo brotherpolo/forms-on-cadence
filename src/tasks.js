@@ -265,7 +265,7 @@ export function taskRefusal(me, account, task, record, person, names = {}) {
       const acc = account.access || {};
       const lvl = acc[task.formId] || acc['*'] || {};
       const view = lvl.view || 'none';
-      const responsible = record.assignee === me.uid || (record.assigneeGroup && (account.groups || []).includes(record.assigneeGroup));
+      const responsible = record.assignee === me.uid || (record.assigneeGroup && (account.groups || []).includes(record.assigneeGroup)) || (record.assigneeRole && (account.roles || []).includes(record.assigneeRole));
       const sees = view === 'all' || (view === 'own' && record.ownerId === me.uid) || responsible;
       if (!sees) out.push(view === 'own'
         ? `Your access to this form is “only records you created”, and someone else created this one. An administrator can give your group “All records” for this form.`

@@ -16,6 +16,7 @@ const ADMIN_PAGES = [
   { id: 'designer', label: 'Form designer', glyph: '⚙' },
   { id: 'users', label: 'Users', glyph: '☺' },
   { id: 'groups', label: 'Security groups', glyph: '◫' },
+  { id: 'roles', label: 'Roles', glyph: '◉' },
   { id: 'automations', label: 'Automations', glyph: '↯' },
   { id: 'audit', label: 'Audit trail', glyph: '⌕' },
   { id: 'imports', label: 'Import history', glyph: '⇪' },

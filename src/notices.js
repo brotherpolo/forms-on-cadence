@@ -15,7 +15,7 @@ export function reset() { Object.assign(N, { since: Date.now(), seenM: null, see
 /** Look for anything new (called whenever the data changes). */
 export function check() {
   if (!H || !H.store.user) return;
-  const me = H.store.user.uid, groups = H.store.me?.groups || [];
+  const me = H.store.user.uid, groups = H.store.me?.groups || [], roles = H.store.me?.roles || [];
   // the first look only takes note of what's there
   if (!N.seenM) { N.seenM = new Set((H.store.mentions || []).map((m) => m.id)); }
   else {
@@ -25,7 +25,7 @@ export function check() {
   }
   const wf = (r) => H.wfOn(H.formById(r.formId));
   if (!N.seenW) N.seenW = new Set();
-  const fresh = freshWaiting(H.store.records, { me, groups, seen: N.seenW, since: N.since, wf });
+  const fresh = freshWaiting(H.store.records, { me, groups, roles, seen: N.seenW, since: N.since, wf });
   (H.store.records || []).forEach((r) => { if (r.stage) N.seenW.add(waitKey(r)); });
   if (fresh.length) showWaiting(fresh, me);
 }
@@ -42,6 +42,7 @@ function showMentions(list) {
 function showWaiting(list, me) {
   if (list.length > 1) { toast(`<b>${list.length} records</b> are waiting on you`, { html: true, action: 'Show', onAction: () => H.openMyWork('waiting'), duration: LONG }); return; }
   const r = list[0], f = H.formById(r.formId);
-  const who = r.assignee === me ? 'you' : `the ${H.groupName(r.assigneeGroup) || ''} group`.replace('the  group', 'your group');
+  const rn = r.assigneeRole ? (H.store.roles || []).find((x) => x.id === r.assigneeRole)?.name : null;
+  const who = r.assignee === me ? 'you' : r.assigneeRole ? (rn ? `${rn} (your role)` : 'your role') : `the ${H.groupName(r.assigneeGroup) || ''} group`.replace('the  group', 'your group');
   toast(`<b>${esc(H.recTitle(r, f))}</b> is waiting on ${esc(who)} at <b>${esc(H.stageName(f, r))}</b>`, { html: true, action: 'Open', onAction: () => H.openRecord(r.id), duration: LONG });
 }

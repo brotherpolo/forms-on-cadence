@@ -25,3 +25,9 @@ test('records that just became mine', () => {
   assert.equal(waitsOn(r('x'), me), true);
   assert.equal(waitsOn(r('x', { stage: null }), me), false);
 });
+
+test('roles: a record waiting on a role I hold is waiting on me', () => {
+  const r = { id: 'r1', stage: 's2', assigneeRole: 'r_acc' };
+  assert.equal(waitsOn(r, 'far', [], ['r_acc']), true);
+  assert.equal(waitsOn(r, 'far', [], []), false);
+});

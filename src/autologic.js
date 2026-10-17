@@ -75,7 +75,7 @@ export function actText(x, form, ctx = {}) {
     return `create task “${x.title || 'Follow up'}” for ${who}${x.dueDays !== '' && x.dueDays != null ? `, due in ${x.dueDays} day${Number(x.dueDays) === 1 ? '' : 's'}` : ''}`;
   }
   if (x.do === 'email') {
-    const to = x.to || {}, who = [...(to.fields || []).map((id) => fl(form, id)), ...(to.parentFields || []).length ? ['the parent’s email'] : [], ...(to.owner ? ['the owner'] : []), ...(to.people || []).map((u) => (ctx.person ? ctx.person(u) : 'someone')), ...String(to.addresses || '').split(/[,;\s]+/).filter(Boolean)];
+    const to = x.to || {}, who = [...(to.fields || []).map((id) => fl(form, id)), ...(to.parentFields || []).length ? ['the parent’s email'] : [], ...(to.owner ? ['the owner'] : []), ...(to.people || []).map((u) => (ctx.person ? ctx.person(u) : 'someone')), ...(to.roles || []).map((r) => `everyone in ${ctx.role ? ctx.role(r) : 'a role'}`), ...String(to.addresses || '').split(/[,;\s]+/).filter(Boolean)];
     return `email ${who.join(', ') || '(nobody yet)'}${x.pdf ? ' with the PDF' : ''}`;
   }
   if (x.do === 'child') { const cf = ctx.formById?.(x.formId); return cf ? `create ${an(itemOf(cf).toLowerCase())}` : ''; }
@@ -106,7 +106,7 @@ export function checkAutomation(a, form, ctx = {}) {
     if (x.do === 'task' && x.assign === 'person' && !x.person) out.push(`${n}: pick who gets the task.`);
     if (x.do === 'email') {
       const to = x.to || {};
-      if (!(to.fields || []).length && !(to.parentFields || []).length && !(to.people || []).length && !to.owner && !String(to.addresses || '').trim()) out.push(`${n}: say who the email goes to.`);
+      if (!(to.fields || []).length && !(to.parentFields || []).length && !(to.people || []).length && !(to.roles || []).length && !to.owner && !String(to.addresses || '').trim()) out.push(`${n}: say who the email goes to.`);
       const bad = String(to.addresses || '').split(/[,;\s]+/).filter((s) => s && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s));
       if (bad.length) out.push(`${n}: “${bad[0]}” isn’t an email address.`);
       if (!String(x.subject || '').trim()) out.push(`${n}: add a subject.`);

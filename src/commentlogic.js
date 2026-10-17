@@ -145,6 +145,7 @@ export function canSeeRecord(user, rec, uid) {
   if (lv.view === 'own' && rec.ownerId === uid) return true;
   if (rec.assignee && rec.assignee === uid) return true;
   if (rec.assigneeGroup && (user.groups || []).includes(rec.assigneeGroup)) return true;
+  if (rec.assigneeRole && (user.roles || []).includes(rec.assigneeRole)) return true;
   return false;
 }
 

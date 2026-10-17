@@ -1,8 +1,8 @@
-// Administrator screens: security groups and users.
+// Administrator screens: security groups, roles and users.
 // Effective access is recomputed here and written to each affected users/{uid} document,
 // where firestore.rules and storage.rules read it.
 
-import { store, saveGroup, deleteGroup, setUserGroups, setUserRole, setUserCadence, recomputeAllAccess, removeAccount, setOwner } from './store.js';
+import { store, saveGroup, deleteGroup, saveJobRole, deleteJobRole, setUserJobRoles, setUserGroups, setUserRole, setUserCadence, recomputeAllAccess, removeAccount, setOwner } from './store.js';
 import { go, render, renderMain, byOrder } from './app.js';
 import { esc, uid, clone, toast, badge } from './ui.js';
 import * as exportset from './exportset.js';
@@ -10,8 +10,9 @@ import * as audit from './audit.js';
 import * as autos from './autos.js';
 import { LEVELS, NONE, PRESETS, normalize, describeLevel, levelFor, isAdmin, accessParents } from './access.js';
 
-const VIEWS = new Set(['users', 'groups', 'groupEdit', 'exports', 'audit', 'automations', 'automation']);
+const VIEWS = new Set(['users', 'groups', 'groupEdit', 'roles', 'roleEdit', 'exports', 'audit', 'automations', 'automation']);
 let gdraft = null;
+let rdraft = null;        // the role being edited: { id, name, description, members, isNew, dirty }
 let confirmDel = false;
 let leaveArmed = false;
 let rm = null;            // removing someone: { id, giveTo, busy }
@@ -22,16 +23,21 @@ const VIEW_LABEL = { none: 'Can’t see', own: 'Only their own', all: 'All recor
 const EDIT_LABEL = { none: 'Can’t edit', own: 'Their own', all: 'All records' };
 
 export const handles = (view) => VIEWS.has(view.name);
-export const isDirty = (view) => (view.name === 'groupEdit' && !!gdraft?.dirty && !leaveArmed) || (view.name === 'exports' && exportset.isDirty()) || autos.isDirty(view);
+export const isDirty = (view) => (view.name === 'groupEdit' && !!gdraft?.dirty && !leaveArmed) || (view.name === 'roleEdit' && !!rdraft?.dirty && !leaveArmed) || (view.name === 'exports' && exportset.isDirty()) || autos.isDirty(view);
 
 const userName = (u) => store.profiles[u.id]?.displayName || u.displayName || (u.email || '').split('@')[0] || 'Unnamed user';
 const sortedUsers = () => [...store.users].sort((a, b) => userName(a).localeCompare(userName(b)));
 const sortedGroups = () => [...store.groups].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+const sortedRoles = () => [...(store.roles || [])].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+/** Workflow stages that go to this role: "Invoices › Approve" */
+const stagesFor = (roleId) => store.forms.flatMap((f) => (f.workflow?.stages || []).filter((st) => st.assign?.type === 'role' && st.assign.role === roleId).map((st) => `${f.name || 'Untitled form'} › ${st.name || 'Untitled stage'}`));
 
 export function renderView(view) {
   if (view.name === 'users') return { title: 'Users', html: viewUsers() };
   if (view.name === 'groups') return { title: 'Security groups', html: viewGroups() };
   if (view.name === 'groupEdit') return { title: 'Edit group', html: viewGroupEdit() };
+  if (view.name === 'roles') return { title: 'Roles', html: viewRoles() };
+  if (view.name === 'roleEdit') return { title: 'Edit role', html: viewRoleEdit() };
   if (view.name === 'exports') return { title: 'PDF exports', html: exportset.viewExports() };
   if (view.name === 'audit') return { title: 'Audit trail', html: audit.viewAudit(view) };
   if (view.name === 'automations') return { title: 'Automations', html: autos.viewAutomations() };
@@ -56,6 +62,76 @@ function viewGroups() {
       <div class="ctl"><button class="btn sm primary" data-act="g-edit" data-id="${g.id}">Edit</button></div></div>`;
   }).join('')}</div>`
   : `<div class="panel empty"><h2>No groups yet</h2><p>Create a group such as “Field staff” (view and edit their own records) or “Office” (view and edit everything), then add people to it.</p><button class="btn primary" data-act="g-new">+ New group</button></div>`}`;
+}
+
+/* ---------- Roles ---------- */
+
+function viewRoles() {
+  const rs = sortedRoles();
+  const holders = (r) => store.users.filter((u) => (u.roles || []).includes(r.id));
+  return `
+  <div class="head"><div class="ttl"><div><h1>Roles</h1>
+    <p class="sub">A role is a job people do, such as “Accounts” or “Site manager”. A workflow stage can go to a role, and anyone in it can pick it up; whoever moves it on is noted as “Accounts (Farren)” in the stage history and audit trail. Roles don’t change what people can see: that’s Security groups. People can hold several roles.</p></div></div>
+    <div class="actions"><button class="btn primary" data-act="r-new">+ New role</button></div></div>
+  ${rs.length ? `<div class="panel flist">${rs.map((r) => {
+    const hs = holders(r), used = stagesFor(r.id);
+    return `<div class="fcard"><span class="glyph" style="width:40px;height:40px">◉</span><div class="info"><b>${esc(r.name || 'Untitled role')}</b>${r.description ? `<span class="help">${esc(r.description)}</span>` : ''}
+      <div class="tags"><span class="chip${hs.length ? '' : ' warn'}">${hs.length ? `${hs.length} ${hs.length === 1 ? 'person' : 'people'}` : 'Nobody yet'}</span>${hs.slice(0, 4).map((u) => `<span class="chip">${esc(userName(u))}</span>`).join('')}${hs.length > 4 ? `<span class="chip">+${hs.length - 4}</span>` : ''}${used.length ? `<span class="chip acc">${used.length} workflow stage${used.length === 1 ? '' : 's'}</span>` : ''}</div></div>
+      <div class="ctl"><button class="btn sm primary" data-act="r-edit" data-id="${r.id}">Edit</button></div></div>`;
+  }).join('')}</div>`
+  : `<div class="panel empty"><h2>No roles yet</h2><p>Add a role such as “Accounts”, tick who’s in it, then choose it as the person responsible for a workflow stage.</p><button class="btn primary" data-act="r-new">+ New role</button></div>`}`;
+}
+
+function openRole(id) {
+  const r = id ? (store.roles || []).find((x) => x.id === id) : null;
+  rdraft = r
+    ? { id: r.id, name: r.name || '', description: r.description || '', createdAt: r.createdAt || null, members: store.users.filter((u) => (u.roles || []).includes(r.id)).map((u) => u.id), isNew: false, dirty: false }
+    : { id: uid('role'), name: '', description: '', createdAt: null, members: [], isNew: true, dirty: true };
+  confirmDel = false;
+  leaveArmed = false;
+}
+
+function viewRoleEdit() {
+  if (!rdraft) return '';
+  const r = rdraft, users = sortedUsers(), used = r.isNew ? [] : stagesFor(r.id);
+  return `
+  <div class="crumbs"><button data-act="nav-roles">Roles</button><span>›</span><span>${r.isNew ? 'New role' : esc(r.name)}</span></div>
+  <div class="head"><div class="ttl"><span class="glyph" style="width:40px;height:40px">◉</span><div style="flex:1;min-width:0"><input class="title-in" data-rp="name" value="${esc(r.name)}" placeholder="Role name, e.g. Accounts" aria-label="Role name" maxlength="80"></div></div></div>
+  <div class="panel"><div class="settings"><label class="prop full"><span>Description</span><input class="in" data-rp="description" value="${esc(r.description)}" placeholder="What this role does" maxlength="500"></label></div></div>
+
+  <section class="section"><div class="section-h"><h2>People in this role <span class="count">${r.members.length}</span></h2><span class="help">Anyone ticked can pick up work that goes to this role.</span></div>
+    <div class="panel">${users.length ? `<div class="members">${users.map((u) => `<label class="member"><input type="checkbox" data-rmember="${u.id}"${r.members.includes(u.id) ? ' checked' : ''}><span class="grow"><b>${esc(userName(u))}</b><small>${esc(u.email || '')}${isAdmin(u) ? ' · Administrator' : ''}</small></span></label>`).join('')}</div>` : `<p class="note">Nobody has signed in yet.</p>`}</div></section>
+
+  ${used.length ? `<section class="section"><div class="section-h"><h2>Used by</h2></div><div class="panel"><div class="tags">${used.map((x) => `<span class="chip">${esc(x)}</span>`).join('')}</div></div></section>` : ''}
+
+  <div class="panel savebar" style="border-radius:var(--r)">
+    ${r.isNew ? '' : `<button class="btn danger${confirmDel ? ' armed' : ''}" data-act="r-del">${confirmDel ? (used.length ? `Tap again: ${used.length} stage${used.length === 1 ? '' : 's'} will need a new person responsible` : 'Tap again to delete') : 'Delete role'}</button>`}
+    <span class="grow" id="rdirty">${r.dirty ? 'Unsaved changes' : 'All changes saved'}</span>
+    <button class="btn ghost" data-act="r-cancel">${r.dirty ? 'Discard' : 'Done'}</button>
+    <button class="btn primary" data-act="r-save">Save role</button>
+  </div>`;
+}
+
+function setRoleDirty() {
+  rdraft.dirty = true;
+  const n = document.getElementById('rdirty');
+  if (n) n.textContent = 'Unsaved changes';
+}
+
+async function saveRole() {
+  const r = rdraft;
+  const name = r.name.trim();
+  if (!name) { toast('Give the role a name first.'); document.querySelector('[data-rp=name]')?.focus(); return; }
+  if ((store.roles || []).some((x) => x.id !== r.id && String(x.name || '').trim().toLowerCase() === name.toLowerCase())) { toast(`There’s already a role called “${name}”.`); return; }
+  try {
+    await saveJobRole({ id: r.id, name, description: r.description.trim(), createdAt: r.createdAt }, r.members);
+    r.name = name; r.dirty = false; r.isNew = false; r.createdAt = r.createdAt || Date.now();
+    toast(`Saved. ${r.members.length} ${r.members.length === 1 ? 'person' : 'people'} in ${name}.`);
+    renderMain();
+  } catch (e) {
+    console.error(e);
+    toast(e?.code === 'permission-denied' ? 'Couldn’t save the role. The Cadence security rules may need updating (see the install steps).' : 'Saving failed. Check your connection and try again.');
+  }
 }
 
 /* ---------- Group editor ---------- */
@@ -127,18 +203,20 @@ function setDirty() {
 function viewUsers() {
   const users = sortedUsers();
   const gs = sortedGroups();
+  const rs = sortedRoles();
   const admins = store.users.filter(isAdmin).length;
   const formsVisible = (u) => (isAdmin(u) ? store.forms.length : store.forms.filter((f) => levelFor(u.access, f.id).view !== 'none').length);
   return `
-  <div class="head"><div class="ttl"><div><h1>Users</h1><p class="sub">People appear here after they sign in to Formwright or Cadence for the first time. Add them to security groups to give them access to forms, and switch on Cadence for the people who should use it.</p></div></div></div>
+  <div class="head"><div class="ttl"><div><h1>Users</h1><p class="sub">People appear here after they sign in to Formwright or Cadence for the first time. Add them to security groups to give them access to forms, give them roles for the work they do, and switch on Cadence for the people who should use it.</p></div></div></div>
   ${users.length ? `<div class="panel flist">${users.map((u) => {
     const self = u.id === store.user?.uid;
     const lastAdmin = isAdmin(u) && admins <= 1;
     return `<div class="ucard">
       <div class="uhead"><div class="grow"><b>${esc(userName(u))}${self ? ' <span class="chip">You</span>' : ''}</b><small>${esc(u.email || 'No email')}</small></div>
-        <label class="prop urole"><span class="sr">Role</span><select class="in" data-urole="${u.id}"${self || lastAdmin ? ' disabled title="You can’t remove the last administrator or change your own role."' : ''}><option value="member"${!isAdmin(u) ? ' selected' : ''}>Member</option><option value="admin"${isAdmin(u) ? ' selected' : ''}>Administrator</option></select></label></div>
+        <label class="prop urole"><span class="sr">Access level</span><select class="in" data-urole="${u.id}"${self || lastAdmin ? ' disabled title="You can’t remove the last administrator or change your own role."' : ''}><option value="member"${!isAdmin(u) ? ' selected' : ''}>Member</option><option value="admin"${isAdmin(u) ? ' selected' : ''}>Administrator</option></select></label></div>
       ${isAdmin(u) ? `<p class="help">Administrators see and edit every form and manage forms, groups and users.</p>` : gs.length ? `<div class="opts">${gs.map((g) => `<label class="opt"><input type="checkbox" data-ugroup="${u.id}" value="${g.id}"${(u.groups || []).includes(g.id) ? ' checked' : ''}>${esc(g.name || 'Untitled group')}</label>`).join('')}</div>
         <p class="help">${(u.groups || []).length ? `Can open ${formsVisible(u)} of ${store.forms.length} forms.` : 'Not in any group, so no forms are visible yet.'}</p>` : `<p class="help">Create a security group first, then add this person to it.</p>`}
+      ${rs.length ? `<div class="uroles"><span class="help">Roles</span><div class="opts">${rs.map((r) => `<label class="opt"><input type="checkbox" data-ujrole="${u.id}" value="${r.id}"${(u.roles || []).includes(r.id) ? ' checked' : ''}>${esc(r.name || 'Untitled role')}</label>`).join('')}</div></div>` : ''}
       ${isAdmin(u) ? `<p class="help ucad">Cadence: administrators can always use it.</p>` : `<label class="switch ucad"><input type="checkbox" data-ucad="${u.id}"${u.cadence === true ? ' checked' : ''}><span class="tr"></span><span>Can use Cadence${u.cadence === true ? '' : ' <span class="chip">Waiting</span>'}</span></label>`}
       ${self ? '' : removeHTML(u)}
     </div>`;
@@ -213,6 +291,34 @@ export async function onClick(el, a, id) {
       reassigning = null; renderMain();
       return;
     }
+    case 'r-new':
+      openRole(null);
+      if (go({ name: 'roleEdit' })) setTimeout(() => document.querySelector('[data-rp=name]')?.focus(), 50);
+      return;
+    case 'r-edit':
+      openRole(id);
+      go({ name: 'roleEdit', roleId: id });
+      return;
+    case 'r-cancel':
+      if (rdraft?.dirty && !leaveArmed) {
+        leaveArmed = true;
+        toast('Tap Discard again to drop your changes.');
+        setTimeout(() => (leaveArmed = false), 4000);
+        return;
+      }
+      rdraft = null; leaveArmed = false;
+      go({ name: 'roles' });
+      return;
+    case 'r-save': await saveRole(); return;
+    case 'r-del':
+      if (!confirmDel) { confirmDel = true; renderMain(); return; }
+      try {
+        await deleteJobRole(rdraft.id);
+        toast('Role deleted.');
+        rdraft = null;
+        go({ name: 'roles' }, false);
+      } catch (e) { console.error(e); toast('Delete failed. Try again.'); }
+      return;
     case 'g-new':
       openGroup(null);
       if (go({ name: 'groupEdit' })) setTimeout(() => document.querySelector('[data-gp=name]')?.focus(), 50);
@@ -297,6 +403,7 @@ export function onInput(t) {
   if (exportset.onInput(t)) return;
   if (audit.onInput(t)) return;
   if (autos.onInput(t)) return;
+  if (t.dataset.rp && rdraft) { rdraft[t.dataset.rp] = t.value; setRoleDirty(); return; }
   if (t.dataset.gp && gdraft) {
     gdraft[t.dataset.gp] = t.value;
     setDirty();
@@ -333,6 +440,19 @@ export async function onChange(t) {
     renderMain();
     return;
   }
+  if (t.dataset.rmember && rdraft) {
+    const id = t.dataset.rmember;
+    rdraft.members = rdraft.members.filter((m) => m !== id).concat(t.checked ? [id] : []);
+    setRoleDirty(); renderMain(); return;
+  }
+  if (t.dataset.ujrole) {
+    const u = store.users.find((x) => x.id === t.dataset.ujrole);
+    if (!u) return;
+    const roles = (u.roles || []).filter((r) => r !== t.value).concat(t.checked ? [t.value] : []);
+    try { await setUserJobRoles(u.id, roles); toast('Roles updated.'); }
+    catch (e) { console.error(e); toast('Could not update roles. Try again.'); render(); }
+    return;
+  }
   if (t.dataset.urmgive && rm) { rm.giveTo = t.value; return; }
   if (t.dataset.ureasn) { give[t.dataset.ureasn] = t.value; renderMain(); return; }
   if (t.dataset.ucad) {
@@ -352,7 +472,7 @@ export async function onChange(t) {
       toast(t.value === 'admin' ? 'Now an administrator.' : 'Now a member.');
     } catch (e) {
       console.error(e);
-      toast('Could not change the role. Try again.');
+      toast('Could not change that. Try again.');
       render();
     }
     return;

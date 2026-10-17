@@ -415,6 +415,7 @@ details.fxref summary{cursor:pointer;font-weight:600;font-size:13px;padding:4px 
 .flist.searching [data-act="form-move"]{display:none}
 .flist .fcard[hidden]{display:none}
 .ucad{margin-top:2px}
+.uroles{display:flex;flex-direction:column;gap:4px;margin-top:2px}.uroles>.help{font-weight:600}
 
 /* no access yet (app.js accessGate) */
 #noaccess{position:fixed;inset:0;z-index:200;overflow:auto}

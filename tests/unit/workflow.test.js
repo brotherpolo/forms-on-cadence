@@ -59,12 +59,20 @@ test('who can work on it', () => {
 
 test('who a stage goes to', () => {
   const rec = { ownerId: 'own', assignee: 'u7', assigneeGroup: null };
-  assert.deepEqual(W.assigneeFor({ assign: { type: 'owner' } }, rec, 'mv'), { assignee: 'own', assigneeGroup: null });
-  assert.deepEqual(W.assigneeFor({ assign: { type: 'person', person: 'p' } }, rec, 'mv'), { assignee: 'p', assigneeGroup: null });
-  assert.deepEqual(W.assigneeFor({ assign: { type: 'group', group: 'g' } }, rec, 'mv'), { assignee: null, assigneeGroup: 'g' });
-  assert.deepEqual(W.assigneeFor({ assign: { type: 'mover' } }, rec, 'mv'), { assignee: 'mv', assigneeGroup: null });
-  assert.deepEqual(W.assigneeFor({ assign: { type: 'keep' } }, rec, 'mv'), { assignee: 'u7', assigneeGroup: null });
-  assert.deepEqual(W.assigneeFor({ assign: { type: 'keep' } }, { ownerId: 'own' }, 'mv'), { assignee: 'own', assigneeGroup: null }, 'keep with nobody falls back to the owner');
+  const one = (assignee, assigneeGroup = null, assigneeRole = null) => ({ assignee, assigneeGroup, assigneeRole });
+  assert.deepEqual(W.assigneeFor({ assign: { type: 'owner' } }, rec, 'mv'), one('own'));
+  assert.deepEqual(W.assigneeFor({ assign: { type: 'person', person: 'p' } }, rec, 'mv'), one('p'));
+  assert.deepEqual(W.assigneeFor({ assign: { type: 'group', group: 'g' } }, rec, 'mv'), one(null, 'g'));
+  assert.deepEqual(W.assigneeFor({ assign: { type: 'mover' } }, rec, 'mv'), one('mv'));
+  assert.deepEqual(W.assigneeFor({ assign: { type: 'keep' } }, rec, 'mv'), one('u7'));
+  assert.deepEqual(W.assigneeFor({ assign: { type: 'keep' } }, { ownerId: 'own' }, 'mv'), one('own'), 'keep with nobody falls back to the owner');
+  assert.deepEqual(W.assigneeFor({ assign: { type: 'role', role: 'r_acc' } }, rec, 'mv'), one(null, null, 'r_acc'));
+  assert.deepEqual(W.assigneeFor({ assign: { type: 'keep' } }, { ownerId: 'own', assigneeRole: 'r_acc' }, 'mv'), one(null, null, 'r_acc'), 'keep keeps the role');
+  const me = { uid: 'far', roles: ['r_acc'] };
+  assert.equal(W.canWork({ stage: 's1', assigneeRole: 'r_acc' }, me), true, 'anyone holding the role can work on it');
+  assert.equal(W.canWork({ stage: 's1', assigneeRole: 'r_acc' }, { uid: 'x', roles: [] }), false);
+  assert.equal(W.creditName({ assigneeRole: 'r_acc' }, me, 'Farren', [{ id: 'r_acc', name: 'Accounts' }]), 'Accounts (Farren)');
+  assert.equal(W.creditName({ assigneeRole: 'r_acc' }, { roles: [] }, 'Bo', [{ id: 'r_acc', name: 'Accounts' }]), 'Bo');
 });
 
 test('buttons and required-before-moving-on', () => {
@@ -128,4 +136,11 @@ test('due dates count working days (Monday to Friday)', async () => {
   assert.equal(dueState('2026-10-19', '2026-10-17'), 'soon', 'on a weekend, Monday is next');
   assert.equal(dueState('', '2026-10-15'), '');
   assert.ok(W.checkWorkflow({ workflow: { on: true, stages: [{ id: 'a', name: 'A', dueDays: 1.5 }] } }).some((m) => /whole number/.test(m)));
+});
+
+test('roles: a stage that goes to a role must name one that exists', () => {
+  const f = { workflow: { on: true, stages: [{ id: 's1', name: 'Pay', assign: { type: 'role', role: '' } }, { id: 's2', name: 'Check', assign: { type: 'role', role: 'gone' } }] } };
+  const p = W.checkWorkflow(f, { roles: new Set(['r_acc']) });
+  assert.ok(p.some((x) => /pick which role/.test(x)));
+  assert.ok(p.some((x) => /no longer exists/.test(x)));
 });

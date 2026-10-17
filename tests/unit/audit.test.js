@@ -30,6 +30,7 @@ test('wording', () => {
 
 test('what can be put back', () => {
   assert.ok(canPutBack(e1, e1.changes[0]));
+  assert.equal(canPutBack({ area: 'record', kind: 'changed' }, { key: 'stage', type: 'text', from: 'Review', to: 'Paid' }), false, 'stage moves are not put back from the audit trail');
   assert.ok(!canPutBack(e1, { type: 'signature', from: 'signed' }), 'signatures and files aren’t kept whole');
   assert.ok(!canPutBack(e1, { type: 'textarea', from: 'x'.repeat(1000) + '…' }), 'shortened long text');
   assert.ok(!canPutBack(e2, { type: 'text' }), 'only record changes');
