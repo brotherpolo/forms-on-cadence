@@ -358,3 +358,33 @@ button.db-li:hover{background:var(--accent-soft)}
 }
 /* phones: a KPI number fits across the card */
 @media (max-width:760px){.db-tile.db-t-kpi button.rp-kpi{font-size:clamp(1.6rem,12cqw,2.8rem)}}
+
+/* Report editor preview: charts fill the preview the way they fill a dashboard tile. The preview
+   box has a set height (more on a tall screen); the donut ring, the KPI number and the bars scale
+   to it. Tables and pivots keep their natural height. */
+.db-pb.db-t-donut,.db-pb.db-t-kpi{height:clamp(300px,52vh,560px);container-type:size}
+.db-pb.db-t-bar{max-height:clamp(300px,52vh,560px)}
+.db-pb.db-t-line .rp-ln,.db-pb.db-t-area .rp-ln{height:clamp(300px,52vh,560px)}
+.db-pb.db-t-donut .db-donut,.db-pb.db-t-donut .db-donut.many{height:100%;display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:center;gap:max(24px,5cqw)}
+.db-pb.db-t-donut .db-rbox{height:100%;aspect-ratio:1;flex:0 1 auto;max-width:58%;min-width:0;container-type:size;display:grid;place-items:center}
+.db-pb.db-t-donut .db-ring,.db-pb.db-t-donut .db-donut.many .db-ring{--ring:min(100cqw,100cqh);width:var(--ring);height:var(--ring);position:relative;top:auto;flex:none}
+.db-pb.db-t-donut .db-ring::after{inset:21%}
+.db-pb.db-t-donut .db-ringc{font-size:clamp(16px,calc(var(--ring) * .14),48px);line-height:1.1}
+.db-pb.db-t-donut .db-ringc small{font-size:clamp(11px,calc(var(--ring) * .06),16px)}
+.db-pb.db-t-donut .db-leg{flex:0 1 auto;min-width:200px;max-width:min(420px,40%);max-height:100%;overflow-y:auto;align-self:center;gap:2px}
+.db-pb.db-t-donut .db-li{font-size:14px;padding:5px 8px}
+@container (max-aspect-ratio:6/5){
+  .db-pb.db-t-donut .db-donut,.db-pb.db-t-donut .db-donut.many{flex-direction:column;align-items:stretch;gap:12px}
+  .db-pb.db-t-donut .db-rbox{flex:1 1 0;height:auto;aspect-ratio:auto;max-width:none;min-height:140px}
+  .db-pb.db-t-donut .db-leg{max-width:none;min-width:0;max-height:38%;align-self:stretch}
+}
+.db-pb.db-t-kpi{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px}
+.db-pb.db-t-kpi button.rp-kpi{align-self:center;text-align:center;font-size:clamp(2rem,min(34cqh,14cqw),9rem);line-height:1;max-width:96%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.db-pb.db-t-kpi .rp-kpisub{font-size:clamp(13px,4cqh,20px)}
+.db-pb.db-t-kpi .db-kd{align-self:center;font-size:clamp(12px,3.4cqh,16px)}
+.db-pb.db-t-bar{overflow-y:auto}
+.db-pb.db-t-bar .rp-bars{gap:4px}
+.db-pb.db-t-bar .rp-bar{min-height:40px;font-size:14px}
+.db-pb.db-t-bar .rp-bt,.db-pb.db-t-bar .rp-bf{height:min(26px,60%)}
+.db-pb.db-t-bar .rp-bt{height:100%;display:flex;align-items:center}
+@media (max-width:760px){.db-pb.db-t-donut,.db-pb.db-t-kpi{height:clamp(260px,62vh,420px)}}
