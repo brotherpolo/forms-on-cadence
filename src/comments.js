@@ -5,7 +5,7 @@
 // edit and delete your own comments; administrators can delete any. Replies are one level deep.
 // Comments aren't part of the record's PDF.
 import { esc } from './ui.js';
-import { threads, shownCount, mentionQuery, matchPeople, insertMention, mentionsIn, parts, notifyLine, notifiedNotes, canSeeRecord, initials, avatarColor, ago, unreadOf, MAX_TEXT } from './commentlogic.js';
+import { isRoleId, threads, shownCount, mentionQuery, matchPeople, insertMention, mentionsIn, parts, notifyLine, notifiedNotes, canSeeRecord, initials, avatarColor, ago, unreadOf, MAX_TEXT } from './commentlogic.js';
 import { watchComments, addComment, updateComment, deleteComment, markMentionsRead } from './store.js';
 
 let H = null; // { store, view(), recById, formById, recTitle, itemName, toast, isAdmin, canUseTasks, foldBtn, folded(formId,key), unfold(formId,key), openRecord(id) }
@@ -48,6 +48,8 @@ function people(rec) {
     p.off = !canSeeRecord(u, rec, u.id);
     if (!H.store.profiles?.[u.id]?.removed) out.set(u.id, p);
   });
+  // roles (Formwright → Roles): everyone in the role is told
+  (H.store.roles || []).forEach((r) => { if (r && r.name) out.set('role:' + r.id, { uid: 'role:' + r.id, name: String(r.name), email: '', role: true }); });
   return [...out.values()];
 }
 const offSet = (rec) => new Set(people(rec).filter((p) => p.off).map((p) => p.uid));
@@ -118,9 +120,11 @@ export function html() {
 }
 
 function textHTML(c) {
-  return parts(c.text, c.mentions).map((p) => (p.uid ? `<span class="cm-pill${p.uid === me() ? ' me' : ''}">${esc(p.t)}</span>` : esc(p.t))).join('');
+  const mine = (uid) => uid === me() || (isRoleId(uid) && (H.store.me?.roles || []).includes(uid.slice(5)));
+  return parts(c.text, c.mentions).map((p) => (p.uid ? `<span class="cm-pill${mine(p.uid) ? ' me' : ''}${isRoleId(p.uid) ? ' role' : ''}">${esc(p.t)}</span>` : esc(p.t))).join('');
 }
 function avatar(uid, name, small) {
+  if (isRoleId(uid)) return `<span class="cm-av${small ? ' sm' : ''} pk-ic" aria-hidden="true">◉</span>`;
   return `<span class="cm-av${small ? ' sm' : ''}" style="background:${avatarColor(uid)}" aria-hidden="true">${esc(initials(name))}</span>`;
 }
 
@@ -161,7 +165,7 @@ function composerHTML(rec) {
   const tasks = H.canUseTasks();
   return `<div class="cm-new">
     ${parent ? `<div class="cm-replying">Replying to <b>${esc(nameOf(parent.by, parent.byName))}</b><button type="button" class="cm-lnk" data-cm="cancel-reply">Cancel</button></div>` : ''}
-    <div class="cm-tawrap">${avatar(me(), myName())}<textarea class="in cm-ta" data-cm-ta="new" rows="${d.text ? 3 : 2}" maxlength="${MAX_TEXT}" placeholder="Write a comment. Type @ to mention someone." aria-label="${parent ? 'Write a reply' : 'Write a comment'}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cm-pop-new"${busy ? ' disabled' : ''}>${esc(d.text)}</textarea><div class="cm-pop" id="cm-pop-new" role="listbox" aria-label="People" hidden></div></div>
+    <div class="cm-tawrap">${avatar(me(), myName())}<textarea class="in cm-ta" data-cm-ta="new" rows="${d.text ? 3 : 2}" maxlength="${MAX_TEXT}" placeholder="Write a comment. Type @ to mention someone (or a role)." aria-label="${parent ? 'Write a reply' : 'Write a comment'}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cm-pop-new"${busy ? ' disabled' : ''}>${esc(d.text)}</textarea><div class="cm-pop" id="cm-pop-new" role="listbox" aria-label="People" hidden></div></div>
     <div class="cm-foot">
       ${tasks ? `<label class="cm-task"><input type="checkbox" data-cm-task${d.task ? ' checked' : ''}> Also give the people I mention a Cadence task</label>` : ''}
       <span class="cm-who" id="cm-who" role="status">${esc(whoLine(rec))}</span>
@@ -198,7 +202,7 @@ function paintPop() {
   if (!S.pop) return;
   const el = document.getElementById('cm-pop-' + S.pop.ta);
   if (!el) return;
-  el.innerHTML = S.pop.items.map((p, i) => `<button type="button" role="option" id="cm-opt-${i}" class="cm-opt${i === S.pop.idx ? ' on' : ''}" data-cm-pick="${i}" aria-selected="${i === S.pop.idx}"${p.off ? ' aria-disabled="true"' : ''} tabindex="-1">${avatar(p.uid, p.name, true)}<span class="grow">${esc(p.name)}</span>${p.off ? '<small>can’t see this record</small>' : p.email ? `<small>${esc(p.email)}</small>` : ''}</button>`).join('');
+  el.innerHTML = S.pop.items.map((p, i) => `<button type="button" role="option" id="cm-opt-${i}" class="cm-opt${i === S.pop.idx ? ' on' : ''}" data-cm-pick="${i}" aria-selected="${i === S.pop.idx}"${p.off ? ' aria-disabled="true"' : ''} tabindex="-1">${avatar(p.uid, p.name, true)}<span class="grow">${esc(p.name)}</span>${p.off ? '<small>can’t see this record</small>' : p.role ? '<small>role: everyone in it</small>' : p.email ? `<small>${esc(p.email)}</small>` : ''}</button>`).join('');
   el.hidden = false;
   document.querySelector(`[data-cm-ta="${S.pop.ta}"]`)?.setAttribute('aria-activedescendant', 'cm-opt-' + S.pop.idx);
   el.querySelector('.cm-opt.on')?.scrollIntoView({ block: 'nearest' });
@@ -340,7 +344,7 @@ export function mentionsHTML() {
     const by = nameOf(m.by, m.byName);
     return `<button type="button" class="mw-m${m.read ? '' : ' unread'}" data-cm="m-open" data-id="${esc(m.id)}">
       <span class="mw-dot" aria-hidden="true"></span>${avatar(m.by, by)}
-      <span class="mw-b"><span class="mw-1"><b>${esc(by)}</b> mentioned you on <b>${esc(title)}</b> <span class="mw-f">· ${esc(f?.name || m.formName || '')}</span>${m.read ? '' : '<span class="sr"> (unread)</span>'}</span>
+      <span class="mw-b"><span class="mw-1"><b>${esc(by)}</b> mentioned ${m.role ? `<b>${esc(m.role)}</b> (your role)` : 'you'} on <b>${esc(title)}</b> <span class="mw-f">· ${esc(f?.name || m.formName || '')}</span>${m.read ? '' : '<span class="sr"> (unread)</span>'}</span>
       <span class="mw-2">${esc(m.snippet || '')}</span></span>
       <time datetime="${new Date(m.at || 0).toISOString()}">${esc(ago(m.at || 0))}</time></button>`;
   };

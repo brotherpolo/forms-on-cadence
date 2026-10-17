@@ -380,12 +380,14 @@ export async function fileBlob(v) {
  * query must filter on members. Returns an unsubscribe function.
  */
 export function watchTasks(recordId, onNext, onError) {
-  const q = query(
-    collection(db, 'tasks'),
-    where('members', 'array-contains', store.user.uid),
-    where('recordId', '==', recordId)
-  );
-  return onSnapshot(q, (s) => onNext(s.docs.map((d) => ({ ...d.data(), id: d.id }))), onError);
+  // mine (owner or assignee), plus tasks given to a role I hold (Formwright → Roles), merged
+  const parts = new Map(), unsubs = [];
+  const emit = () => { const seen = new Map(); [...parts.values()].flat().forEach((t) => seen.set(t.id, t)); onNext([...seen.values()]); };
+  const listen = (key, q, optional) => unsubs.push(onSnapshot(q, (s) => { parts.set(key, s.docs.map((d) => ({ ...d.data(), id: d.id }))); emit(); },
+    (err) => { if (optional) { console.warn('[formwright] role tasks', err?.code || err); parts.delete(key); emit(); } else onError?.(err); }));
+  listen('mine', query(collection(db, 'tasks'), where('members', 'array-contains', store.user.uid), where('recordId', '==', recordId)));
+  ((store.me && store.me.roles) || []).slice(0, 10).forEach((r) => listen('role:' + r, query(collection(db, 'tasks'), where('assigneeRole', '==', r), where('recordId', '==', recordId)), true));
+  return () => unsubs.forEach((u) => u());
 }
 
 /* ---------- Adding and editing Cadence tasks in Formwright ----------

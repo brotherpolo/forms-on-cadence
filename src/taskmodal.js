@@ -4,7 +4,7 @@
 import { esc, colorOf } from './ui.js';
 import { pickerHTML, pickerFilter, pickerKey, pickerFocus } from './peoplepick.js';
 import { avatarColor, initials } from './commentlogic.js';
-import { normEmail, reassignPatch, passChoices, cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES, taskRefusal } from './tasks.js';
+import { normEmail, reassignPatch, roleChoice, doneCredit, holderName, passChoices, cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES, taskRefusal } from './tasks.js';
 import { loadCadenceItems, assignableUids, writeTasks, updateTask, deleteTask, taskCheckReads, probeTask } from './store.js';
 
 let H = null;   // { store, recById, formById, recTitle, toast, cadenceUrl, tasks() }
@@ -39,6 +39,16 @@ export async function assignablePeople() {
   return list;
 }
 
+/** Roles as choices in "Assigned to" (Formwright → Roles). Administrators also see how many hold each. */
+export function roleChoices() {
+  const users = H.store.users || [];
+  return [...(H.store.roles || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+    .map((r) => roleChoice(r, users.length ? users.filter((u) => (u.roles || []).includes(r.id)).length : null));
+}
+const myRoles = () => H.store.me?.roles || [];
+/** Is this task given to a role I hold (and not mine)? */
+export const holdsRoleOf = (t) => !!t && !!t.assigneeRole && t.ownerId !== H.store.user?.uid && myRoles().includes(t.assigneeRole);
+
 /** Open the pop-up: a new task for this record, or an existing task (taskId). */
 /** opts (My work → All tasks): { task, reassign(), openRecord() } — the task as listed there, and what
  *  the view-only pop-up's buttons do for someone else's task (administrators can only reassign those). */
@@ -46,10 +56,11 @@ export async function open(recordId, taskId = null, opts = {}) {
   const task = taskId ? (opts.task || (H.tasks() || []).find((t) => t.id === taskId)) : null;
   if (taskId && !task) return;
   const mine = !task || task.ownerId === H.store.user?.uid;
-  const view = !!task && !mine && task.assigneeId !== H.store.user?.uid;
-  // a record task given to me: I can pass it on to someone else (Reassign)
-  const passOn = !!task && !mine && task.assigneeId === H.store.user?.uid && !!task.recordId;
-  M = { recordId, id: taskId, task, owner: mine, passOn, view, opts, loading: true, busy: false, nodeOpen: false, nodeQ: '', whoOpen: false, whoQ: '', armed: false, newSub: '', err: '' };
+  const viaRole = holdsRoleOf(task);
+  const view = !!task && !mine && task.assigneeId !== H.store.user?.uid && !viaRole;
+  // a record task given to me (or my role): I can pass it on to someone else (Reassign)
+  const passOn = !!task && !mine && (task.assigneeId === H.store.user?.uid || viaRole) && !!task.recordId;
+  M = { recordId, id: taskId, task, owner: mine, passOn, viaRole, view, opts, loading: true, busy: false, nodeOpen: false, nodeQ: '', whoOpen: false, whoQ: '', armed: false, newSub: '', err: '' };
   paint();
   const [items, ppl] = await Promise.all([mine ? loadCadenceItems() : Promise.resolve({}), mine || passOn ? assignablePeople() : Promise.resolve([])]);
   if (!M || M.id !== taskId) return;
@@ -60,11 +71,14 @@ export async function open(recordId, taskId = null, opts = {}) {
   M.nodes = mine ? mapNodes(items.map) : [];
   const cur = task?.assigneeId ? { uid: task.assigneeId, name: task.assigneeName || task.assigneeEmail || 'Someone', email: normEmail(task.assigneeEmail) } : null;
   M.people = mine ? assignChoices(ppl, me(), cur) : passOn ? passChoices(ppl, task, me()) : [];
+  M.roles = mine || passOn ? roleChoices() : [];
+  if (task?.assigneeRole && !M.roles.some((r) => r.role === task.assigneeRole)) M.roles.push(roleChoice({ id: task.assigneeRole, name: (task.assigneeRoleName || 'A role') + ' (deleted)' }));
   M.draft = task ? {
     title: task.title || '', notes: task.notes || '', due: task.due || '', time: task.time || '', repeat: task.repeat || 'none',
-    typeId: task.typeId || '', levelId: task.levelId || '', nodeId: task.nodeId || '', who: task.assigneeId || task.ownerId,
+    typeId: task.typeId || '', levelId: task.levelId || '', nodeId: task.nodeId || '', who: task.assigneeRole ? 'role:' + task.assigneeRole : task.assigneeId || task.ownerId,
     subtasks: (task.subtasks || []).map((s) => (typeof s === 'string' ? { id: uid('s'), title: s, done: false } : { id: s.id || uid('s'), title: s.title || s.text || '', done: !!s.done })),
   } : { title: '', notes: '', due: '', time: '', repeat: 'none', typeId: M.lists.defType || '', levelId: M.lists.defLevel || '', nodeId: '', who: H.store.user.uid, subtasks: [] };
+  M.startWho = M.draft.who;
   M.loading = false;
   paint();
   setTimeout(() => root().querySelector(task ? '[data-tki="notes"]' : '[data-tki="title"]')?.focus(), 0);
@@ -73,16 +87,19 @@ export async function open(recordId, taskId = null, opts = {}) {
 export function close() { M = null; const r = document.getElementById('tk-root'); if (r) r.innerHTML = ''; }
 
 /** "Assigned to": the chosen person, as a button that opens the person picker. */
+const chosen = () => M.people.find((x) => x.uid === M.draft.who) || (M.roles || []).find((x) => x.uid === M.draft.who) || M.people[0];
 function whoField() {
-  const p = M.people.find((x) => x.uid === M.draft.who) || M.people[0];
-  const label = !p ? 'Choose…' : p.me ? (M.passOn ? 'Me (keep it)' : `Me (${p.name || 'you'})`) : p.owner ? `${p.name} (owner)` : p.name || p.email;
-  return `<div class="tk-l"><span id="tk-who-l">Assigned to</span><button type="button" class="in tk-who" data-tk="who" aria-haspopup="listbox" aria-expanded="${M.whoOpen}" aria-labelledby="tk-who-l tk-who-v">${p ? `<span class="cm-av sm" style="background:${avatarColor(p.uid)}" aria-hidden="true">${esc(initials(p.name || p.email || '?'))}</span>` : ''}<span id="tk-who-v" class="tk-who-v">${esc(label)}</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>`;
+  const p = chosen();
+  const label = !p ? 'Choose…' : p.role ? (M.viaRole && p.role === M.task?.assigneeRole ? `${p.name} (keep it with the role)` : `${p.name} (role)`) : p.me ? (M.passOn ? (M.viaRole ? 'Me (take it myself)' : 'Me (keep it)') : `Me (${p.name || 'you'})`) : p.owner ? `${p.name} (owner)` : p.name || p.email;
+  return `<div class="tk-l"><span id="tk-who-l">Assigned to</span><button type="button" class="in tk-who" data-tk="who" aria-haspopup="listbox" aria-expanded="${M.whoOpen}" aria-labelledby="tk-who-l tk-who-v">${p ? (p.role ? `<span class="cm-av sm pk-ic" aria-hidden="true">◉</span>` : `<span class="cm-av sm" style="background:${avatarColor(p.uid)}" aria-hidden="true">${esc(initials(p.name || p.email || '?'))}</span>`) : ''}<span id="tk-who-v" class="tk-who-v">${esc(label)}</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>`;
 }
 /** The person picker under "Assigned to": me (or me and the owner, when passing it on) first. */
 function whoPanel() {
-  const pin = M.people.filter((p) => p.me || p.owner).map((p) => ({ ...p, av: p.name, name: p.me ? (M.passOn ? 'Me (keep it)' : `Me (${p.name || 'you'})`) : `${p.name} (owner): give it back` }));
+  const keep = M.viaRole ? (M.roles || []).filter((r) => r.role === M.task.assigneeRole).map((r) => ({ ...r, name: `${r.name} (keep it with the role)` })) : [];
+  const pin = keep.concat(M.people.filter((p) => p.me || p.owner).map((p) => ({ ...p, av: p.name, name: p.me ? (M.passOn ? (M.viaRole ? 'Me (take it myself)' : 'Me (keep it)') : `Me (${p.name || 'you'})`) : `${p.name} (owner): give it back` })));
   const rest = M.people.filter((p) => !p.me && !p.owner);
-  return `<div class="tk-whop">${pickerHTML({ id: 'tk', label: 'Assigned to', people: rest, pinned: pin, sel: M.draft.who, q: M.whoQ })}</div>`;
+  const roles = (M.roles || []).filter((r) => !keep.some((k) => k.uid === r.uid));
+  return `<div class="tk-whop">${pickerHTML({ id: 'tk', label: 'Assigned to', people: rest, pinned: pin, roles, sel: M.draft.who, q: M.whoQ })}</div>`;
 }
 
 const pill = (hex, label, cls = '') => `<span class="tk-pill ${cls}" style="--pc:${esc(hex)}"><i></i>${esc(label)}</span>`;
@@ -96,16 +113,16 @@ function paint() {
     return;
   }
   const d = M.draft, t = M.task, own = M.owner, dis = M.busy ? ' disabled' : '', ro = own ? '' : ' disabled';
-  const holderName = t ? (t.assigneeId ? t.assigneeName || t.assigneeEmail || 'someone' : t.ownerName || t.ownerEmail || 'its owner') : '';
-  const from = M.view ? `<p class="help tk-from">${esc(t.ownerName || t.ownerEmail || 'Someone')}’s task${t.assigneeId ? `, with ${esc(holderName)}` : ''}. Only they can change it${M.opts.reassign ? '; you can reassign it' : ''}.</p>`
-    : !own && t ? `<p class="help tk-from">From ${esc(t.ownerName || t.ownerEmail || 'someone')}. You can change the notes, date and checklist${M.passOn ? ', and pass it on to someone else' : ''}; the rest is theirs.</p>` : '';
+  const holderNm = t ? holderName(t) : '';
+  const doneBy = t && t.done && t.doneByName ? `<p class="help tk-doneby">Done by <b>${esc(t.doneByName)}</b>.</p>` : '';
+  const from = (M.view ? `<p class="help tk-from">${esc(t.ownerName || t.ownerEmail || 'Someone')}’s task${t.assigneeId || t.assigneeRole ? `, with ${esc(holderNm)}` : ''}. Only they can change it${M.opts.reassign ? '; you can reassign it' : ''}.</p>`
+    : !own && t ? `<p class="help tk-from">From ${esc(t.ownerName || t.ownerEmail || 'someone')}${M.viaRole ? ` to <b>${esc(t.assigneeRoleName || 'your role')}</b> (your role): anyone in it can do it, and whoever ticks it off first is credited` : ''}. You can change the notes, date and checklist${M.passOn ? ', and pass it on to someone else' : ''}; the rest is theirs.</p>` : '') + doneBy;
   const levels = M.lists.levels || [];
   const node = (M.nodes || []).find((n) => n.id === d.nodeId);
   const q = M.nodeQ.trim().toLowerCase();
   const nodeOpts = [{ id: '', title: 'Not on the map', hex: '', depth: 0 }].concat((M.nodes || []).filter((n) => !q || n.title.toLowerCase().includes(q)));
   const subsDone = d.subtasks.filter((s) => s.done).length;
-  const who = M.people.find((p) => p.uid === d.who);
-  const canDel = t && (own || (t.assigneeId === H.store.user.uid && t.spawnedFrom && !t.done));
+  const canDel = t && (own || ((t.assigneeId === H.store.user.uid || M.viaRole) && t.spawnedFrom && !t.done));
   r.innerHTML = `<div class="lv-scrim tk-scrim" data-tk="scrim"><div class="lv-dlg tk-dlg${M.view ? ' tk-view' : ''}" role="dialog" aria-modal="true" aria-labelledby="tk-h" data-stop-scrim="1">
     <div class="tk-head"><h2 id="tk-h">${t ? (t.done ? 'Task (done)' : 'Task') : 'New task'}</h2><button type="button" class="ibtn" data-tk="close" aria-label="Close">✕</button></div>
     ${linkLine}${from}
@@ -123,7 +140,7 @@ function paint() {
       </div>` : M.passOn ? `<div class="tk-row2">
         ${whoField()}${M.whoOpen ? whoPanel() : ''}
         <div class="tk-l tk-type"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div>
-      </div><p class="help tk-who-help">To pass this on, pick who should do it instead. ${esc(t.ownerName || 'The owner')} still sees it.</p>` : `<div class="tk-row2"><div class="tk-l"><span>Assigned to</span><p class="tk-ro">${M.view ? esc(holderName) : 'You'}</p></div><div class="tk-l"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div></div>`}
+      </div><p class="help tk-who-help">To pass this on, pick who should do it instead${M.viaRole ? ', or another role' : ''}. ${esc(t.ownerName || 'The owner')} still sees it.</p>` : `<div class="tk-row2"><div class="tk-l"><span>Assigned to</span><p class="tk-ro">${M.view ? esc(holderNm) : 'You'}</p></div><div class="tk-l"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div></div>`}
       ${own ? `<div class="tk-l tk-nodew"><span>On the map</span>
         <div class="tk-nodeline"><button type="button" class="tk-pill tk-pickn${node ? '' : ' tk-none'}" data-tk="nodes" aria-haspopup="listbox" aria-expanded="${M.nodeOpen}"${node ? ` style="--pc:${esc(node.hex)}"` : ''}><i></i>${esc(node ? node.title : d.nodeId ? 'Its node was deleted' : 'Link to a node')}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           ${d.nodeId ? `<button type="button" class="ibtn" data-tk="node" data-v="" aria-label="Unlink from the map" title="Unlink">✕</button>` : ''}${node?.parent ? `<span class="help">in ${esc(node.parent)}</span>` : ''}</div>
@@ -155,7 +172,9 @@ function paint() {
 /** Tick a task off (or reopen it). A repeating task makes its next occurrence, as in Cadence. */
 export async function toggleDone(t) {
   const now = Date.now(), myId = H.store.user.uid;
-  const patch = donePatch(!t.done, myId, now);
+  const myName = H.store.profiles?.[myId]?.displayName || H.store.me?.displayName || (H.store.user?.email || '').split('@')[0] || 'Someone';
+  // a task given to a role: whoever ticks it off first is credited, "Accounts (Farren)"
+  const patch = donePatch(!t.done, myId, now, t.ownerId === myId ? (t.assigneeRole ? myName : undefined) : doneCredit(t, H.store.me, myName));
   if (!t.done && t.repeat && t.repeat !== 'none' && !t.spawnedNext) {
     const next = nextOccurrence(t, uid('t'), now, dateKey(new Date()));
     await writeTasks([next], [[t.id, { ...patch, spawnedNext: next.id }]]);
@@ -163,7 +182,7 @@ export async function toggleDone(t) {
   }
   if (t.done && t.spawnedNext) {
     const sp = (H.tasks() || []).find((x) => x.id === t.spawnedNext);
-    if (sp && !sp.done && (sp.ownerId === myId || (sp.assigneeId === myId && sp.spawnedFrom))) { try { await deleteTask(sp.id); } catch (e) { /* already gone */ } }
+    if (sp && !sp.done && (sp.ownerId === myId || ((sp.assigneeId === myId || holdsRoleOf(sp)) && sp.spawnedFrom))) { try { await deleteTask(sp.id); } catch (e) { /* already gone */ } }
     await updateTask(t.id, { ...patch, spawnedNext: null });
     return 'reopened';
   }
@@ -175,7 +194,7 @@ async function save() {
   const d = M.draft;
   if (!String(d.title).trim()) { M.err = 'Give the task a title.'; paint(); root().querySelector('[data-tki="title"]')?.focus(); return; }
   if (M.newSub.trim()) { d.subtasks.push({ id: uid('s'), title: M.newSub.trim(), done: false }); M.newSub = ''; }
-  const mine = me(), who = M.owner ? M.people.find((p) => p.uid === d.who) : null;
+  const mine = me(), who = M.owner ? chosen() : null;
   if (M.owner && who && !who.me && !who.ok && who.uid !== M.task?.assigneeId) { M.err = `${who.name} can’t be given tasks yet.`; paint(); return; }
   M.busy = true; M.err = ''; paint();
   try {
@@ -190,16 +209,16 @@ async function save() {
         const r = await explainRefusal(t, who);
         if (!r.saved) { const err = new Error(r.msg); err.diag = r.msg; throw err; }
       }
-      H.toast(who && !who.me ? `Task added and given to ${who.name.split(' ')[0]}` : 'Task added');
+      H.toast(who && who.role ? `Task added and given to ${who.name}` : who && !who.me ? `Task added and given to ${who.name.split(' ')[0]}` : 'Task added');
     } else {
       const patch = editPatch(M.task, d, mine, who && !who.me ? who : null, M.owner, M.lists, now);
       if (Object.keys(patch).length) { await updateTask(M.task.id, patch); H.toast('Task saved'); }
       // passed on to someone else (or back to the owner): a change of its own, as Cadence's rules want
-      if (M.passOn && d.who !== mine.uid) {
-        const to = M.people.find((p) => p.uid === d.who);
-        if (to && to.ok) {
+      if (M.passOn && d.who !== M.startWho) {
+        const to = chosen();
+        if (to && to.ok && to.uid === d.who) {
           await updateTask(M.task.id, reassignPatch(M.task, to.owner ? null : to, mine.uid, now));
-          H.toast(to.owner ? `Given back to ${String(to.name).split(' ')[0]}` : `Passed to ${String(to.name).split(' ')[0]}`);
+          H.toast(to.owner ? `Given back to ${String(to.name).split(' ')[0]}` : to.role ? `Passed to ${to.name}` : to.me ? 'It’s yours now' : `Passed to ${String(to.name).split(' ')[0]}`);
         }
       }
     }
@@ -220,7 +239,7 @@ async function explainRefusal(t, who) {
   console.warn('[formwright] task refused. What the rules read:', { task: t, ...reads });
   const err = (x) => !!(x && x.error);
   if (err(reads.account)) return { msg: `Cadence didn’t allow that, and your own account couldn’t be read (${reads.account.error}). Sign out and sign in again. If you use Brave or an ad blocker, turn it off for this site.` };
-  const why = taskRefusal(me(), reads.account, t, err(reads.record) ? null : reads.record, err(reads.person) ? null : reads.person, { assignee: who?.name });
+  const why = taskRefusal(me(), reads.account, t, err(reads.record) ? null : reads.record, err(reads.person) ? null : reads.person, { assignee: who?.name, roleMissing: !!t.assigneeRole && !(H.store.roles || []).some((r) => r.id === t.assigneeRole) });
   if (why.length) return { msg: 'Cadence didn’t allow that. ' + why.join(' ') };
   if (t.typeSnap || t.levelSnap) {
     try { await writeTasks([{ ...t, typeSnap: null, levelSnap: null }]); console.warn('[formwright] task saved without its type/priority copy'); return { saved: true }; } catch (e) { /* not that */ }

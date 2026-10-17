@@ -140,8 +140,8 @@ export function taskCell(key, t, { todayKey, now, dueInfo }) {
     }
     case 'days': { const n = daysOpen(t, now); return { text: n == null ? '' : n === 1 ? '1 day' : n + ' days', sort: n, num: true }; }
     case 'owner': { const s = t.ownerName || t.ownerEmail || ''; return { text: s, sort: s ? s.toLowerCase() : null }; }
-    case 'assignee': { const s = t.assigneeName || t.assigneeEmail || ''; return { text: s, sort: s ? s.toLowerCase() : null }; }
-    case 'status': return { text: t.done ? 'Done' : 'Open', sort: t.done ? 1 : 0, tone: t.done ? 'ok' : '' };
+    case 'assignee': { const s = t.assigneeName || t.assigneeEmail || (t.assigneeRole ? `${t.assigneeRoleName || 'A role'} (role)` : ''); return { text: s, sort: s ? s.toLowerCase() : null }; }
+    case 'status': return { text: t.done ? (t.doneByName ? `Done by ${t.doneByName}` : 'Done') : 'Open', sort: t.done ? 1 : 0, tone: t.done ? 'ok' : '' };
     case 'repeat': { const s = REPEATS[t.repeat] || ''; return { text: s, sort: s || null }; }
     case 'notes': { const s = String(t.notes || '').replace(/\s*\n\s*/g, ' ').trim(); return { text: s, sort: s ? s.toLowerCase() : null, long: true }; }
     case 'created': return { text: shortDate(t.createdAt), sort: t.createdAt || null };

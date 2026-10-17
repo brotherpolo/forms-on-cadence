@@ -79,6 +79,9 @@ export function mentionsIn(text, picked = [], people = []) {
   return out.slice(0, MAX_MENTIONS);
 }
 
+/** A role mentioned (Formwright → Roles) rather than a person: uid "role:<roleId>". */
+export const isRoleId = (uid) => typeof uid === 'string' && uid.startsWith('role:');
+
 /** The text in pieces, with each mention marked: [{t}, {t: '@Sam Lee', uid: 'sam'}, …]. */
 export function parts(text, mentions = []) {
   const t = String(text || '');
@@ -118,7 +121,8 @@ export function notifyLine(mentions, { task = false, off = new Set() } = {}) {
   const ok = (mentions || []).filter((m) => !off.has(m.uid));
   const no = (mentions || []).filter((m) => off.has(m.uid));
   const bits = [];
-  if (ok.length) bits.push(`${andList(ok.map((m) => first(m.name)))} will get an email${task ? ' and a Cadence task' : ''}`);
+  const nm = (m) => (isRoleId(m.uid) ? `everyone in ${m.name}` : first(m.name));
+  if (ok.length) bits.push(`${andList(ok.map(nm))} will get an email${task ? ' and a Cadence task' : ''}`);
   if (no.length) bits.push(`${andList(no.map((m) => first(m.name)))} can’t see this record`);
   return bits.join('. ') + (bits.length ? '.' : '');
 }
@@ -126,10 +130,16 @@ export function notifyLine(mentions, { task = false, off = new Set() } = {}) {
 /** Notes under a comment for the people who weren't told: "Sam can’t see this record and wasn’t notified." */
 export function notifiedNotes(comment) {
   const done = (comment && comment.notified) || {};
-  const nameOf = (uid) => ((comment.mentions || []).find((m) => m.uid === uid) || {}).name || 'Someone';
-  const no = Object.keys(done).filter((u) => done[u] === 'no-access').map(nameOf);
+  const named = (uid) => (comment.mentions || []).find((m) => m.uid === uid);
+  const nameOf = (uid) => (named(uid) || {}).name || 'Someone';
+  const no = Object.keys(done).filter((u) => done[u] === 'no-access' && named(u)).map(nameOf);
   const gone = Object.keys(done).filter((u) => done[u] === 'gone').map(nameOf);
   const out = [];
+  // people reached through a role mentioned (not named themselves)
+  const viaRole = Object.keys(done).filter((u) => done[u] === 'no-access' && !named(u)).length;
+  const nobody = Object.keys(done).filter((u) => done[u] === 'nobody').map(nameOf);
+  if (nobody.length) out.push(`Nobody is in ${andList(nobody, 4)} yet, so no one was told.`);
+  if (viaRole) out.push(`${viaRole === 1 ? 'One person' : viaRole + ' people'} in ${viaRole === 1 ? 'a role' : 'the roles'} you mentioned can’t see this record and ${viaRole === 1 ? 'wasn’t' : 'weren’t'} notified.`);
   if (no.length) out.push(`${andList(no, 4)} can’t see this record and ${no.length === 1 ? 'wasn’t' : 'weren’t'} notified.`);
   if (gone.length) out.push(`${andList(gone, 4)} no longer ${gone.length === 1 ? 'has an account' : 'have accounts'} and ${gone.length === 1 ? 'wasn’t' : 'weren’t'} notified.`);
   return out;

@@ -11,23 +11,26 @@ const av = (p) => p.icon
 
 function opt(p, sel, q, counts, pin) {
   const on = p.uid === sel, dis = !p.ok && !on;
-  const right = !p.ok ? '<span class="pk-why">Can’t be given tasks yet</span>' : counts && !p.icon ? `<span class="pk-n">${counts[p.uid] || 0} open</span>` : '';
-  return `<button type="button" role="option" class="pk-opt${pin ? ' pk-pin' : ''}${on ? ' on' : ''}" data-pk="pick" data-v="${esc(p.uid)}" data-s="${esc(pickText(p))}" aria-selected="${on}"${dis ? ' disabled' : ''}${pickMatch(p, q) ? '' : ' hidden'}>
+  const right = !p.ok ? '<span class="pk-why">Can’t be given tasks yet</span>' : counts && !p.icon ? `<span class="pk-n">${counts[p.uid] || 0} open</span>` : p.sub ? `<span class="pk-n">${esc(p.sub)}</span>` : '';
+  return `<button type="button" role="option" class="pk-opt${pin === 'role' ? ' pk-role' : pin ? ' pk-pin' : ''}${on ? ' on' : ''}" data-pk="pick" data-v="${esc(p.uid)}" data-s="${esc(pickText(p))}" aria-selected="${on}"${dis ? ' disabled' : ''}${pickMatch(p, q) ? '' : ' hidden'}>
     <span class="pk-radio" aria-hidden="true"></span>${av(p)}<span class="pk-nm"><b>${esc(p.name || p.email || 'Someone')}</b>${p.email && !p.icon ? `<small>${esc(p.email)}</small>` : ''}</span>${right}</button>`;
 }
 
-/** { people, pinned, exclude, sel, q, counts, label, id } → HTML */
+/** { people, pinned, roles, exclude, sel, q, counts, label, id } → HTML. roles: [{ uid: 'role:…', name, icon, sub }] listed last under "Roles". */
 export function pickerHTML(o) {
-  const { pinned, rows, search } = pickRows(o.people, { pinned: o.pinned || [], exclude: o.exclude || [] });
+  const { pinned, rows, search: s0 } = pickRows(o.people, { pinned: o.pinned || [], exclude: o.exclude || [] });
+  const roles = (o.roles || []).filter((r) => !(o.exclude || []).includes(r.uid));
+  const search = s0 || pinned.length + rows.length + roles.length >= 6;
   const q = search ? o.q || '' : '';
-  const any = [...pinned, ...rows].some((p) => pickMatch(p, q));
+  const any = [...pinned, ...rows, ...roles].some((p) => pickMatch(p, q));
   const blocked = rows.some((p) => !p.ok);
   return `<div class="pk" data-pk-root="${esc(o.id || 'pk')}">
-    ${search ? `<input class="in pk-q" type="search" data-pk-q="1" value="${esc(q)}" placeholder="Search people…" aria-label="Search people" autocomplete="off">` : ''}
+    ${search ? `<input class="in pk-q" type="search" data-pk-q="1" value="${esc(q)}" placeholder="${roles.length ? 'Search people and roles…' : 'Search people…'}" aria-label="${roles.length ? 'Search people and roles' : 'Search people'}" autocomplete="off">` : ''}
     <div class="pk-list" role="listbox" aria-label="${esc(o.label || 'People')}">
       ${pinned.map((p) => opt(p, o.sel, q, null, true)).join('')}
       ${pinned.length && rows.length ? `<div class="pk-sep" role="presentation"${pinned.every((p) => !pickMatch(p, q)) ? ' hidden' : ''}></div>` : ''}
       ${rows.map((p) => opt(p, o.sel, q, o.counts)).join('')}
+      ${roles.length ? `<div class="pk-sep pk-rh" role="presentation"${roles.every((p) => !pickMatch(p, q)) ? ' hidden' : ''}><span>Roles: anyone in it can do it</span></div>${roles.map((p) => opt(p, o.sel, q, null, 'role')).join('')}` : ''}
       <p class="pk-none help"${any ? ' hidden' : ''}>No one matches “<span>${esc(q)}</span>”.</p>
     </div>
     ${blocked ? '<p class="help pk-foot">Greyed-out people need Cadence switched on (an administrator does that in Users), then to sign in to Formwright or Cadence once.</p>' : ''}
@@ -41,7 +44,8 @@ export function pickerFilter(input) {
   let any = false;
   box.querySelectorAll('.pk-opt').forEach((b) => { const m = pickMatch({ name: b.dataset.s }, q); b.hidden = !m; if (m) any = true; });
   const none = box.querySelector('.pk-none'); if (none) { none.hidden = any; none.querySelector('span').textContent = q; }
-  const sep = box.querySelector('.pk-sep'); if (sep) sep.hidden = ![...box.querySelectorAll('.pk-opt.pk-pin')].some((b) => !b.hidden);
+  const sep = box.querySelector('.pk-sep:not(.pk-rh)'); if (sep) sep.hidden = ![...box.querySelectorAll('.pk-opt.pk-pin')].some((b) => !b.hidden);
+  const rh = box.querySelector('.pk-rh'); if (rh) rh.hidden = ![...box.querySelectorAll('.pk-opt.pk-role')].some((b) => !b.hidden);
 }
 
 /** Arrow keys move between rows (and from the search box into the list). true when handled. */

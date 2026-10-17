@@ -868,6 +868,7 @@ tr.wf-over td.title{color:var(--danger)}
 .pk-why{font-size:12px;color:var(--muted);white-space:nowrap}
 .pk-sep{height:1px;background:var(--line);margin:4px 6px}
 .pk-sep[hidden],.pk-none[hidden]{display:none}
+.pk-rh{height:auto;background:none;border-top:1px solid var(--line);margin:6px 6px 2px;padding-top:8px;font-size:12px;font-weight:600;color:var(--muted)}.pk-rh[hidden]{display:none}
 .pk-none{margin:10px}
 .pk-foot{margin:0}
 .tk-who{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;font:inherit;color:inherit}

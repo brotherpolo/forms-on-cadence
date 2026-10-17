@@ -1,6 +1,8 @@
 // Cadence tasks linked to a Formwright record: display helpers and links into Cadence.
 // Cadence stores tasks in the shared `tasks` collection. A task links to a record with
-// recordId, formId and recordSnap; members = [ownerId] or [ownerId, assigneeId].
+// recordId, formId and recordSnap; members = [ownerId] or [ownerId, assigneeId]. A task given to a
+// role (Formwright → Roles) has assigneeRole/assigneeRoleName instead, members = [ownerId], and anyone
+// holding the role can see and do it; the first to tick it off is credited (doneByName "Accounts (Farren)").
 // Pure functions: no DOM, no Firebase.
 
 const REPEATS = { daily: 'Repeats daily', weekdays: 'Repeats on weekdays', weekly: 'Repeats weekly', monthly: 'Repeats monthly' };
@@ -41,6 +43,7 @@ export function dueInfo(due, todayKey) {
 /** Who else is on the task, from the viewer's side: "Assigned to Farren" or "From Farren". */
 export function whoLine(t, myUid) {
   const first = (name, email) => String(name || email || 'someone').split(' ')[0];
+  if (t.assigneeRole) return t.ownerId === myUid ? 'For ' + (t.assigneeRoleName || 'a role') : 'For ' + (t.assigneeRoleName || 'your role') + ' · from ' + first(t.ownerName, t.ownerEmail);
   if (t.ownerId === myUid && t.assigneeId) return 'Assigned to ' + first(t.assigneeName, t.assigneeEmail);
   if (t.assigneeId === myUid && t.ownerId !== myUid) return 'From ' + first(t.ownerName, t.ownerEmail);
   return '';
@@ -51,7 +54,7 @@ export const repeatLabel = (t) => REPEATS[t.repeat] || '';
 /** Everything a task can be found by: title, notes, people, its due text, Done, repeats, subtasks. */
 export function taskText(t, todayKey) {
   const subs = Array.isArray(t.subtasks) ? t.subtasks.map((x) => (typeof x === 'string' ? x : x && (x.title || x.text)) || '') : [];
-  return [t.title, t.notes, t.ownerName, t.assigneeName, t.done ? 'Done' : dueInfo(t.due, todayKey).text, t.due || '', repeatLabel(t), ...subs]
+  return [t.title, t.notes, t.ownerName, t.assigneeName, t.assigneeRoleName, t.doneByName, t.done ? 'Done' : dueInfo(t.due, todayKey).text, t.due || '', repeatLabel(t), ...subs]
     .filter(Boolean).join(' \u2022 ');
 }
 
@@ -65,8 +68,23 @@ export function cadenceLink(base, params) {
 }
 
 /** The fields Cadence expects when a task is ticked off or reopened outside Cadence. */
-export function donePatch(done, myUid, now) {
-  return { done: !!done, doneAt: done ? now : null, doneBy: done ? myUid : null, updatedAt: now };
+export function donePatch(done, myUid, now, byName) {
+  const p = { done: !!done, doneAt: done ? now : null, doneBy: done ? myUid : null, updatedAt: now };
+  if (byName !== undefined) p.doneByName = done ? byName || null : null;
+  return p;
+}
+/** A role is a choice in the "Assigned to" pickers: { uid: 'role:<id>', role: id, name }. */
+export const roleChoice = (r, holders) => ({ uid: 'role:' + r.id, role: r.id, name: r.name || 'Untitled role', ok: true, icon: '◉', sub: holders == null ? '' : `${holders} ${holders === 1 ? 'person' : 'people'}` });
+/** Who ticked it off, for a task given to a role: "Accounts (Farren)" when they hold it; else undefined (no credit field). */
+export function doneCredit(t, me, myName) {
+  if (!t || !t.assigneeRole) return undefined;
+  return (me?.roles || []).includes(t.assigneeRole) ? `${t.assigneeRoleName || 'Role'} (${myName})` : myName;
+}
+/** Who has a task now, in words: a person, "Accounts (role)", or its owner. */
+export function holderName(t) {
+  if (t.assigneeId) return t.assigneeName || t.assigneeEmail || 'someone';
+  if (t.assigneeRole) return `${t.assigneeRoleName || 'A role'} (role)`;
+  return t.ownerName || t.ownerEmail || 'its owner';
 }
 
 /* ---------- Adding and editing tasks in Formwright (the same documents Cadence writes) ---------- */
@@ -151,7 +169,8 @@ const snapOf = (x, keys) => (x ? Object.fromEntries(keys.map((k) => [k, x[k] ?? 
 export const normEmail = (e) => String(e || '').trim().toLowerCase();
 
 export function newTaskDoc(id, draft, me, who, link, lists, now) {
-  const assigned = who && who.uid && who.uid !== me.uid;
+  const role = who && who.role ? who : null;
+  const assigned = !role && who && who.uid && who.uid !== me.uid;
   const t = {
     id, title: String(draft.title || '').trim().slice(0, 500) || 'Untitled task', notes: String(draft.notes || '').slice(0, 20000),
     typeId: draft.typeId || null, levelId: draft.levelId || null, due: draft.due || null, time: draft.due && draft.time ? draft.time : null,
@@ -161,9 +180,10 @@ export function newTaskDoc(id, draft, me, who, link, lists, now) {
     ownerId: me.uid, ownerName: me.name || null, ownerEmail: me.email || null,
     assigneeId: assigned ? who.uid : null, assigneeName: assigned ? who.name || null : null, assigneeEmail: assigned ? who.email || null : null,
     members: assigned ? [me.uid, who.uid] : [me.uid],
+    ...(role ? { assigneeRole: role.role, assigneeRoleName: String(role.name || '').slice(0, 80) || null } : {}),
     recordId: link?.recordId || null, formId: link?.recordId ? link.formId || null : null, recordSnap: link?.recordId ? link.recordSnap || null : null,
   };
-  if (assigned) Object.assign(t, snaps(t, lists));
+  if (assigned || role) Object.assign(t, snaps(t, lists));
   return t;
 }
 function snaps(t, lists) {
@@ -177,12 +197,23 @@ function snaps(t, lists) {
  * who: { uid, name, email } | null; by: the uid doing it.
  */
 export function reassignPatch(task, who, by, now) {
-  const to = who && who.uid && who.uid !== task.ownerId ? who : null;
-  return {
+  const role = who && who.role ? who : null;
+  const to = !role && who && who.uid && who.uid !== task.ownerId ? who : null;
+  const p = {
     assigneeId: to ? to.uid : null, assigneeName: to ? to.name || null : null, assigneeEmail: to ? normEmail(to.email) || null : null,
     members: to ? [task.ownerId, to.uid] : [task.ownerId],
     updatedAt: now, reassignedBy: by, reassignedAt: now,
   };
+  // to a role, or away from one (only these fields change, as Cadence's rules want)
+  if (role) Object.assign(p, { assigneeRole: role.role, assigneeRoleName: String(role.name || '').slice(0, 80) || null });
+  else if (task.assigneeRole) Object.assign(p, { assigneeRole: null, assigneeRoleName: null });
+  return p;
+}
+/** Is this task already with that choice (a person, a role, or back with its owner)? */
+export function alreadyWith(task, who) {
+  if (!who) return !task.assigneeId && !task.assigneeRole;
+  if (who.role) return task.assigneeRole === who.role;
+  return who.uid === task.ownerId ? !task.assigneeId && !task.assigneeRole : task.assigneeId === who.uid;
 }
 /** Who a task can be passed to by its assignee: keep it, back to the owner, or anyone else Cadence lets have it. */
 export function passChoices(people, task, me) {
@@ -210,10 +241,13 @@ export function editPatch(old, draft, me, who, owner, lists, now) {
     set('title', String(draft.title || '').trim().slice(0, 500) || 'Untitled task');
     set('typeId', draft.typeId || null); set('levelId', draft.levelId || null);
     set('repeat', draft.repeat || 'none'); set('nodeId', draft.nodeId || null);
-    const assigned = who && who.uid && who.uid !== me.uid;
+    const role = who && who.role ? who : null;
+    const assigned = !role && who && who.uid && who.uid !== me.uid;
     set('assigneeId', assigned ? who.uid : null);
-    if ('assigneeId' in p) Object.assign(p, { assigneeName: assigned ? who.name || null : null, assigneeEmail: assigned ? who.email || null : null, members: assigned ? [old.ownerId, who.uid] : [old.ownerId] });
-    if (assigned) { const s = snaps({ typeId: draft.typeId, levelId: draft.levelId }, lists); set('typeSnap', s.typeSnap); set('levelSnap', s.levelSnap); }
+    set('assigneeRole', role ? role.role : null);
+    if ('assigneeRole' in p) p.assigneeRoleName = role ? String(role.name || '').slice(0, 80) || null : null;
+    if ('assigneeId' in p || 'assigneeRole' in p) Object.assign(p, { assigneeName: assigned ? who.name || null : null, assigneeEmail: assigned ? who.email || null : null, members: assigned ? [old.ownerId, who.uid] : [old.ownerId] });
+    if (assigned || role) { const s = snaps({ typeId: draft.typeId, levelId: draft.levelId }, lists); set('typeSnap', s.typeSnap); set('levelSnap', s.levelSnap); }
     else if (old.typeSnap || old.levelSnap) { p.typeSnap = null; p.levelSnap = null; }
   }
   if (!Object.keys(p).length) return p;
@@ -225,7 +259,7 @@ export function editPatch(old, draft, me, who, owner, lists, now) {
 /** The next occurrence of a repeating task, as Cadence makes it when one is ticked off. */
 export function nextOccurrence(t, newId, now, todayKey) {
   const next = JSON.parse(JSON.stringify(t));
-  ['spawnedNext', 'moved', 'pushed', 'doneBy'].forEach((k) => delete next[k]);
+  ['spawnedNext', 'moved', 'pushed', 'doneBy', 'doneByName'].forEach((k) => delete next[k]);
   Object.assign(next, { id: newId, done: false, doneAt: null, createdAt: now, updatedAt: now, due: nextDue(t.due, t.repeat, todayKey), spawnedFrom: t.id });
   next.subtasks = (next.subtasks || []).map((s) => ({ ...s, done: false }));
   return next;
@@ -258,6 +292,7 @@ export function taskRefusal(me, account, task, record, person, names = {}) {
     if (!person) out.push(`${who} isn’t in Cadence’s people list under ${task.assigneeEmail}. They need to open Cadence once while signed in with that address.`);
     else if (person.uid !== task.assigneeId) out.push(`Cadence’s people list has ${task.assigneeEmail} on a different account (${String(person.uid || 'none').slice(0, 8)}…) from the ${who} you picked (${String(task.assigneeId).slice(0, 8)}…). They should open Cadence once to fix it.`);
   }
+  if (task.assigneeRole && names.roleMissing) out.push(`The role ${task.assigneeRoleName || ''} was deleted. Pick someone else, or another role.`.replace('  ', ' '));
   if (task.recordId) {
     if (!record) out.push('This record isn’t saved on the server yet (or was deleted). Save it, check your connection, and try again.');
     else if (record.formId !== task.formId) out.push('The task points at the wrong form for this record. Reload the page and try again.');

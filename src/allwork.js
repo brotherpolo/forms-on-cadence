@@ -5,8 +5,8 @@
 // Reassign: give one or several to someone else, or back to their owner. The owner stays.
 import { esc, badge } from './ui.js';
 import { watchAllMentions, watchRecordTasks, reassignTasks } from './store.js';
-import { reassignPatch, dueInfo, dateKey } from './tasks.js';
-import { assignablePeople, open as openTask } from './taskmodal.js';
+import { reassignPatch, alreadyWith, dueInfo, dateKey } from './tasks.js';
+import { assignablePeople, roleChoices, open as openTask } from './taskmodal.js';
 import { ago, avatarColor, initials } from './commentlogic.js';
 import { filterMentions, filterTasks, sortTasks, holder } from './allworklogic.js';
 import { pickerHTML, pickerFilter, pickerKey, pickerFocus } from './peoplepick.js';
@@ -50,7 +50,7 @@ export function stop() { A.m?.(); A.t?.(); Object.assign(A, { m: null, mList: []
 
 const nameOf = (uid, fb) => H.store.profiles?.[uid]?.displayName || fb || 'Someone';
 const people = () => Object.entries(H.store.profiles || {}).filter(([, p]) => p && !p.removed).map(([uid, p]) => ({ uid, name: p.displayName || p.email || 'Someone' })).sort((a, b) => a.name.localeCompare(b.name));
-const av = (uid, name) => `<span class="cm-av sm" style="background:${avatarColor(uid)}" aria-hidden="true">${esc(initials(name))}</span>`;
+const av = (uid, name) => String(uid).startsWith('role:') ? '<span class="cm-av sm pk-ic" aria-hidden="true">◉</span>' : `<span class="cm-av sm" style="background:${avatarColor(uid)}" aria-hidden="true">${esc(initials(name))}</span>`;
 const denied = (msg) => `<div class="panel empty"><h2>Couldn’t load this</h2><p>${msg} The latest Cadence security rules may not be deployed yet.</p></div>`;
 const recLabel = (recordId, fallback) => { const r = H.recById(recordId), f = r && H.formById(r.formId); return { rec: r, form: f, title: r && f ? H.recTitle(r, f) : fallback || 'a record' }; };
 
@@ -70,7 +70,7 @@ export function allMentionsHTML() {
     const { title, form } = recLabel(m.recordId, m.recordTitle);
     const to = nameOf(m.to), by = nameOf(m.by, m.byName);
     return `<tr data-aw="m-open" data-id="${esc(m.id)}" class="${m.read ? '' : 'aw-unread'}" tabindex="0">
-      <td><span class="aw-who">${av(m.to, to)}${esc(to)}</span></td><td><span class="aw-who">${av(m.by, by)}${esc(by)}</span></td>
+      <td><span class="aw-who">${av(m.to, to)}${esc(to)}</span>${m.role ? `<small class="help"> via ${esc(m.role)}</small>` : ''}</td><td><span class="aw-who">${av(m.by, by)}${esc(by)}</span></td>
       <td>${form ? badge(form) : ''}<span class="aw-rec">${esc(title)}</span></td><td class="aw-snip">${esc(m.snippet || '')}</td>
       <td class="aw-when" title="${esc(new Date(m.at || 0).toLocaleString())}">${esc(ago(m.at || 0))}</td>
       <td>${m.read ? '<span class="aw-st">Read</span>' : '<span class="aw-st un">Unread</span>'}</td></tr>`;
@@ -100,7 +100,7 @@ export function allTasksHTML() {
   const forms = [...new Set(A.tList.map((t) => t.formId).filter(Boolean))].map((id) => H.formById(id)).filter(Boolean).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const nOpen = A.tList.filter((t) => !t.done).length, nLate = A.tList.filter((t) => !t.done && t.due && t.due < today).length;
   const sel = [...A.sel].filter((id) => list.some((t) => t.id === id));
-  const bar = `<div class="aw-bar"><label class="aw-f"><span>Person</span><select class="in" data-awf="t-who"><option value="">Everyone</option>${ppl.map((p) => `<option value="${esc(p.uid)}"${A.tf.who === p.uid ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+  const bar = `<div class="aw-bar"><label class="aw-f"><span>Person</span><select class="in" data-awf="t-who"><option value="">Everyone</option>${ppl.map((p) => `<option value="${esc(p.uid)}"${A.tf.who === p.uid ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}${(H.store.roles || []).length ? `<optgroup label="Roles">${[...H.store.roles].sort((a, b) => String(a.name).localeCompare(String(b.name))).map((r) => `<option value="role:${esc(r.id)}"${A.tf.who === 'role:' + r.id ? ' selected' : ''}>${esc(r.name || 'Untitled role')}</option>`).join('')}</optgroup>` : ''}</select></label>
     <label class="aw-f"><span>Form</span><select class="in" data-awf="t-form"><option value="">All forms</option>${forms.map((f) => `<option value="${esc(f.id)}"${A.tf.form === f.id ? ' selected' : ''}>${esc(f.name)}</option>`).join('')}</select></label>
     <div class="segs" role="group" aria-label="Status">${[['open', 'Open'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => `<button type="button" class="${A.tf.status === k ? 'on' : ''}" aria-pressed="${A.tf.status === k}" data-aw="t-status" data-v="${k}">${l}</button>`).join('')}</div>
     <span class="grow help">${list.length} shown · ${nOpen} open${nLate ? ` · <b class="aw-late">${nLate} overdue</b>` : ''}</span></div>
@@ -114,7 +114,7 @@ export function allTasksHTML() {
       <td class="aw-cb"><input type="checkbox" data-aw="t-sel" data-id="${esc(t.id)}" aria-label="Select ${esc(t.title || 'task')}"${A.sel.has(t.id) ? ' checked' : ''}></td>
       <td class="aw-title"><button type="button" class="aw-tbtn" data-aw="t-row" data-id="${esc(t.id)}">${esc(t.title || 'Untitled task')}</button></td>
       <td>${rec ? `<button type="button" class="aw-link" data-aw="t-open" data-id="${esc(t.recordId)}">${form ? badge(form) : ''}${esc(title)}</button>` : `<span class="help">${esc(title)} (removed)</span>`}</td>
-      <td><span class="aw-who">${av(h.uid, h.name)}${esc(h.name)}${t.assigneeId ? '' : ' <small class="help">(owner)</small>'}</span></td>
+      <td><span class="aw-who">${av(h.uid, h.name)}${esc(h.name)}${t.assigneeId || t.assigneeRole ? '' : ' <small class="help">(owner)</small>'}</span>${t.done && t.doneByName ? `<small class="help aw-doneby">Done by ${esc(t.doneByName)}</small>` : ''}</td>
       <td>${esc(t.ownerName || t.ownerEmail || 'Someone')}</td>
       <td>${due ? `<span class="aw-due ${late ? 'late' : due.tone}">${esc(due.text)}</span>` : '<span class="help">–</span>'}</td>
       <td>${t.done ? '<span class="aw-st">Done</span>' : '<span class="aw-st un">Open</span>'}</td>
@@ -127,7 +127,7 @@ export function allTasksHTML() {
     return `<div class="card aw-card aw-tcard${t.done ? ' aw-done' : ''}" data-aw="t-row" data-id="${esc(t.id)}">
       <div class="aw-ch"><input type="checkbox" data-aw="t-sel" data-id="${esc(t.id)}" aria-label="Select ${esc(t.title || 'task')}"${A.sel.has(t.id) ? ' checked' : ''}><button type="button" class="aw-tbtn aw-title" data-aw="t-row" data-id="${esc(t.id)}">${esc(t.title || 'Untitled task')}</button>${t.done ? '<span class="aw-st">Done</span>' : '<span class="aw-st un">Open</span>'}</div>
       <div>${rec ? `<button type="button" class="aw-link" data-aw="t-open" data-id="${esc(t.recordId)}">${form ? badge(form) : ''}${esc(title)}</button>` : `<span class="help">${esc(title)} (removed)</span>`}</div>
-      <div class="meta"><span class="aw-who">${av(h.uid, h.name)}${esc(h.name)}${t.assigneeId ? '' : ' (owner)'}</span>${t.assigneeId ? `<span>From ${esc(t.ownerName || t.ownerEmail || 'someone')}</span>` : ''}${due ? `<span class="aw-due ${late ? 'late' : due.tone}">${esc(due.text)}</span>` : ''}</div>
+      <div class="meta"><span class="aw-who">${av(h.uid, h.name)}${esc(h.name)}${t.assigneeId || t.assigneeRole ? '' : ' (owner)'}</span>${t.done && t.doneByName ? `<span>Done by ${esc(t.doneByName)}</span>` : ''}${t.assigneeId || t.assigneeRole ? `<span>From ${esc(t.ownerName || t.ownerEmail || 'someone')}</span>` : ''}${due ? `<span class="aw-due ${late ? 'late' : due.tone}">${esc(due.text)}</span>` : ''}</div>
       <div class="aw-cact"><button type="button" class="btn sm" data-aw="t-reassign" data-id="${esc(t.id)}">Reassign…</button></div></div>`;
   };
   return `${bar}<div class="panel"><div class="tblwrap"><table class="tbl aw-tbl aw-tasks"><thead><tr><th class="aw-cb"><input type="checkbox" data-aw="t-all" aria-label="Select all shown"${all ? ' checked' : ''}></th><th>Task</th><th>Record</th><th>Assigned to</th><th>Owner</th><th>Due</th><th>Status</th><th><span class="sr">Reassign</span></th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>
@@ -149,7 +149,7 @@ function paintDlg() {
     ${d.loading ? '<p class="note">Loading people…</p>' : `<div class="mail-l"><span class="mlab" id="aw-give">Give ${one ? 'it' : 'them'} to</span>
       ${pickerHTML({ id: 'aw', label: `Give ${one ? 'it' : 'them'} to`, people: d.people, sel: d.who, q: d.q, counts: openCounts(A.tList),
         pinned: [{ uid: '__owner', name: one ? `Back to ${one.ownerName || one.ownerEmail || 'the owner'} (owner)` : 'Back to each task’s owner', ok: true, icon: '↩' }],
-        exclude: one ? [one.ownerId, holder(one).uid] : [] })}</div>
+        roles: d.roles, exclude: one ? [one.ownerId, holder(one).uid] : [] })}</div>
       <p class="help">They get Cadence’s “assigned to you” notice. The owner stays the same and still sees ${one ? 'it' : 'them'}. It’s noted in the audit trail.</p>`}
     ${d.err ? `<p class="err" role="alert">${esc(d.err)}</p>` : ''}
     <div class="lv-dlgacts"><button type="button" class="btn ghost" data-aw="d-cancel"${d.busy ? ' disabled' : ''}>Cancel</button><button type="button" class="btn primary" data-aw="d-save"${d.busy || !d.who ? ' disabled' : ''}>${d.busy ? 'Reassigning…' : 'Reassign'}</button></div>
@@ -164,6 +164,7 @@ async function openDlg(ids) {
   try { ppl = await assignablePeople(); } catch (e) { console.error(e); }
   if (!A.dlg) return;
   A.dlg.people = ppl.map((p) => ({ ...p, ok: !!p.ok })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  A.dlg.roles = roleChoices();
   A.dlg.loading = false;
   paintDlg();
   pickerFocus(dlgRoot(), '', true);
@@ -172,15 +173,16 @@ async function saveDlg() {
   const d = A.dlg;
   if (!d || !d.who || d.busy) return;
   const me = H.store.user?.uid, now = Date.now();
-  const target = d.who === '__owner' ? null : d.people.find((p) => p.uid === d.who);
+  const target = d.who === '__owner' ? null : d.people.find((p) => p.uid === d.who) || (d.roles || []).find((r) => r.uid === d.who);
   if (d.who !== '__owner' && (!target || !target.ok)) return;
   const tasks = d.ids.map((id) => A.tList.find((t) => t.id === id)).filter(Boolean);
-  const pairs = tasks.filter((t) => (target ? (target.uid === t.ownerId ? !!t.assigneeId : t.assigneeId !== target.uid) : !!t.assigneeId)).map((t) => [t.id, reassignPatch(t, target, me, now)]);
+  const pairs = tasks.filter((t) => !alreadyWith(t, target)).map((t) => [t.id, reassignPatch(t, target, me, now)]);
   d.busy = true; d.err = ''; paintDlg();
   try {
     if (pairs.length) await reassignTasks(pairs);
     const to = target ? target.name.split(' ')[0] : 'their owners';
-    H.toast(!pairs.length ? 'Nothing to change: already with them.' : pairs.length === 1 ? `Reassigned to ${target ? target.name.split(' ')[0] : (tasks[0].ownerName || 'the owner').split(' ')[0]}` : `${pairs.length} tasks reassigned to ${to}`);
+    const tn = target ? (target.role ? target.name : target.name.split(' ')[0]) : null;
+    H.toast(!pairs.length ? 'Nothing to change: already with them.' : pairs.length === 1 ? `Reassigned to ${tn || (tasks[0].ownerName || 'the owner').split(' ')[0]}` : `${pairs.length} tasks reassigned to ${tn || to}`);
     A.sel.clear(); A.dlg = null; paintDlg(); H.renderMain();
   } catch (e) {
     console.error('[formwright] reassign', e);

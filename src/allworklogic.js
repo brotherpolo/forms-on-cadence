@@ -10,7 +10,7 @@ export function filterMentions(list, { who = '', unread = false } = {}) {
 /** Tasks for a person (assigned or owner), a form, and open / done / all. */
 export function filterTasks(list, { who = '', form = '', status = 'open' } = {}) {
   return (list || []).filter((t) => t && t.recordId
-    && (!who || t.assigneeId === who || t.ownerId === who)
+    && (!who || t.assigneeId === who || t.ownerId === who || (t.assigneeRole && 'role:' + t.assigneeRole === who))
     && (!form || t.formId === form)
     && (status === 'all' || (status === 'done' ? !!t.done : !t.done)));
 }
@@ -22,4 +22,4 @@ export function sortTasks(list, todayKey) {
 }
 
 /** Who a task is with: its assignee, or its owner when it's assigned to nobody. */
-export const holder = (t) => (t.assigneeId ? { uid: t.assigneeId, name: t.assigneeName || t.assigneeEmail || 'someone' } : { uid: t.ownerId, name: t.ownerName || t.ownerEmail || 'the owner' });
+export const holder = (t) => (t.assigneeId ? { uid: t.assigneeId, name: t.assigneeName || t.assigneeEmail || 'someone' } : t.assigneeRole ? { uid: 'role:' + t.assigneeRole, name: `${t.assigneeRoleName || 'A role'} (role)`, role: true } : { uid: t.ownerId, name: t.ownerName || t.ownerEmail || 'the owner' });

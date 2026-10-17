@@ -70,3 +70,29 @@ test('emails as Cadence keeps them: lowercase, trimmed', async () => {
   assert.equal(t.ownerEmail, 'a@x.com');
   assert.equal(t.assigneeEmail, 'b@x.com');
 });
+
+test('roles: a task given to a role, its credit, and passing it on', async () => {
+  const T = await import('../../src/tasks.js');
+  const me = { uid: 'amy', name: 'Amy', email: 'amy@x.example' };
+  const acc = T.roleChoice({ id: 'r_acc', name: 'Accounts' }, 2);
+  assert.deepEqual([acc.uid, acc.role, acc.sub], ['role:r_acc', 'r_acc', '2 people']);
+  const t = T.newTaskDoc('t1', { title: 'Pay', subtasks: [] }, me, acc, null, { types: [], levels: [] }, 5);
+  assert.deepEqual([t.assigneeId, t.assigneeRole, t.assigneeRoleName, t.members], [null, 'r_acc', 'Accounts', ['amy']]);
+  assert.equal(T.holderName(t), 'Accounts (role)');
+  assert.equal(T.whoLine(t, 'amy'), 'For Accounts');
+  assert.equal(T.whoLine(t, 'far'), 'For Accounts · from Amy');
+  assert.equal(T.doneCredit(t, { roles: ['r_acc'] }, 'Farren'), 'Accounts (Farren)');
+  assert.equal(T.doneCredit({ assigneeId: 'x' }, { roles: [] }, 'Farren'), undefined, 'no credit field for a person’s task');
+  assert.deepEqual(T.donePatch(true, 'far', 9, 'Accounts (Farren)').doneByName, 'Accounts (Farren)');
+  assert.ok(!('doneByName' in T.donePatch(true, 'far', 9)));
+  // passing it to one person takes it off the role; to a role puts it on one
+  const toFar = T.reassignPatch(t, { uid: 'far', name: 'Farren', email: 'far@x.example' }, 'far', 10);
+  assert.deepEqual([toFar.assigneeId, toFar.assigneeRole, toFar.assigneeRoleName, toFar.members], ['far', null, null, ['amy', 'far']]);
+  const toSite = T.reassignPatch({ ...t, assigneeRole: null }, T.roleChoice({ id: 'r_site', name: 'Site' }), 'amy', 10);
+  assert.deepEqual([toSite.assigneeId, toSite.assigneeRole, toSite.members], [null, 'r_site', ['amy']]);
+  assert.ok(T.alreadyWith(t, acc) && !T.alreadyWith(t, null) && T.alreadyWith({ ownerId: 'amy' }, { uid: 'amy' }));
+  // the owner switches it from the role to a person in the pop-up
+  const p = T.editPatch(t, { title: 'Pay', subtasks: [] }, me, { uid: 'bo', name: 'Bo', email: 'bo@x' }, true, { types: [], levels: [] }, 11);
+  assert.deepEqual([p.assigneeId, p.assigneeRole, p.assigneeRoleName, p.members], ['bo', null, null, ['amy', 'bo']]);
+  assert.ok(!('doneByName' in T.nextOccurrence({ ...t, doneByName: 'x', repeat: 'daily', due: '2026-10-17' }, 'n', 1, '2026-10-17')));
+});
