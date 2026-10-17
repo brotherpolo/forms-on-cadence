@@ -53,7 +53,7 @@ import { STAGE_FIELD, wfOn, stagesOf, stageById, stageIndex, firstStage, stageNa
 import { initRules, viewRules, rulesClick, rulesChange, rulesInput, rulesListHTML, parentUse, rulesCtx } from './rulesui.js';
 import { formatAuto, nextAuto, missingNumbers, autoSettings } from './autonum.js';
 import { signOutUser } from './auth.js';
-import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge } from './ui.js';
+import { $, esc, uid, clone, isEmpty, toast, COLORS, colorOf, itemName, badge, lazy } from './ui.js';
 import examples from './examples.json';
 
 const ADMIN_VIEWS = new Set(['designer', 'formEdit', 'users', 'groups', 'groupEdit', 'roles', 'roleEdit', 'import', 'imports', 'exports', 'audit', 'automations', 'automation']);
@@ -1039,7 +1039,7 @@ async function sendMail(){
   try{
     let pdf={missing:0};
     if(m.attach){
-      const {makeRecordPdf,toBase64}=await import('./pdfexport.js');
+      const {makeRecordPdf,toBase64}=await lazy(()=>import('./pdfexport.js'));
       pdf=await makeRecordPdf(pdfModel(form,rec));
       if(pdf.bytes.length>8*1024*1024)throw Object.assign(new Error('The PDF is over 8 MB, too big to email.'),{code:'local'});
       pdf.b64=toBase64(pdf.bytes);
@@ -1106,7 +1106,7 @@ async function exportPdf(){
   if(rdraft?.dirty){toast('Save your changes first, so the PDF matches what’s saved.');return;}
   ui.pdfBusy=true;const paint=()=>exportBusy(ui.pdfBusy);paint();
   try{
-    const {exportRecordPdf}=await import('./pdfexport.js');
+    const {exportRecordPdf}=await lazy(()=>import('./pdfexport.js'));
     const r=await exportRecordPdf(pdfModel(form,rec));
     toast(r.missing?`Downloaded ${r.name}. ${r.missing} picture${r.missing>1?'s':''} couldn’t be included.`:`Downloaded ${r.name}`);
   }catch(e){console.error('[formwright] PDF',e);toast(/Failed to fetch|dynamically imported|Importing a module/i.test(String(e?.message))?'Couldn’t load the PDF maker. Check your connection and try again.':'Couldn’t make the PDF. Try again.');}

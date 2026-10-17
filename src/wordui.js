@@ -3,7 +3,7 @@
 // The filling itself is docxtpl.js; this file gives it the record (a "scope") and the form (a
 // "schema" for checking). Anyone who can see a form can add templates to it; whoever added one,
 // or an administrator, can change or delete it.
-import { esc } from './ui.js';
+import { esc, lazy } from './ui.js';
 import { fieldByName } from './fieldnames.js';
 import { richBlocks } from './richtext.js';
 import { formSchema as schemaOf } from './docxgen.js';
@@ -155,7 +155,7 @@ function splitName(name) { const i = String(name).indexOf(':'); return i > 0 ? [
 /* ---------- the record, for filling in ---------- */
 function picture(v) {
   return (async () => {
-    const { dataUrlBytes, photoBytes } = await import('./pdfexport.js');
+    const { dataUrlBytes, photoBytes } = await lazy(() => import('./pdfexport.js'));
     if (typeof v === 'string') {
       const b = dataUrlBytes(v);
       if (!b) return null;
@@ -273,7 +273,7 @@ async function onAct(b, e) {
     if (d.recheck?.id === id) { d.recheck = null; paint(); return; }
     const t = W.list.find((x) => x.id === id);
     d.busy = true; paint();
-    try { const { checkDocx } = await import('./docxtpl.js'); d.recheck = { id, check: await checkDocx(await templateBytes(t), formSchema(H.formById(W.formId))) }; }
+    try { const { checkDocx } = await lazy(() => import('./docxtpl.js')); d.recheck = { id, check: await checkDocx(await templateBytes(t), formSchema(H.formById(W.formId))) }; }
     catch (e) { console.error(e); H.toast(e.message && /Word file/.test(e.message) ? e.message : 'Couldn’t check it. Try again.'); }
     d.busy = false; paint();
   }
@@ -292,11 +292,11 @@ async function onFile(input) {
   const p = W.dlg.pending = { file, name: file.name.replace(/\.docx$/i, '').replace(/[_-]+/g, ' ').trim(), check: null, replace: input.dataset.id || null, all: false };
   paint();
   try {
-    const { checkDocx } = await import('./docxtpl.js');
+    const { checkDocx } = await lazy(() => import('./docxtpl.js'));
     p.check = await checkDocx(new Uint8Array(await file.arrayBuffer()), formSchema(H.formById(W.formId)));
   } catch (e) {
     console.error(e);
-    p.check = { tags: [], errors: [/Word file/.test(e.message) ? e.message : 'Formwright couldn’t read that file.'] };
+    p.check = { tags: [], errors: [/Word file/.test(e.message) || e.stale ? e.message : `Formwright couldn’t read that file (${String(e?.message || e).slice(0, 120)}). Reload the page and try again; if it still happens, send a screenshot of this.`] };
   }
   if (W.dlg?.pending === p) { paint(); root().querySelector(p.replace ? '[data-xw="pend-save"]' : '[data-xwi="name"]')?.focus(); }
 }
@@ -323,7 +323,7 @@ function save(bytes, name) {
 export async function downloadPlaceholders(form) {
   if (!form) return;
   try {
-    const { placeholderModel, placeholderDocx } = await import('./docxgen.js');
+    const { placeholderModel, placeholderDocx } = await lazy(() => import('./docxgen.js'));
     const model = placeholderModel(form, { formById: (id) => (form.id && id === form.id ? form : H.formById(id)), parentsOf: H.parentsOf, itemName: H.itemName, wfOn: H.wfOn, gridCols: H.gridCols });
     save(await placeholderDocx(model), `Placeholders for ${safeName(form.name || 'form')}.docx`);
   } catch (e) { console.error('[formwright] placeholders', e); H.toast('Couldn’t make the file. Try again.'); }
@@ -336,7 +336,7 @@ async function run(t) {
   if (H.dirty()) { H.toast('Save your changes first, so the export matches what’s saved.'); return; }
   running = true; H.busy(true);
   try {
-    const [{ fillDocx }, bytes, brand] = await Promise.all([import('./docxtpl.js'), templateBytes(t), getExportSettings()]);
+    const [{ fillDocx }, bytes, brand] = await Promise.all([lazy(() => import('./docxtpl.js')), templateBytes(t), getExportSettings()]);
     const cur = (form.fields || []).find((f) => f.type === 'currency')?.currency || 'CAD';
     const out = await fillDocx(bytes, recordScope(rec, form, { brand }), { currency: cur });
     const name = `${safeName(t.name)} - ${safeName(H.recTitle(rec, form))}.docx`;

@@ -63,3 +63,22 @@ export function toast(message, opts = {}) {
   }
   return close;
 }
+
+/* ---------- a page opened before an update ----------
+   Parts of Formwright load when first needed (Word templates, PDFs). After an update those files
+   have new names, so a page left open from before can't load them: say so, and offer a reload. */
+let staleShown = false;
+export const isStaleImport = (e) => /dynamically imported module|importing a module script failed|error loading dynamically imported module|unable to preload css|failed to load module script/i.test(String((e && (e.message || e)) || ''));
+export function staleNotice() {
+  if (staleShown) return;
+  staleShown = true;
+  toast('Formwright was updated since this page opened. Reload to use the new version.', { action: 'Reload', onAction: () => location.reload(), duration: 60000 });
+}
+/** Load a part of Formwright; if the page is from before an update, explain instead of a vague error. */
+export async function lazy(load) {
+  try { return await load(); } catch (e) {
+    if (isStaleImport(e)) { staleNotice(); const err = new Error('Formwright was updated since this page opened. Reload the page (pull down, or press Reload), then try again.'); err.stale = true; err.cause = e; throw err; }
+    throw e;
+  }
+}
+if (typeof window !== 'undefined') window.addEventListener('vite:preloadError', (ev) => { ev.preventDefault?.(); staleNotice(); });
