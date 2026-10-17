@@ -6,9 +6,11 @@
 import { esc, badge } from './ui.js';
 import { watchAllMentions, watchRecordTasks, reassignTasks } from './store.js';
 import { reassignPatch, dueInfo, dateKey } from './tasks.js';
-import { assignablePeople } from './taskmodal.js';
+import { assignablePeople, open as openTask } from './taskmodal.js';
 import { ago, avatarColor, initials } from './commentlogic.js';
 import { filterMentions, filterTasks, sortTasks, holder } from './allworklogic.js';
+import { pickerHTML, pickerFilter, pickerKey, pickerFocus } from './peoplepick.js';
+import { openCounts } from './pickerlogic.js';
 
 let H = null; // { store, recById, formById, recTitle, view(), showComment(recordId, commentId), openRecord(id), toast, renderMain, isAdmin() }
 const A = { m: null, mList: [], mReady: false, mErr: false, t: null, tList: [], tReady: false, tErr: false,
@@ -23,7 +25,19 @@ export function initAllWork(helpers) {
     onClick(el, e);
   }, true);
   document.addEventListener('change', (e) => { const el = e.target; if (el.dataset?.awf) { e.stopPropagation(); onFilter(el); } }, true);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && A.dlg && !A.dlg.busy) { e.preventDefault(); e.stopPropagation(); A.dlg = null; paintDlg(); } }, true);
+  // the Reassign pop-up's person picker
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest?.('#aw-root [data-pk="pick"]');
+    if (!el || !A.dlg || A.dlg.busy || el.disabled) return;
+    e.stopPropagation();
+    A.dlg.who = el.dataset.v; paintDlg(); pickerFocus(dlgRoot(), A.dlg.who);
+  }, true);
+  document.addEventListener('input', (e) => { const el = e.target; if (A.dlg && el.dataset?.pkQ && el.closest('#aw-root')) { e.stopPropagation(); A.dlg.q = el.value; pickerFilter(el); } }, true);
+  document.addEventListener('keydown', (e) => {
+    if (!A.dlg) return;
+    if (e.key === 'Escape' && !A.dlg.busy) { e.preventDefault(); e.stopPropagation(); A.dlg = null; paintDlg(); return; }
+    if (e.target.closest?.('#aw-root')) { if (pickerKey(e)) e.stopPropagation(); else if (e.key === 'Enter' && e.target.dataset?.pkQ) { e.preventDefault(); const first = dlgRoot().querySelector('.pk-opt:not([hidden]):not([disabled])'); if (first) first.click(); } }
+  }, true);
 }
 const onTab = (tab) => H.view().name === 'mywork' && H.tab() === tab;
 /** Start listening once an administrator opens one of the tabs. */
@@ -96,9 +110,9 @@ export function allTasksHTML() {
   const row = (t) => {
     const { title, form, rec } = recLabel(t.recordId, t.recordSnap?.title);
     const h = holder(t), due = t.due ? dueInfo(t.due, today) : null, late = !t.done && t.due && t.due < today;
-    return `<tr class="${t.done ? 'aw-done' : ''}${late ? ' aw-over' : ''}">
+    return `<tr class="aw-trow${t.done ? ' aw-done' : ''}${late ? ' aw-over' : ''}" data-aw="t-row" data-id="${esc(t.id)}" title="Open this task">
       <td class="aw-cb"><input type="checkbox" data-aw="t-sel" data-id="${esc(t.id)}" aria-label="Select ${esc(t.title || 'task')}"${A.sel.has(t.id) ? ' checked' : ''}></td>
-      <td class="aw-title">${esc(t.title || 'Untitled task')}</td>
+      <td class="aw-title"><button type="button" class="aw-tbtn" data-aw="t-row" data-id="${esc(t.id)}">${esc(t.title || 'Untitled task')}</button></td>
       <td>${rec ? `<button type="button" class="aw-link" data-aw="t-open" data-id="${esc(t.recordId)}">${form ? badge(form) : ''}${esc(title)}</button>` : `<span class="help">${esc(title)} (removed)</span>`}</td>
       <td><span class="aw-who">${av(h.uid, h.name)}${esc(h.name)}${t.assigneeId ? '' : ' <small class="help">(owner)</small>'}</span></td>
       <td>${esc(t.ownerName || t.ownerEmail || 'Someone')}</td>
@@ -110,8 +124,8 @@ export function allTasksHTML() {
   const card = (t) => {
     const { title, form, rec } = recLabel(t.recordId, t.recordSnap?.title);
     const h = holder(t), due = t.due ? dueInfo(t.due, today) : null, late = !t.done && t.due && t.due < today;
-    return `<div class="card aw-card aw-tcard${t.done ? ' aw-done' : ''}">
-      <div class="aw-ch"><input type="checkbox" data-aw="t-sel" data-id="${esc(t.id)}" aria-label="Select ${esc(t.title || 'task')}"${A.sel.has(t.id) ? ' checked' : ''}><b class="aw-title">${esc(t.title || 'Untitled task')}</b>${t.done ? '<span class="aw-st">Done</span>' : '<span class="aw-st un">Open</span>'}</div>
+    return `<div class="card aw-card aw-tcard${t.done ? ' aw-done' : ''}" data-aw="t-row" data-id="${esc(t.id)}">
+      <div class="aw-ch"><input type="checkbox" data-aw="t-sel" data-id="${esc(t.id)}" aria-label="Select ${esc(t.title || 'task')}"${A.sel.has(t.id) ? ' checked' : ''}><button type="button" class="aw-tbtn aw-title" data-aw="t-row" data-id="${esc(t.id)}">${esc(t.title || 'Untitled task')}</button>${t.done ? '<span class="aw-st">Done</span>' : '<span class="aw-st un">Open</span>'}</div>
       <div>${rec ? `<button type="button" class="aw-link" data-aw="t-open" data-id="${esc(t.recordId)}">${form ? badge(form) : ''}${esc(title)}</button>` : `<span class="help">${esc(title)} (removed)</span>`}</div>
       <div class="meta"><span class="aw-who">${av(h.uid, h.name)}${esc(h.name)}${t.assigneeId ? '' : ' (owner)'}</span>${t.assigneeId ? `<span>From ${esc(t.ownerName || t.ownerEmail || 'someone')}</span>` : ''}${due ? `<span class="aw-due ${late ? 'late' : due.tone}">${esc(due.text)}</span>` : ''}</div>
       <div class="aw-cact"><button type="button" class="btn sm" data-aw="t-reassign" data-id="${esc(t.id)}">Reassign…</button></div></div>`;
@@ -132,18 +146,19 @@ function paintDlg() {
   r.innerHTML = `<div class="lv-scrim" data-aw="scrim"><div class="lv-dlg aw-dlg" role="dialog" aria-modal="true" aria-labelledby="aw-h">
     <h2 id="aw-h">${one ? `Reassign “${esc(one.title || 'Untitled task')}”` : `Reassign ${tasks.length} tasks`}</h2>
     ${one ? `<p class="help">Now with <b>${esc(holder(one).name)}</b>. Owner: ${esc(one.ownerName || one.ownerEmail || 'someone')}.</p>` : `<p class="help">Owners: ${esc(owners.slice(0, 4).join(', '))}${owners.length > 4 ? '…' : ''}.</p>`}
-    ${d.loading ? '<p class="note">Loading people…</p>' : `<label class="mail-l"><span class="mlab">Give ${one ? 'it' : 'them'} to</span>
-      <select class="in" data-awf="d-who"${d.busy ? ' disabled' : ''}><option value="">Choose…</option><option value="__owner"${d.who === '__owner' ? ' selected' : ''}>Back to ${one ? esc(one.ownerName || 'the owner') + ' (owner)' : 'each task’s owner'}</option>
-      ${d.people.map((p) => `<option value="${esc(p.uid)}"${d.who === p.uid ? ' selected' : ''}${p.ok ? '' : ' disabled'}>${esc(p.name)}${p.ok ? '' : ' (can’t be given tasks yet)'}</option>`).join('')}</select></label>
+    ${d.loading ? '<p class="note">Loading people…</p>' : `<div class="mail-l"><span class="mlab" id="aw-give">Give ${one ? 'it' : 'them'} to</span>
+      ${pickerHTML({ id: 'aw', label: `Give ${one ? 'it' : 'them'} to`, people: d.people, sel: d.who, q: d.q, counts: openCounts(A.tList),
+        pinned: [{ uid: '__owner', name: one ? `Back to ${one.ownerName || one.ownerEmail || 'the owner'} (owner)` : 'Back to each task’s owner', ok: true, icon: '↩' }],
+        exclude: one ? [one.ownerId, holder(one).uid] : [] })}</div>
       <p class="help">They get Cadence’s “assigned to you” notice. The owner stays the same and still sees ${one ? 'it' : 'them'}. It’s noted in the audit trail.</p>`}
     ${d.err ? `<p class="err" role="alert">${esc(d.err)}</p>` : ''}
     <div class="lv-dlgacts"><button type="button" class="btn ghost" data-aw="d-cancel"${d.busy ? ' disabled' : ''}>Cancel</button><button type="button" class="btn primary" data-aw="d-save"${d.busy || !d.who ? ' disabled' : ''}>${d.busy ? 'Reassigning…' : 'Reassign'}</button></div>
   </div></div>`;
-  r.querySelector(d.loading ? '.aw-dlg' : '[data-awf="d-who"]')?.focus?.();
+  if (d.loading) r.querySelector('.aw-dlg')?.focus?.();
 }
 async function openDlg(ids) {
   if (!ids.length) return;
-  A.dlg = { ids, loading: true, people: [], who: '', busy: false, err: '' };
+  A.dlg = { ids, loading: true, people: [], who: '', q: '', busy: false, err: '' };
   paintDlg();
   let ppl = [];
   try { ppl = await assignablePeople(); } catch (e) { console.error(e); }
@@ -151,6 +166,7 @@ async function openDlg(ids) {
   A.dlg.people = ppl.map((p) => ({ ...p, ok: !!p.ok })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   A.dlg.loading = false;
   paintDlg();
+  pickerFocus(dlgRoot(), '', true);
 }
 async function saveDlg() {
   const d = A.dlg;
@@ -184,6 +200,13 @@ function onClick(el, e) {
   if (a === 't-all') { const shown = sortTasks(filterTasks(A.tList, A.tf), dateKey(new Date())); if (el.checked) shown.forEach((t) => A.sel.add(t.id)); else A.sel.clear(); H.renderMain(); return; }
   if (a === 't-clear') { A.sel.clear(); H.renderMain(); return; }
   if (a === 't-reassign') { openDlg([id]); return; }
+  if (a === 't-row') {
+    if (e.target.closest?.('input,select,a,label') && !e.target.closest('.aw-tbtn')) return;
+    const t = A.tList.find((x) => x.id === id); if (!t) return;
+    const rec = t.recordId && H.recById(t.recordId);
+    openTask(t.recordId, t.id, { task: t, reassign: () => openDlg([t.id]), openRecord: rec ? () => H.openRecord(t.recordId) : null });
+    return;
+  }
   if (a === 't-reassign-sel') { openDlg([...A.sel].filter((x) => A.tList.some((t) => t.id === x))); return; }
   if (a === 'd-cancel' || (a === 'scrim' && e.target === el && !A.dlg?.busy)) { A.dlg = null; paintDlg(); return; }
   if (a === 'd-save') saveDlg();
@@ -194,7 +217,6 @@ function onFilter(el) {
   else if (k === 'm-unread') A.mf.unread = el.checked;
   else if (k === 't-who') A.tf.who = el.value;
   else if (k === 't-form') A.tf.form = el.value;
-  else if (k === 'd-who') { if (A.dlg) { A.dlg.who = el.value; const b = dlgRoot().querySelector('[data-aw="d-save"]'); if (b) b.disabled = !el.value; } return; }
   H.renderMain();
   document.querySelector(`[data-awf="${k}"]`)?.focus();
 }

@@ -2,6 +2,8 @@
 // It reads and writes the same task documents Cadence does (tasks.js builds them; Cadence's security
 // rules check every write), so a task added here shows in Cadence at once, and the other way round.
 import { esc, colorOf } from './ui.js';
+import { pickerHTML, pickerFilter, pickerKey, pickerFocus } from './peoplepick.js';
+import { avatarColor, initials } from './commentlogic.js';
 import { normEmail, reassignPatch, passChoices, cadenceLists, mapNodes, newTaskDoc, editPatch, nextOccurrence, assignChoices, donePatch, cadenceLink, dateKey, REPEAT_CHOICES, taskRefusal } from './tasks.js';
 import { loadCadenceItems, assignableUids, writeTasks, updateTask, deleteTask, taskCheckReads, probeTask } from './store.js';
 
@@ -38,13 +40,16 @@ export async function assignablePeople() {
 }
 
 /** Open the pop-up: a new task for this record, or an existing task (taskId). */
-export async function open(recordId, taskId = null) {
-  const task = taskId ? (H.tasks() || []).find((t) => t.id === taskId) : null;
+/** opts (My work → All tasks): { task, reassign(), openRecord() } — the task as listed there, and what
+ *  the view-only pop-up's buttons do for someone else's task (administrators can only reassign those). */
+export async function open(recordId, taskId = null, opts = {}) {
+  const task = taskId ? (opts.task || (H.tasks() || []).find((t) => t.id === taskId)) : null;
   if (taskId && !task) return;
   const mine = !task || task.ownerId === H.store.user?.uid;
+  const view = !!task && !mine && task.assigneeId !== H.store.user?.uid;
   // a record task given to me: I can pass it on to someone else (Reassign)
   const passOn = !!task && !mine && task.assigneeId === H.store.user?.uid && !!task.recordId;
-  M = { recordId, id: taskId, task, owner: mine, passOn, loading: true, busy: false, nodeOpen: false, nodeQ: '', armed: false, newSub: '', err: '' };
+  M = { recordId, id: taskId, task, owner: mine, passOn, view, opts, loading: true, busy: false, nodeOpen: false, nodeQ: '', whoOpen: false, whoQ: '', armed: false, newSub: '', err: '' };
   paint();
   const [items, ppl] = await Promise.all([mine ? loadCadenceItems() : Promise.resolve({}), mine || passOn ? assignablePeople() : Promise.resolve([])]);
   if (!M || M.id !== taskId) return;
@@ -67,6 +72,19 @@ export async function open(recordId, taskId = null) {
 
 export function close() { M = null; const r = document.getElementById('tk-root'); if (r) r.innerHTML = ''; }
 
+/** "Assigned to": the chosen person, as a button that opens the person picker. */
+function whoField() {
+  const p = M.people.find((x) => x.uid === M.draft.who) || M.people[0];
+  const label = !p ? 'Choose…' : p.me ? (M.passOn ? 'Me (keep it)' : `Me (${p.name || 'you'})`) : p.owner ? `${p.name} (owner)` : p.name || p.email;
+  return `<div class="tk-l"><span id="tk-who-l">Assigned to</span><button type="button" class="in tk-who" data-tk="who" aria-haspopup="listbox" aria-expanded="${M.whoOpen}" aria-labelledby="tk-who-l tk-who-v">${p ? `<span class="cm-av sm" style="background:${avatarColor(p.uid)}" aria-hidden="true">${esc(initials(p.name || p.email || '?'))}</span>` : ''}<span id="tk-who-v" class="tk-who-v">${esc(label)}</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>`;
+}
+/** The person picker under "Assigned to": me (or me and the owner, when passing it on) first. */
+function whoPanel() {
+  const pin = M.people.filter((p) => p.me || p.owner).map((p) => ({ ...p, av: p.name, name: p.me ? (M.passOn ? 'Me (keep it)' : `Me (${p.name || 'you'})`) : `${p.name} (owner): give it back` }));
+  const rest = M.people.filter((p) => !p.me && !p.owner);
+  return `<div class="tk-whop">${pickerHTML({ id: 'tk', label: 'Assigned to', people: rest, pinned: pin, sel: M.draft.who, q: M.whoQ })}</div>`;
+}
+
 const pill = (hex, label, cls = '') => `<span class="tk-pill ${cls}" style="--pc:${esc(hex)}"><i></i>${esc(label)}</span>`;
 function paint() {
   const r = root();
@@ -78,7 +96,9 @@ function paint() {
     return;
   }
   const d = M.draft, t = M.task, own = M.owner, dis = M.busy ? ' disabled' : '', ro = own ? '' : ' disabled';
-  const from = !own && t ? `<p class="help tk-from">From ${esc(t.ownerName || t.ownerEmail || 'someone')}. You can change the notes, date and checklist${M.passOn ? ', and pass it on to someone else' : ''}; the rest is theirs.</p>` : '';
+  const holderName = t ? (t.assigneeId ? t.assigneeName || t.assigneeEmail || 'someone' : t.ownerName || t.ownerEmail || 'its owner') : '';
+  const from = M.view ? `<p class="help tk-from">${esc(t.ownerName || t.ownerEmail || 'Someone')}’s task${t.assigneeId ? `, with ${esc(holderName)}` : ''}. Only they can change it${M.opts.reassign ? '; you can reassign it' : ''}.</p>`
+    : !own && t ? `<p class="help tk-from">From ${esc(t.ownerName || t.ownerEmail || 'someone')}. You can change the notes, date and checklist${M.passOn ? ', and pass it on to someone else' : ''}; the rest is theirs.</p>` : '';
   const levels = M.lists.levels || [];
   const node = (M.nodes || []).find((n) => n.id === d.nodeId);
   const q = M.nodeQ.trim().toLowerCase();
@@ -86,11 +106,10 @@ function paint() {
   const subsDone = d.subtasks.filter((s) => s.done).length;
   const who = M.people.find((p) => p.uid === d.who);
   const canDel = t && (own || (t.assigneeId === H.store.user.uid && t.spawnedFrom && !t.done));
-  const blocked = M.people.filter((p) => !p.ok);
-  r.innerHTML = `<div class="lv-scrim tk-scrim" data-tk="scrim"><div class="lv-dlg tk-dlg" role="dialog" aria-modal="true" aria-labelledby="tk-h" data-stop-scrim="1">
+  r.innerHTML = `<div class="lv-scrim tk-scrim" data-tk="scrim"><div class="lv-dlg tk-dlg${M.view ? ' tk-view' : ''}" role="dialog" aria-modal="true" aria-labelledby="tk-h" data-stop-scrim="1">
     <div class="tk-head"><h2 id="tk-h">${t ? (t.done ? 'Task (done)' : 'Task') : 'New task'}</h2><button type="button" class="ibtn" data-tk="close" aria-label="Close">✕</button></div>
     ${linkLine}${from}
-    <fieldset class="tk-f"${dis}>
+    <fieldset class="tk-f"${M.view ? ' disabled' : dis}>
       <label class="tk-l"><span>Title</span><input class="in tk-title" data-tki="title" maxlength="500" value="${esc(d.title)}" placeholder="What needs doing?"${ro}></label>
       <label class="tk-l"><span>Notes</span><textarea class="in" data-tki="notes" rows="3" maxlength="20000" placeholder="Details, links, anything that helps">${esc(d.notes)}</textarea></label>
       <div class="tk-row3">
@@ -99,13 +118,12 @@ function paint() {
         <label class="tk-l"><span>Repeat</span><select class="in" data-tki="repeat"${ro}>${REPEAT_CHOICES.map(([k, l]) => `<option value="${k}"${d.repeat === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
       </div>
       ${own ? `<div class="tk-row2">
-        <label class="tk-l"><span>Assigned to</span><select class="in" data-tki="who">${M.people.map((p) => `<option value="${esc(p.uid)}"${p.uid === d.who ? ' selected' : ''}${p.ok || p.uid === d.who ? '' : ' disabled'}>${esc(p.me ? 'Me (' + (p.name || 'you') + ')' : p.name || p.email)}${p.ok ? '' : ' (can’t be given tasks yet)'}</option>`).join('')}</select>
-</label>
-        <label class="tk-l"><span>Type</span><select class="in" data-tki="typeId"><option value="">No type</option>${(M.lists.types || []).map((x) => `<option value="${esc(x.id)}"${d.typeId === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
-      </div>${blocked.length ? `<p class="help tk-who-help">Greyed-out people can’t be given tasks yet: they need Cadence switched on (an administrator does that in Users), then to sign in to Formwright or Cadence once.</p>` : ''}` : M.passOn ? `<div class="tk-row2">
-        <label class="tk-l"><span>Assigned to</span><select class="in" data-tki="who">${M.people.map((p) => `<option value="${esc(p.uid)}"${p.uid === d.who ? ' selected' : ''}${p.ok ? '' : ' disabled'}>${esc(p.me ? 'Me (keep it)' : p.owner ? `${p.name} (owner): give it back` : p.name || p.email)}${p.ok ? '' : ' (can’t be given tasks yet)'}</option>`).join('')}</select></label>
-        <div class="tk-l"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div>
-      </div><p class="help tk-who-help">To pass this on, pick who should do it instead. ${esc(t.ownerName || 'The owner')} still sees it.</p>` : `<div class="tk-row2"><div class="tk-l"><span>Assigned to</span><p class="tk-ro">You</p></div><div class="tk-l"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div></div>`}
+        ${whoField()}${M.whoOpen ? whoPanel() : ''}
+        <label class="tk-l tk-type"><span>Type</span><select class="in" data-tki="typeId"><option value="">No type</option>${(M.lists.types || []).map((x) => `<option value="${esc(x.id)}"${d.typeId === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+      </div>` : M.passOn ? `<div class="tk-row2">
+        ${whoField()}${M.whoOpen ? whoPanel() : ''}
+        <div class="tk-l tk-type"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div>
+      </div><p class="help tk-who-help">To pass this on, pick who should do it instead. ${esc(t.ownerName || 'The owner')} still sees it.</p>` : `<div class="tk-row2"><div class="tk-l"><span>Assigned to</span><p class="tk-ro">${M.view ? esc(holderName) : 'You'}</p></div><div class="tk-l"><span>Type</span><p class="tk-ro">${(M.lists.types[0] && pill(M.lists.types[0].color, M.lists.types[0].name)) || 'No type'}</p></div></div>`}
       ${own ? `<div class="tk-l tk-nodew"><span>On the map</span>
         <div class="tk-nodeline"><button type="button" class="tk-pill tk-pickn${node ? '' : ' tk-none'}" data-tk="nodes" aria-haspopup="listbox" aria-expanded="${M.nodeOpen}"${node ? ` style="--pc:${esc(node.hex)}"` : ''}><i></i>${esc(node ? node.title : d.nodeId ? 'Its node was deleted' : 'Link to a node')}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           ${d.nodeId ? `<button type="button" class="ibtn" data-tk="node" data-v="" aria-label="Unlink from the map" title="Unlink">✕</button>` : ''}${node?.parent ? `<span class="help">in ${esc(node.parent)}</span>` : ''}</div>
@@ -118,14 +136,19 @@ function paint() {
           <div class="tk-sub tk-subnew"><span aria-hidden="true">+</span><input data-tki="newSub" value="${esc(M.newSub)}" placeholder="Add a step, then press Enter" aria-label="Add a checklist step" maxlength="500"></div></div></div>
       ${M.err ? `<p class="err" role="alert">${esc(M.err)}</p>` : ''}
     </fieldset>
-    <div class="tk-foot">
+    ${M.view ? `<div class="tk-foot">
+      ${M.opts.openRecord ? `<button type="button" class="btn" data-tk="openrec">Open record</button>` : ''}
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" data-tk="close">Close</button>
+      ${M.opts.reassign ? `<button type="button" class="btn primary" data-tk="reassign">Reassign…</button>` : ''}
+    </div>` : `<div class="tk-foot">
       ${canDel ? `<button type="button" class="btn${M.armed ? ' danger armed' : ' ghost danger'}" data-tk="del"${dis}>${M.armed ? 'Tap again to delete' : 'Delete'}</button>` : ''}
       ${t ? `<button type="button" class="btn" data-tk="done"${dis}>${t.done ? 'Mark not done' : 'Mark done'}</button>` : ''}
       ${H.cadenceUrl ? `<a class="tk-cad" href="${esc(cadenceLink(H.cadenceUrl, t ? { task: t.id } : { addTaskFor: M.recordId }))}" target="cadence" rel="noopener">Open in Cadence ↗</a>` : ''}
       <span class="grow"></span>
       <button type="button" class="btn ghost" data-tk="close"${dis}>Cancel</button>
       <button type="button" class="btn primary" data-tk="save"${dis}>${M.busy ? 'Saving…' : t ? 'Save changes' : 'Add task'}</button>
-    </div>
+    </div>`}
   </div></div>`;
 }
 
@@ -211,17 +234,28 @@ async function explainRefusal(t, who) {
 
 export function onClick(e) {
   if (!M) return false;
+  const pk = e.target.closest?.('[data-pk="pick"]');
+  if (pk && M.draft && !pk.disabled) { M.draft.who = pk.dataset.v; M.whoOpen = false; M.whoQ = ''; paint(); root().querySelector('[data-tk="who"]')?.focus(); return true; }
   const el = e.target.closest?.('[data-tk]');
-  if (!el) { if (M.nodeOpen && !e.target.closest?.('.tk-nodew')) { M.nodeOpen = false; paint(); } return !!e.target.closest?.('#tk-root'); }
+  if (!el) {
+    let redraw = false;
+    if (M.nodeOpen && !e.target.closest?.('.tk-nodew')) { M.nodeOpen = false; redraw = true; }
+    if (M.whoOpen && !e.target.closest?.('.tk-whop')) { M.whoOpen = false; M.whoQ = ''; redraw = true; }
+    if (redraw) paint();
+    return !!e.target.closest?.('#tk-root');
+  }
   const a = el.dataset.tk, d = M.draft;
   if (a === 'scrim') { if (e.target === el && !M.busy) close(); return true; }
   if (M.loading || !d) { if (a === 'close') close(); return true; }
   if (a !== 'del') M.armed = false;
   switch (a) {
     case 'close': if (!M.busy) close(); return true;
-    case 'save': save(); return true;
+    case 'save': if (!M.view) save(); return true;
+    case 'reassign': { const f = M.opts.reassign; close(); f?.(); return true; }
+    case 'openrec': { const f = M.opts.openRecord; close(); f?.(); return true; }
     case 'level': d.levelId = el.dataset.v; break;
-    case 'nodes': M.nodeOpen = !M.nodeOpen; M.nodeQ = ''; paint(); if (M.nodeOpen) setTimeout(() => root().querySelector('[data-tki="nodeQ"]')?.focus(), 0); return true;
+    case 'who': M.whoOpen = !M.whoOpen; M.whoQ = ''; M.nodeOpen = false; paint(); if (M.whoOpen) setTimeout(() => { root().querySelector('.tk-whop')?.scrollIntoView({ block: 'nearest' }); pickerFocus(root(), d.who, true); }, 0); return true;
+    case 'nodes': M.whoOpen = false; M.nodeOpen = !M.nodeOpen; M.nodeQ = ''; paint(); if (M.nodeOpen) setTimeout(() => root().querySelector('[data-tki="nodeQ"]')?.focus(), 0); return true;
     case 'node': d.nodeId = el.dataset.v; M.nodeOpen = false; break;
     case 'sub-done': d.subtasks[+el.dataset.i].done = !d.subtasks[+el.dataset.i].done; break;
     case 'sub-del': d.subtasks.splice(+el.dataset.i, 1); break;
@@ -241,6 +275,7 @@ export function onClick(e) {
 }
 
 export function onInput(el) {
+  if (M && el.dataset?.pkQ) { M.whoQ = el.value; pickerFilter(el); return true; }
   if (!M || !M.draft || !el.dataset?.tki) return false;
   const k = el.dataset.tki, d = M.draft;
   if (k === 'nodeQ') { M.nodeQ = el.value; const pos = el.selectionStart; paint(); const s = root().querySelector('[data-tki="nodeQ"]'); if (s) { s.focus(); try { s.setSelectionRange(pos, pos); } catch (err) { /* fine */ } } return true; }
@@ -254,8 +289,10 @@ export function onInput(el) {
 
 export function onKeydown(e) {
   if (!M) return false;
-  if (e.key === 'Escape') { if (M.nodeOpen) { M.nodeOpen = false; paint(); } else if (!M.busy) close(); return true; }
+  if (e.key === 'Escape') { if (M.whoOpen) { M.whoOpen = false; M.whoQ = ''; paint(); root().querySelector('[data-tk="who"]')?.focus(); } else if (M.nodeOpen) { M.nodeOpen = false; paint(); } else if (!M.busy) close(); return true; }
   const el = e.target;
+  if (pickerKey(e)) return true;
+  if (e.key === 'Enter' && el.dataset?.pkQ) { e.preventDefault(); root().querySelector('.tk-whop .pk-opt:not([hidden]):not([disabled])')?.click(); return true; }
   if (e.key === 'Enter' && el.dataset?.tki === 'newSub') {
     e.preventDefault();
     const v = el.value.trim(); if (!v) return true;
@@ -263,6 +300,6 @@ export function onKeydown(e) {
     paint(); root().querySelector('[data-tki="newSub"]')?.focus();
     return true;
   }
-  if (e.key === 'Enter' && el.dataset?.tki === 'title') { e.preventDefault(); save(); return true; }
+  if (e.key === 'Enter' && el.dataset?.tki === 'title') { e.preventDefault(); if (!M.view) save(); return true; }
   return !!el.closest?.('#tk-root');
 }

@@ -809,7 +809,6 @@ tr.wf-over td.title{color:var(--danger)}
 .aw-dlg .help{margin:6px 0 14px}
 .aw-tasks th:nth-child(2),.aw-tasks td.aw-title{min-width:160px}
 .aw-cards .card{gap:6px}
-.aw-tcard{cursor:default}
 .aw-ch{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .aw-ch .aw-st{margin-left:auto}
 .aw-ch input{width:20px;height:20px;accent-color:var(--accent);flex:none}
@@ -822,3 +821,41 @@ tr.wf-over td.title{color:var(--danger)}
 .aw-call{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:13.5px;color:var(--muted)}
 .aw-call input{width:18px;height:18px;accent-color:var(--accent)}
 @media (max-width:640px){.aw-bar .aw-f{flex:1 1 100%}.aw-bar .grow{flex:1 1 100%;min-width:0}}
+
+/* Person picker (Reassign, a task's Assigned to): search, then one row per person */
+.pk{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.pk-q{min-height:40px}
+.pk-list{display:flex;flex-direction:column;max-height:min(46vh,340px);overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px;background:var(--surface)}
+.pk-opt{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:6px 10px;border:0;border-radius:8px;background:transparent;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.pk-opt[hidden]{display:none}
+.pk-opt:hover:not([disabled]),.pk-opt:focus-visible{background:var(--sunk);outline:none}
+.pk-opt:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+.pk-opt.on{background:var(--accent-soft)}
+.pk-opt[disabled]{cursor:not-allowed;opacity:.55}
+.pk-radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--line);flex:none;position:relative}
+.pk-opt.on .pk-radio{border-color:var(--accent)}
+.pk-opt.on .pk-radio::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--accent)}
+.pk-ic{background:var(--sunk);color:var(--muted);font-size:14px}
+.pk-nm{display:flex;flex-direction:column;min-width:0;flex:1}
+.pk-nm b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pk-nm small{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pk-n{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.pk-why{font-size:12px;color:var(--muted);white-space:nowrap}
+.pk-sep{height:1px;background:var(--line);margin:4px 6px}
+.pk-sep[hidden],.pk-none[hidden]{display:none}
+.pk-none{margin:10px}
+.pk-foot{margin:0}
+.tk-who{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.tk-who-v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tk-whop{grid-column:1/-1;order:3}
+.tk-row2 .tk-type{order:2}
+@media (max-width:560px){.tk-whop{order:2}.tk-row2 .tk-type{order:3}}
+@media (max-width:640px){.pk-why{white-space:normal;text-align:right;max-width:110px}}
+/* All tasks: a task opens its pop-up */
+.aw-trow{cursor:pointer}
+.aw-trow:hover{background:var(--sunk)}
+.aw-tcard{cursor:pointer}
+.aw-tbtn{border:0;background:none;padding:0;font:inherit;font-weight:600;color:inherit;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.aw-tbtn:hover{text-decoration:underline}
+.aw-tbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.tk-view .tk-subnew,.tk-view .tk-sub .ibtn{display:none}
